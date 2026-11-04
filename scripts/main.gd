@@ -148,19 +148,16 @@ void fragment() {
 	ground.material_override = gm
 	add_child(ground)
 
-	# landmarks, so you can tell where you are and how fast you go (fixed positions: the same on every machine)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 20261104
-	for i in 60:
+	# solid pillars and steps from the shared layout (the simulation collides with exactly these)
+	var tint := RandomNumberGenerator.new()
+	tint.seed = 7
+	for b: WorldLayout.Box in WorldLayout.boxes():
 		var pillar := MeshInstance3D.new()
 		var bm := BoxMesh.new()
-		var h := rng.randf_range(1.0, 7.0)
-		bm.size = Vector3(rng.randf_range(0.8, 2.5), h, rng.randf_range(0.8, 2.5))
+		bm.size = Vector3(b.hx * 2.0, b.h, b.hz * 2.0)
 		pillar.mesh = bm
-		pillar.material_override = _mat(Color.from_hsv(rng.randf_range(0.05, 0.15), 0.25, rng.randf_range(0.55, 0.8)))
-		var r := rng.randf_range(15.0, Config.WORLD_HALF - 10.0)
-		var a := rng.randf() * TAU
-		pillar.position = Vector3(cos(a) * r, h / 2.0, sin(a) * r)
+		pillar.material_override = _mat(Color.from_hsv(tint.randf_range(0.05, 0.15), 0.25, tint.randf_range(0.55, 0.8)))
+		pillar.position = Vector3(b.cx, b.h / 2.0, b.cz)
 		add_child(pillar)
 
 	cam = Camera3D.new()
@@ -291,7 +288,11 @@ func _process(_delta: float) -> void:
 	else:
 		var focus := me + Vector3(0, CAM_HEIGHT, 0)
 		var back := Vector3(sin(cam_yaw) * cos(cam_pitch), -sin(cam_pitch), cos(cam_yaw) * cos(cam_pitch))
-		var p := focus + back * cam_dist
+		var dist := cam_dist
+		var hit := WorldLayout.ray_hit(focus, back, cam_dist)  # pull in so a pillar never hides the player
+		if hit < dist:
+			dist = maxf(hit - 0.3, 0.6)
+		var p := focus + back * dist
 		p.y = maxf(p.y, 0.3)  # don't dip under the ground
 		cam.position = p
 		cam.look_at(focus, Vector3.UP)

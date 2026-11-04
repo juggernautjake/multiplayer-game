@@ -3,7 +3,7 @@
 A 3D online multiplayer game in **Godot 4** (GDScript). This first stage is the foundation everything else stands on:
 
 - a server that several people can join (or a host who plays and serves at once; solo is just hosting alone);
-- an open plane in 3D with landmarks, each player a capsule with a name;
+- an open plane in 3D with solid pillars and steps to jump on (collision is part of the shared simulation), each player a simple character with a name;
 - movement: WASD, sprint (Shift), jump (Space), dash (Q, the first ability: predicted, with a cooldown);
 - camera: third person or first person (V), mouse-wheel zoom, crosshair;
 - netcode built for fast action, with no lag felt on your own moves and no rubber-banding.
@@ -80,6 +80,16 @@ Files:
 5. **Interest management**: only send each client what's near them, for big worlds.
 6. **Steam**: GodotSteam for lobbies, friends invites, relay networking, achievements, and the Steam build.
 7. **Art pipeline**: characters, animation (synced by state, not by bone), environment assets.
+
+## Tests
+
+`tools/sim_test.gd` checks the shared simulation headless: walking into a step stops beside it, a jump lands on top, walking off falls back down, a dash can't push through a pillar, and identical inputs give identical results.
+
+```
+<godot>_console.exe --headless --path . -s tools/sim_test.gd
+```
+
+For a live test with scripted players: start a server (`-- --server --port 7789`), then run clients with `-- --join 127.0.0.1 --port 7789 --bot`; each prints its position, the players it sees, its ping and its prediction corrections every 2 s. Add `--screenshot shot.png` (and `--view first`) to save a frame.
 
 ## Checking the netcode
 

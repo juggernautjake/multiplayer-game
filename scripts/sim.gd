@@ -16,6 +16,7 @@ const JUMP_SPEED := 10.0
 const DASH_SPEED := 24.0
 const DASH_TICKS := 9         # 0.15 s burst
 const DASH_COOLDOWN := 54     # 0.9 s
+const RADIUS := 0.4           # the player's collision radius
 
 
 ## One tick of player intent. yaw: facing in radians, 0 = looking down -Z (chosen by the camera).
@@ -108,12 +109,15 @@ static func step(s: PlayerState, inp: PlayerInput) -> void:
 	if not s.grounded and s.dash_ticks == 0:
 		s.vel.y -= GRAVITY * Config.DT
 
+	var prev_y := s.pos.y
 	s.pos += s.vel * Config.DT
 
+	s.grounded = false
 	if s.pos.y <= 0.0:  # the ground plane
 		s.pos.y = 0.0
 		s.vel.y = 0.0
 		s.grounded = true
+	_collide_boxes(s, prev_y)
 	var lim := Config.WORLD_HALF  # the edge of the world
 	if absf(s.pos.x) > lim:
 		s.pos.x = clampf(s.pos.x, -lim, lim)
@@ -123,6 +127,42 @@ static func step(s: PlayerState, inp: PlayerInput) -> void:
 		s.vel.z = 0.0
 
 	quantize(s)
+
+
+## The player is an upright cylinder (radius RADIUS) against the pillars: land on a top when coming down onto it,
+## otherwise get pushed out sideways and lose the velocity into the wall (so you slide along it).
+static func _collide_boxes(s: PlayerState, prev_y: float) -> void:
+	for b: WorldLayout.Box in WorldLayout.boxes():
+		var nx := clampf(s.pos.x, b.cx - b.hx, b.cx + b.hx)
+		var nz := clampf(s.pos.z, b.cz - b.hz, b.cz + b.hz)
+		var dx := s.pos.x - nx
+		var dz := s.pos.z - nz
+		var d2 := dx * dx + dz * dz
+		if d2 >= RADIUS * RADIUS:
+			continue
+		if prev_y >= b.h - 0.01 and s.pos.y <= b.h + 0.01 and s.vel.y <= 0.0:
+			s.pos.y = b.h  # standing on top
+			s.vel.y = 0.0
+			s.grounded = true
+		elif s.pos.y < b.h - 0.01:
+			var n := Vector2.ZERO
+			var depth := 0.0
+			if d2 > 1e-12:
+				var dl := sqrt(d2)
+				n = Vector2(dx, dz) / dl
+				depth = RADIUS - dl
+			else:  # centre inside the box: out through the nearest face
+				var faces := [[b.cx + b.hx - s.pos.x, Vector2(1, 0)], [s.pos.x - (b.cx - b.hx), Vector2(-1, 0)],
+					[b.cz + b.hz - s.pos.z, Vector2(0, 1)], [s.pos.z - (b.cz - b.hz), Vector2(0, -1)]]
+				faces.sort_custom(func(p, q): return p[0] < q[0])
+				n = faces[0][1]
+				depth = faces[0][0] + RADIUS
+			s.pos.x += n.x * depth
+			s.pos.z += n.y * depth
+			var into := s.vel.x * n.x + s.vel.z * n.y
+			if into < 0.0:
+				s.vel.x -= n.x * into
+				s.vel.z -= n.y * into
 
 
 ## Round to float32, the precision snapshots carry, so the server's state and the client's copy match bit for bit.
