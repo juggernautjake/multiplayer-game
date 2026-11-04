@@ -71,7 +71,7 @@ static func bow() -> Node3D:
 		var b: Vector3 = pts[i + 1]
 		var seg := _box(n, Vector3(0.03, (b - a).length() + 0.01, 0.03), (a + b) / 2.0, WOOD, 0.8)
 		seg.rotation.x = atan2(b.z - a.z, b.y - a.y) * -1.0
-	_box(n, Vector3(0.006, 1.24, 0.006), Vector3(0, 0, 0.0), STRING, 0.6)                  # string
+	_box(n, Vector3(0.006, 1.24, 0.006), Vector3(0, 0, 0.0), STRING, 0.6).name = "string"   # (the 3D figure draws it live when drawing)
 	_cyl(n, 0.025, 0.14, Vector3(0, 0, -0.13), LEATHER)                                  # grip wrap
 	return n
 
@@ -82,9 +82,9 @@ static func sling() -> Node3D:
 	for s in [-1.0, 1.0]:
 		var prong := _cyl(n, 0.018, 0.2, Vector3(s * 0.06, 0.18, 0), WOOD)
 		prong.rotation.z = -s * 0.5
-	_box(n, Vector3(0.012, 0.012, 0.14), Vector3(-0.1, 0.27, 0.07), BAND, 0.7)           # band
-	_box(n, Vector3(0.012, 0.012, 0.14), Vector3(0.1, 0.27, 0.07), BAND, 0.7)
-	_box(n, Vector3(0.06, 0.03, 0.03), Vector3(0, 0.27, 0.14), LEATHER, 0.8)             # pouch
+	_box(n, Vector3(0.012, 0.012, 0.14), Vector3(-0.1, 0.27, 0.07), BAND, 0.7).name = "band_l"   # bands and pouch at rest
+	_box(n, Vector3(0.012, 0.012, 0.14), Vector3(0.1, 0.27, 0.07), BAND, 0.7).name = "band_r"
+	_box(n, Vector3(0.06, 0.03, 0.03), Vector3(0, 0.27, 0.14), LEATHER, 0.8).name = "pouch"
 	return n
 
 

@@ -9,6 +9,31 @@ A 3D online multiplayer game in **Godot 4** (GDScript). This first stage is the 
 - an animated placeholder character (scripts/avatar.gd): walk and run cycles that follow speed, a jump pose, a dash lean, idle breathing; ready to swap for a rigged glTF model;
 - netcode built for fast action, with no lag felt on your own moves and no rubber-banding.
 
+## Controls
+
+| Key | Action |
+|---|---|
+| WASD, Shift, Space, Q | move, sprint, jump, dash |
+| Left mouse | attack; click again during a move for the combo; hold to draw a bow or slingshot, let go to shoot |
+| Right mouse | aim (zoom in, finer mouse) |
+| E | pick up the weapon you're standing at (ammo is picked up by walking over it) |
+| 1-5 / Tab | fists, club, sword, bow, slingshot (the ones you have) |
+| V, mouse wheel | first / third person, camera distance |
+| F2 | host only: switch everyone between Pip (sprite) and the 3D figure |
+| Esc | menu: resume, mouse sensitivity, look (host), leave |
+
+## Combat
+
+Tier-one weapons, 6-10 damage a hit. Each melee weapon is a three-move combo: fists jab / cross / kick, club
+bash / backhand / overhead smash (with a ground shockwave), sword slash / backslash / lunging thrust. The bow and
+slingshot draw while held (longer draw: faster, harder), and use arrows and rocks you pick up; spent ones can be
+picked up again. Practice dummies near the spawn show each hit, the total and damage per second. You keep what you
+carry when knocked out (3 s on the ground).
+
+Two looks, picked by the host for everyone: Pip (Jacob's sprite character, with sword, bow and slingshot frames made
+from his sheet by `tools/make_weapon_frames.py`) or the rigged 3D figure (`scripts/figure_avatar.gd`: IK arms and
+legs, keyframed attacks, live bow string and slingshot bands; `tools/figure_poses.gd` renders a pose sheet).
+
 ## Getting started
 
 1. Download **Godot 4.7** (standard, not .NET) from <https://godotengine.org/download>. It's a single program, so no
