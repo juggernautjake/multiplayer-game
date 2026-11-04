@@ -36,6 +36,7 @@ var frames := 0
 var bot_mode := ""
 var weapon_slot := 0
 var aim_pitch := 0.0
+var aim_yaw := 0.0
 var projs := {}            # server projectile id -> { node, kind, tick0, pos0, vel0, g, end_tick, end_pos, stuck, local_t0 }
 var local_shots: Array = []  # our own shots drawn at once, waiting for the server's launch to give them an id
 var dummies: Array = []    # Dummy nodes, index i = target id -(i+1)
@@ -367,7 +368,7 @@ func _sample_input() -> Array:
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and Time.get_ticks_msec() > attack_block_until:
 			b |= Sim.Btn.ATTACK
 		if Input.is_physical_key_pressed(KEY_E): b |= Sim.Btn.INTERACT
-	return [b, cam_yaw, aim_pitch, weapon_slot]
+	return [b, cam_yaw, aim_pitch, weapon_slot, aim_yaw]
 
 
 ## Aim where the crosshair points: find what the camera's centre ray hits (ground, a pillar, or 80 m away) and pitch
@@ -381,15 +382,59 @@ func _update_aim() -> void:
 	if fwd.y < -0.001:
 		t = minf(t, -o.y / fwd.y)
 	t = minf(t, WorldLayout.ray_hit(o, fwd, t))
+	t = minf(t, _ray_people(o, fwd, t))
 	var target := o + fwd * t
+	# the next position (the shot leaves after this tick's step): close enough at walking speed
 	var m := Weapons.muzzle(net.predicted.pos, cam_yaw)
-	var flat := Vector2(target.x - m.x, target.z - m.z).length()
-	aim_pitch = clampf(atan2(target.y - m.y, maxf(flat, 0.5)), -1.2, 1.2)
+	var to := target - m
+	var flat := Vector2(to.x, to.z).length()
+	aim_yaw = atan2(-to.x, -to.z) if flat > 0.3 else cam_yaw   # straight at the crosshair point, from the bow
+	# lift for gravity: the low arc that lands on the point at the speed the shot would leave at now
+	var st := net.predicted
+	var w := Weapons.get_data(st.weapon)
+	var pitch := atan2(to.y, maxf(flat, 0.3))
+	if w.kind == "ranged" and flat > 0.5:
+		var v := float(Weapons.shot(st.weapon, maxi(st.charge, 1))[0])
+		var g := float(w.gravity)
+		var disc := v * v * v * v - g * (g * flat * flat + 2.0 * to.y * v * v)
+		if disc >= 0.0:
+			pitch = atan((v * v - sqrt(disc)) / (g * flat))
+		else:
+			pitch = PI / 4.0   # out of reach at this draw: throw it as far as it goes
+	aim_pitch = clampf(pitch, -1.2, 1.2)
+
+
+## Distance along a ray to the first practice dummy or other player it passes through (upright cylinders), or INF.
+func _ray_people(o: Vector3, d: Vector3, max_t: float) -> float:
+	var best := INF
+	var cyls: Array = []
+	for p: Vector3 in WorldLayout.DUMMIES:
+		cyls.append(p)
+	for id in avatars.keys():
+		if id != net.my_id and avatars[id].visible:
+			cyls.append(avatars[id].position)
+	for c: Vector3 in cyls:
+		var oc := Vector2(o.x - c.x, o.z - c.z)
+		var dd := Vector2(d.x, d.z)
+		var a := dd.dot(dd)
+		if a < 1e-8:
+			continue
+		var b := 2.0 * oc.dot(dd)
+		var cc := oc.dot(oc) - 0.45 * 0.45
+		var disc := b * b - 4.0 * a * cc
+		if disc < 0.0:
+			continue
+		var tt := (-b - sqrt(disc)) / (2.0 * a)
+		if tt > 0.0 and tt < max_t:
+			var y := o.y + d.y * tt
+			if y > c.y and y < c.y + 1.9 and tt < best:
+				best = tt
+	return best
 
 
 ## Test player: walks in a slow circle, sprints, jumps and dashes on a timetable; logs what it sees every 2 s.
 func _bot_input() -> Array:
-	if bot_mode == "fight":
+	if bot_mode == "fight" or bot_mode == "aim":
 		return _bot_fight()
 	bot_t += 1
 	cam_yaw = wrapf(bot_t * 0.01, -PI, PI)
@@ -429,10 +474,15 @@ func _bot_fight() -> Array:
 				bb |= Sim.Btn.INTERACT
 			return [bb, cam_yaw, 0.0, weapon_slot]
 	weapon_slot = (bot_t / 360) % 5
+	if bot_mode == "aim":
+		weapon_slot = Weapons.BOW if (bot_t / 1440) % 2 == 0 else Weapons.SLING
 	var target: Vector3 = WorldLayout.DUMMIES[1]
 	var me := net.predicted.pos
 	var to := target - me
-	cam_yaw = atan2(-to.x, -to.z)
+	if bot_mode != "aim":
+		cam_yaw = atan2(-to.x, -to.z)
+	elif bot_t % 720 == 1:
+		cam_yaw = atan2(-to.x, -to.z)   # rough start; the crosshair steering does the rest
 	var want := 1.6 if Weapons.is_melee(weapon_slot) else 10.0
 	var b := 0
 	var dist := Vector2(to.x, to.z).length()
@@ -444,6 +494,25 @@ func _bot_fight() -> Array:
 	if Weapons.is_melee(weapon_slot):
 		if dist < want + 0.8:
 			b |= Sim.Btn.ATTACK
+	elif bot_mode == "aim":
+		# play it like a person: put the crosshair on the dummy's chest, draw, let go (tests that shots go where the
+		# crosshair is). Alternates 10 m and 22 m every 12 s.
+		want = 10.0 if (bot_t / 720) % 2 == 0 else 22.0
+		b = 0
+		if dist > want + 0.4:
+			b |= Sim.Btn.FORWARD
+		elif dist < want - 0.4:
+			b |= Sim.Btn.BACK
+		if cam:
+			var sp := cam.unproject_position(target + Vector3(0, 1.3, 0))
+			var c := get_viewport().get_visible_rect().size / 2.0
+			cam_yaw -= (sp.x - c.x) * 0.0015
+			cam_pitch = clampf(cam_pitch - (sp.y - c.y) * 0.0015, -1.2, 0.5)
+		_update_aim()
+		pitch = aim_pitch
+		if (bot_t % 70) < 55 and absf(dist - want) < 1.0:
+			b |= Sim.Btn.ATTACK
+		return [b, cam_yaw, pitch, weapon_slot, aim_yaw]
 	else:
 		var m := Weapons.muzzle(me, cam_yaw)
 		var sd := Weapons.shot(weapon_slot, int(Weapons.get_data(weapon_slot).draw))

@@ -34,14 +34,16 @@ class PlayerInput:
 	var pitch := 0.0
 	var weapon := 0
 	var view_tick := 0
+	var aim_yaw := 0.0      # the shot's own direction (to the crosshair), apart from the body's facing
 
-	func _init(s := 0, b := 0, y := 0.0, p := 0.0, w := 0, v := 0) -> void:
+	func _init(s := 0, b := 0, y := 0.0, p := 0.0, w := 0, v := 0, ay := 0.0) -> void:
 		seq = s
 		buttons = b
 		yaw = y
 		pitch = p
 		weapon = w
 		view_tick = v
+		aim_yaw = ay
 
 
 class PlayerState:

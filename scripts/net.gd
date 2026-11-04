@@ -472,7 +472,7 @@ func _shoot(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
 	pr.kind = 0 if w.projectile == "arrow" else 1
 	pr.tick0 = server_tick
 	pr.pos0 = Weapons.muzzle(p.state.pos, inp.yaw)
-	pr.vel0 = Weapons.aim_dir(inp.yaw, inp.pitch) * float(sd[0])
+	pr.vel0 = Weapons.aim_dir(inp.aim_yaw, inp.pitch) * float(sd[0])
 	pr.g = float(w.gravity)
 	pr.damage = int(sd[1])
 	pr.last = pr.pos0
@@ -674,7 +674,8 @@ func _sim_push(q: Array, data: PackedByteArray) -> void:
 func _client_tick() -> void:
 	var b_y: Array = input_source.call() if input_source.is_valid() else [0, 0.0, 0.0, 0]
 	var pitch: float = round(float(b_y[2]) * 10000.0) / 10000.0   # the precision the packet carries, so the server agrees
-	var inp := Sim.PlayerInput.new(next_seq, int(b_y[0]), float(b_y[1]), pitch, int(b_y[3]), int(render_tick))
+	var aim_yaw: float = PackedFloat32Array([float(b_y[4]) if b_y.size() > 4 else float(b_y[1])])[0]
+	var inp := Sim.PlayerInput.new(next_seq, int(b_y[0]), float(b_y[1]), pitch, int(b_y[3]), int(render_tick), aim_yaw)
 	next_seq += 1
 	# predict at once
 	prev_pos = cur_pos
@@ -684,7 +685,7 @@ func _client_tick() -> void:
 		var w := Weapons.get_data(predicted.weapon)
 		var sd := Weapons.shot(predicted.weapon, predicted.last_charge)
 		local_shot.emit(0 if w.projectile == "arrow" else 1, Weapons.muzzle(predicted.pos, inp.yaw),
-			Weapons.aim_dir(inp.yaw, inp.pitch) * float(sd[0]), float(w.gravity))
+			Weapons.aim_dir(inp.aim_yaw, inp.pitch) * float(sd[0]), float(w.gravity))
 	pending.append(inp)
 	if pending.size() > 240:
 		pending = pending.slice(pending.size() - 240)

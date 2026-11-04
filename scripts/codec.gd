@@ -14,10 +14,11 @@ static func encode_inputs(inputs: Array) -> PackedByteArray:
 		b.put_16(int(round(clampf(i.pitch, -1.6, 1.6) * 10000.0)))
 		b.put_u8(i.weapon)
 		b.put_u32(i.view_tick)
+		b.put_float(i.aim_yaw)
 	return b.data_array
 
 
-const INPUT_BYTES := 17
+const INPUT_BYTES := 21
 
 
 static func decode_inputs(data: PackedByteArray) -> Array:
@@ -36,8 +37,9 @@ static func decode_inputs(data: PackedByteArray) -> Array:
 		var pitch := b.get_16() / 10000.0
 		var weapon := b.get_u8()
 		var view := b.get_u32()
-		if is_finite(yaw):
-			out.append(Sim.PlayerInput.new(seq, btn, yaw, pitch, weapon, view))
+		var aim_yaw := b.get_float()
+		if is_finite(yaw) and is_finite(aim_yaw):
+			out.append(Sim.PlayerInput.new(seq, btn, yaw, pitch, weapon, view, aim_yaw))
 	return out
 
 
