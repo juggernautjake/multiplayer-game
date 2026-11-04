@@ -77,6 +77,7 @@ func _ready() -> void:
 		for sig in ["hit", "item_added", "item_removed", "projectile_spawned", "projectile_ended", "roster_changed"]:
 			audit[sig] = 0
 			net.connect(sig, func(a = null, b = null, c = null, d = null, e = null, f = null, g = null): audit[sig] += 1)
+		net.eco.connect(_audit_eco)
 
 	var args := _args()
 	if args.has("server"):
@@ -124,6 +125,14 @@ func _on_status(text: String) -> void:
 
 func args_has_log() -> bool:
 	return OS.get_cmdline_user_args().has("--log")
+
+
+## Yard events (fruit, worms, birds) counted by kind and phase for the audit line.
+func _audit_eco(kind: String, args: Array) -> void:
+	var k := "eco:" + kind
+	if (kind == "worm" or kind == "bird") and args.size() > 3:
+		k += ":" + str(args[3])
+	audit[k] = int(audit.get(k, 0)) + 1
 
 
 ## Network audit line: what this client has received so far, plus what it sees of everyone.
