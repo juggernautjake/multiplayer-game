@@ -26,7 +26,7 @@ func inside_any(s: Sim.PlayerState) -> bool:
 
 
 func _init() -> void:
-	var step1: WorldLayout.Box = WorldLayout.boxes()[60]  # the low step near spawn (0.9 m)
+	var step1: WorldLayout.Box = WorldLayout.boxes().filter(func(b): return b.cx == 6.0 and b.cz == -6.0)[0]  # the low step near spawn (0.9 m)
 	var face := atan2(-(step1.cx - 0.0), -(step1.cz - 0.0))  # yaw that looks from the origin toward it
 
 	# 1) walk into the step without jumping: stopped at its side, never inside

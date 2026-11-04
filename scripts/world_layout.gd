@@ -15,6 +15,28 @@ static var _boxes: Array = []
 ## Practice dummies near the spawn: hit them to see your damage. Target ids -1, -2, -3.
 const DUMMIES := [Vector3(-4.0, 0.0, -9.0), Vector3(0.0, 0.0, -10.0), Vector3(4.0, 0.0, -9.0)]
 
+## The yard's trees (Ecology): two fruit trees near the spawn and a ring of oaks. [kind, position]. Their trunks are
+## solid (added to the boxes below).
+const TREES := [
+	["apple", Vector3(12.0, 0.0, 9.0)], ["pear", Vector3(17.5, 0.0, 14.0)],
+	["oak", Vector3(-14.0, 0.0, 10.0)], ["oak", Vector3(-20.0, 0.0, -6.0)], ["oak", Vector3(-11.0, 0.0, -22.0)],
+	["oak", Vector3(9.0, 0.0, -24.0)], ["oak", Vector3(22.0, 0.0, -10.0)], ["oak", Vector3(26.0, 0.0, 4.0)],
+	["oak", Vector3(4.0, 0.0, 24.0)], ["oak", Vector3(-6.0, 0.0, 22.0)], ["oak", Vector3(30.0, 0.0, 20.0)],
+	["oak", Vector3(-26.0, 0.0, 14.0)],
+]
+const TRUNK := { "apple": [0.22, 2.2], "pear": [0.22, 2.2], "oak": [0.38, 3.2] }   # half width, height
+
+
+## Which tree's trunk a point is inside (-1 if none).
+static func tree_at(pt: Vector3, margin := 0.0) -> int:
+	for i in TREES.size():
+		var t: Array = TREES[i]
+		var tk: Array = TRUNK[t[0]]
+		if absf(pt.x - t[1].x) < tk[0] + margin and absf(pt.z - t[1].z) < tk[0] + margin and pt.y < float(tk[1]) + 2.6 and pt.y > -0.1:
+			return i
+	return -1
+
+
 ## Where the weapons and ammo lie at the start (and come back 20 s after someone takes them): [item kind, position,
 ## count]. Kinds are Weapons.Item: CLUB, SWORD, BOW, SLING, ARROWS, ROCKS.
 const ITEM_SPAWNS := [
@@ -38,6 +60,15 @@ static func boxes() -> Array:
 			b.cx = cos(a) * r
 			b.cz = sin(a) * r
 			_boxes.append(b)
+		for t in TREES:   # tree trunks are solid
+			var tb := Box.new()
+			var tk: Array = TRUNK[t[0]]
+			tb.cx = t[1].x
+			tb.cz = t[1].z
+			tb.hx = tk[0]
+			tb.hz = tk[0]
+			tb.h = tk[1]
+			_boxes.append(tb)
 		# three steps near the spawn, to try jumping onto things
 		for spec in [[6.0, -6.0, 1.0, 1.0, 0.9], [9.0, -9.0, 1.2, 1.2, 1.9], [12.5, -12.5, 1.4, 1.4, 3.0]]:
 			var s := Box.new()

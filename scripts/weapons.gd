@@ -1,4 +1,4 @@
-## Tier-one weapons (Jacob 2026-11-04: low damage, 6-10 a hit, about fist level), shared by the server and every client:
+## Tier-one weapons (Jacob 2026-11-04: low damage, 6-10 a hit, about fist level; the sword a little above the club), shared by the server and every client:
 ## the simulation reads the timings from here, so attacks are predicted exactly like movement. Times are in ticks
 ## (60 per second). Later this becomes data files, one per item.
 ##
@@ -21,13 +21,13 @@ const DATA := [
 		{ "name": "kick", "windup": 9, "swing": 26, "recover": 10, "range": 1.9, "arc": 80.0, "damage": 7, "knock": 3.5, "lunge": 1.5, "anim": "kick", "shape": "arc" },
 	] },
 	{ "kind": "melee", "slow": 0.55, "moves": [
-		{ "name": "bash", "windup": 13, "swing": 30, "recover": 0, "range": 2.2, "arc": 120.0, "damage": 8, "knock": 3.5, "lunge": 2.5, "anim": "c_swing", "shape": "arc" },
-		{ "name": "backhand", "windup": 11, "swing": 28, "recover": 0, "range": 2.2, "arc": 120.0, "damage": 8, "knock": 3.5, "lunge": 2.0, "anim": "c_back", "shape": "arc" },
-		{ "name": "smash", "windup": 20, "swing": 42, "recover": 18, "range": 2.4, "arc": 70.0, "damage": 10, "knock": 6.0, "lunge": 1.5, "anim": "c_smash", "shape": "smash", "aoe": 2.3 },
+		{ "name": "bash", "windup": 13, "swing": 30, "recover": 0, "range": 2.2, "arc": 120.0, "damage": 7, "knock": 3.5, "lunge": 2.5, "anim": "c_swing", "shape": "arc" },
+		{ "name": "backhand", "windup": 11, "swing": 28, "recover": 0, "range": 2.2, "arc": 120.0, "damage": 7, "knock": 3.5, "lunge": 2.0, "anim": "c_back", "shape": "arc" },
+		{ "name": "smash", "windup": 20, "swing": 42, "recover": 18, "range": 2.4, "arc": 70.0, "damage": 9, "knock": 6.0, "lunge": 1.5, "anim": "c_smash", "shape": "smash", "aoe": 2.3 },
 	] },
 	{ "kind": "melee", "slow": 0.75, "moves": [
-		{ "name": "slash", "windup": 5, "swing": 17, "recover": 0, "range": 2.5, "arc": 100.0, "damage": 7, "knock": 1.5, "lunge": 4.0, "anim": "s_swing", "shape": "arc" },
-		{ "name": "backslash", "windup": 5, "swing": 17, "recover": 0, "range": 2.5, "arc": 100.0, "damage": 7, "knock": 1.5, "lunge": 4.0, "anim": "s_back", "shape": "arc" },
+		{ "name": "slash", "windup": 5, "swing": 17, "recover": 0, "range": 2.5, "arc": 100.0, "damage": 8, "knock": 1.5, "lunge": 4.0, "anim": "s_swing", "shape": "arc" },
+		{ "name": "backslash", "windup": 5, "swing": 17, "recover": 0, "range": 2.5, "arc": 100.0, "damage": 8, "knock": 1.5, "lunge": 4.0, "anim": "s_back", "shape": "arc" },
 		{ "name": "thrust", "windup": 9, "swing": 28, "recover": 14, "range": 3.3, "arc": 28.0, "damage": 10, "knock": 4.5, "lunge": 10.0, "anim": "s_smash", "shape": "thrust" },
 	] },
 	{ "kind": "ranged", "draw": 45, "min_speed": 22.0, "max_speed": 58.0, "min_damage": 6, "max_damage": 10,

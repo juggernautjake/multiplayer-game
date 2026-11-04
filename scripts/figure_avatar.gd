@@ -22,10 +22,11 @@ const PANTS := Color("3b4252")
 const BOOTS := Color("4a3426")
 const BELT := Color("3a2618")
 const HAIR := Color("6b4426")
-const UPPER_ARM := 0.29
-const FOREARM := 0.27
-const THIGH := 0.45
-const SHIN := 0.44
+const UPPER_ARM := 0.28
+const FOREARM := 0.25
+const PALM := 0.04             # the palm's centre, past the wrist along the forearm: where a handle sits
+const THIGH := 0.43
+const SHIN := 0.42
 const BOW_HALF := 0.62         # half the bow's length
 const DRAW_LEN := 0.68         # bow grip to anchor at full draw
 
@@ -76,6 +77,12 @@ var _crouch := 0.0
 var _foot_r := Vector3(0.12, 0.0, 0.0)
 var _foot_l := Vector3(-0.12, 0.0, 0.0)
 var _look := 0.0
+var _along_r := Vector3.DOWN   # forearm directions (elbow -> wrist), for gripping
+var _along_l := Vector3.DOWN
+var last_hand_r := Vector3.ZERO   # palms and the weapon's grip this frame (pose previews mark them)
+var last_hand_l := Vector3.ZERO
+var last_grip := Vector3.ZERO
+var _fight_t := 99.0           # seconds since the last attack (fists keep their guard up for a while)
 
 
 func _init(player_name: String, color: Color, show_name: bool) -> void:
@@ -205,11 +212,12 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	_update_held(w)
 	_track_release(st, w, delta)
 
+	_fight_t = 0.0 if st != null and st.atk > 0 else _fight_t + delta
 	var pose := _pose(st, speed)
 	var a := 1.0 if instant else clampf(delta * (30.0 if pose.get("snap", false) else 12.0), 0.0, 1.0)
 	_hand_r = _hand_r.lerp(pose.hand_r, a)
 	_hand_l = _hand_l.lerp(pose.hand_l, a)
-	_pole_r = _pole_r.lerp(pose.get("pole_r", Vector3(0.6, -1.0, 0.7)), a)
+	_pole_r = _pole_r.lerp(pose.get("pole_r", Vector3(0.45, -0.45, 1.0)), a)
 	var wd: Vector3 = (pose.wdir as Vector3).normalized()
 	_wdir = _wdir.slerp(wd, a) if _wdir.normalized().dot(wd) > -0.99 else wd
 	_wroll = _wroll.lerp(pose.wroll, a).normalized()
@@ -236,6 +244,8 @@ func animate(delta: float, _cam: Camera3D) -> void:
 		fl = Vector3(-0.13, 0.3, 0.12)
 	if pose.has("foot_r"):
 		fr = pose.foot_r
+	if pose.has("foot_l"):
+		fl = pose.foot_l
 	var fa := 1.0 if instant else clampf(delta * 20.0, 0.0, 1.0)
 	_foot_r = _foot_r.lerp(fr, fa)
 	_foot_l = _foot_l.lerp(fl, fa)
@@ -253,26 +263,26 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	var spine := Basis(Vector3.UP, _twist) * Basis(Vector3.RIGHT, _lean - run_lean)
 	var waist := pelvis + low * Vector3(0, 0.2, 0)
 	var chest := waist + spine * Vector3(0, 0.24 + breathe, 0)
-	var sh_r := chest + spine * Vector3(0.21, 0.12, 0)
-	var sh_l := chest + spine * Vector3(-0.21, 0.12, 0)
+	var sh_r := chest + spine * Vector3(0.235, 0.1, 0)
+	var sh_l := chest + spine * Vector3(-0.235, 0.1, 0)
 	# the shoulder rises a little when its arm is raised high
 	sh_r.y += clampf((_hand_r.y - sh_r.y) * 0.08, 0.0, 0.04)
 	sh_l.y += clampf((_hand_l.y - sh_l.y) * 0.08, 0.0, 0.04)
-	var neck := chest + spine * Vector3(0, 0.2, 0)
+	var neck := chest + spine * Vector3(0, 0.17, 0)
 	var head_basis := Basis(Vector3.UP, _twist + _look) * Basis(Vector3.RIGHT, (_lean - run_lean) * 0.3)
-	var head := neck + head_basis * Vector3(0, 0.16, 0)
+	var head := neck + head_basis * Vector3(0, 0.15, 0)
 	var hip_r := pelvis + low * Vector3(0.1, -0.04, 0)
 	var hip_l := pelvis + low * Vector3(-0.1, -0.04, 0)
 
 	_place_ball("pelvis", pelvis, Vector3(0.32, 0.16, 0.2), low)
-	_place_seg("waist", pelvis + low * Vector3(0, 0.02, 0), waist, 0.15, 1.15)
-	_place_seg("chest", waist, chest + spine * Vector3(0, 0.08, 0), 0.17, 1.3, spine)
+	_place_seg("waist", pelvis + low * Vector3(0, 0.02, 0), waist, 0.14, 1.2)
+	_place_seg("chest", waist, chest + spine * Vector3(0, 0.08, 0), 0.18, 1.38, spine)
 	_place_seg("hem", pelvis + low * Vector3(0, -0.12, 0), pelvis + low * Vector3(0, 0.06, 0), 0.19, 1.15)
 	_place_seg("belt", pelvis + low * Vector3(0, 0.06, 0), pelvis + low * Vector3(0, 0.11, 0), 0.172, 1.15)
 	_place_ball("buckle", pelvis + low * Vector3(0, 0.085, -0.17), Vector3(0.06, 0.05, 0.03), low)
-	_place_seg("neck", neck - spine * Vector3(0, 0.05, 0), head - head_basis * Vector3(0, 0.08, 0), 0.055)
-	_place_ball("head", head, Vector3(0.3, 0.32, 0.3), head_basis)
-	_place_ball("hair", head + head_basis * Vector3(0, 0.06, 0.03), Vector3(0.31, 0.25, 0.31), head_basis)
+	_place_seg("neck", neck - spine * Vector3(0, 0.06, 0), head - head_basis * Vector3(0, 0.1, 0), 0.06)
+	_place_ball("head", head, Vector3(0.33, 0.35, 0.33), head_basis)
+	_place_ball("hair", head + head_basis * Vector3(0, 0.065, 0.035), Vector3(0.345, 0.27, 0.345), head_basis)
 	_place_ball("nose", head + head_basis * Vector3(0, -0.01, -0.15), Vector3(0.04, 0.05, 0.05), head_basis)
 	for s in [-1.0, 1.0]:
 		var sd := "l" if s < 0 else "r"
@@ -283,7 +293,7 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	_place_ball("shoulder_r", sh_r, Vector3(0.15, 0.13, 0.14), spine)
 	_place_ball("shoulder_l", sh_l, Vector3(0.15, 0.13, 0.14), spine)
 	var hand_r := _arm("r", sh_r, _hand_r, _pole_r)
-	var hand_l := _arm("l", sh_l, _hand_l, Vector3(-0.6, -1.0, 0.5))
+	var hand_l := _arm("l", sh_l, _hand_l, Vector3(-0.45, -0.45, 1.0))
 	_leg("r", hip_r, _foot_r + Vector3(0, 0.07, 0))
 	_leg("l", hip_l, _foot_l + Vector3(0, 0.07, 0))
 
@@ -299,7 +309,11 @@ func animate(delta: float, _cam: Camera3D) -> void:
 		_belt_bag.transform = Transform3D(low, pelvis + low * Vector3(0.18, 0.02, -0.06))
 
 	# ---- the weapon in hand
-	_draw_weapon(st, w, hand_r, hand_l, dead, pose)
+	var palm_r := hand_r + _along_r * PALM
+	var palm_l := hand_l + _along_l * PALM
+	last_hand_r = palm_r
+	last_hand_l = palm_l
+	_draw_weapon(st, w, palm_r, palm_l, dead, pose)
 
 	_swing_fx(st)
 	_flash = maxf(_flash - delta, 0.0)
@@ -346,12 +360,20 @@ func _track_release(st: Sim.PlayerState, w: int, delta: float) -> void:
 func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 	var swing := sin(_phase) * clampf(speed / Sim.WALK_SPEED, 0.0, 1.4) * 0.22 if grounded else 0.0
 	var glance := sin(_t * 0.37) * sin(_t * 0.23) * 0.7 * (1.0 - clampf(speed, 0.0, 1.0))   # an idle look around
-	var p := { "hand_r": Vector3(0.27, 1.0 + 0.01 * sin(_t * 2.1), -0.04 - swing), "hand_l": Vector3(-0.27, 1.0, -0.04 + swing),
+	var p := { "hand_r": Vector3(0.27, 1.07 + 0.01 * sin(_t * 2.1), -0.1 - swing), "hand_l": Vector3(-0.27, 1.07, -0.1 + swing),
 		"wdir": Vector3(0, -0.3, -1), "wroll": Vector3(1, 0, 0), "twist": 0.0, "lean": 0.0, "crouch": 0.0, "look": glance }
 	if st == null or st.dead > 0:
 		return p
 	var w := st.weapon
 	match w:
+		Weapons.FISTS:   # after a punch, the guard stays up a while: fists by the chin, elbows in, knees soft
+			if _fight_t < 3.0 and speed < Sim.SPRINT_SPEED:
+				p.hand_l = Vector3(-0.1, 1.5, -0.3)
+				p.hand_r = Vector3(0.14, 1.46, -0.2)
+				p.twist = -0.25
+				p.crouch = 0.05
+				p.pole_r = Vector3(0.3, -1.0, 0.4)
+				p.guard = true
 		Weapons.SWORD:   # at the ready: blade forward and a little up, the free arm loose
 			p.hand_r = Vector3(0.24, 1.08, -0.28 - swing * 0.3)
 			p.wdir = Vector3(-0.15, 0.35, -1.0)
@@ -374,6 +396,10 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 		for key in k.keys():
 			p[key] = k[key]
 		p.snap = true
+		if not p.has("foot_l") and speed < 0.5:   # step the lead foot into the strike, settle back after
+			var step := _smooth(clampf(t / maxf(h, 0.01), 0.0, 1.0)) * (1.0 - _smooth(clampf((t - h - 0.3) / 0.4, 0.0, 1.0)))
+			p.foot_l = Vector3(-0.15, 0.0, -0.05 - 0.22 * step)
+			p.crouch = float(p.get("crouch", 0.0)) + 0.05 * step
 		if w == Weapons.CLUB:
 			p.hand_l = p.hand_r - (p.wdir as Vector3).normalized() * 0.14 + Vector3(-0.04, 0, 0)
 		return p
@@ -473,22 +499,27 @@ func _move_keys(name: String, h: float, rest: Dictionary) -> Array:
 				[h, {"hand_r": Vector3(0.05, 0.95, -0.62), "wdir": Vector3(0.0, -0.65, -1.0), "wroll": Vector3(1, 0, 0), "lean": -0.45, "crouch": 0.18}],
 				[minf(h + 0.32, 0.92), {"hand_r": Vector3(0.05, 0.92, -0.6), "wdir": Vector3(0.0, -0.7, -1.0), "wroll": Vector3(1, 0, 0), "lean": -0.4, "crouch": 0.16}],
 				[1.0, {"hand_r": R, "wdir": rest.wdir, "wroll": rest.wroll, "lean": 0.0, "crouch": 0.0}]]
-		"jab":
-			return [[0.0, {"hand_r": Vector3(0.18, 1.38, -0.18), "hand_l": Vector3(-0.16, 1.42, -0.22)}],
-				[h, {"hand_r": Vector3(0.12, 1.47, -0.66), "hand_l": Vector3(-0.16, 1.42, -0.2), "twist": -0.25, "lean": -0.08}],
-				[minf(h + 0.25, 0.9), {"hand_r": Vector3(0.18, 1.4, -0.3), "twist": -0.1}],
-				[1.0, {"hand_r": Vector3(0.18, 1.38, -0.18), "hand_l": Vector3(-0.16, 1.42, -0.22), "twist": 0.0, "lean": 0.0}]]
-		"cross":
-			return [[0.0, {"hand_r": Vector3(0.18, 1.4, -0.2), "hand_l": Vector3(-0.16, 1.4, -0.2)}],
-				[h, {"hand_l": Vector3(-0.02, 1.47, -0.68), "hand_r": Vector3(0.2, 1.42, -0.15), "twist": 0.45, "lean": -0.12}],
-				[minf(h + 0.25, 0.9), {"hand_l": Vector3(-0.12, 1.42, -0.32), "twist": 0.2}],
-				[1.0, {"hand_l": L, "hand_r": R, "twist": 0.0, "lean": 0.0}]]
-		"kick":
-			return [[0.0, {"hand_r": Vector3(0.2, 1.38, -0.15), "hand_l": Vector3(-0.2, 1.38, -0.15), "foot_r": Vector3(0.13, 0.0, 0.0)}],
-				[h * 0.6, {"foot_r": Vector3(0.13, 0.5, -0.25), "lean": 0.1}],
-				[h, {"foot_r": Vector3(0.1, 0.95, -0.8), "lean": 0.28, "hand_r": Vector3(0.32, 1.25, 0.05), "hand_l": Vector3(-0.32, 1.3, -0.2)}],
-				[minf(h + 0.3, 0.9), {"foot_r": Vector3(0.13, 0.35, -0.25), "lean": 0.1}],
-				[1.0, {"foot_r": Vector3(0.13, 0.0, 0.0), "hand_r": R, "hand_l": L, "lean": 0.0}]]
+		"jab":   # the lead (left) hand snaps straight out from the guard and straight back; the right stays at the chin
+			return [[0.0, {"hand_l": Vector3(-0.1, 1.5, -0.3), "hand_r": Vector3(0.14, 1.46, -0.2), "twist": -0.25, "crouch": 0.05}],
+				[h * 0.5, {"hand_l": Vector3(-0.1, 1.47, -0.26), "twist": -0.2}],
+				[h, {"hand_l": Vector3(-0.04, 1.53, -0.74), "hand_r": Vector3(0.14, 1.47, -0.18), "twist": -0.45, "lean": -0.08, "crouch": 0.07}],
+				[minf(h + 0.22, 0.9), {"hand_l": Vector3(-0.1, 1.5, -0.32), "twist": -0.28, "lean": 0.0}],
+				[1.0, {"hand_l": Vector3(-0.1, 1.5, -0.3), "hand_r": Vector3(0.14, 1.46, -0.2), "twist": -0.25, "crouch": 0.05}]]
+		"cross":   # the rear (right) hand, driven by the hips and shoulders turning through; the back heel pivots
+			return [[0.0, {"hand_l": Vector3(-0.1, 1.5, -0.3), "hand_r": Vector3(0.14, 1.46, -0.2), "twist": -0.3, "crouch": 0.05}],
+				[h * 0.6, {"hand_r": Vector3(0.16, 1.44, -0.12), "twist": -0.4, "crouch": 0.08}],
+				[h, {"hand_r": Vector3(0.02, 1.52, -0.76), "hand_l": Vector3(-0.16, 1.48, -0.16), "twist": 0.55, "lean": -0.15, "crouch": 0.1,
+					"foot_r": Vector3(0.15, 0.03, 0.14)}],
+				[minf(h + 0.25, 0.9), {"hand_r": Vector3(0.12, 1.47, -0.3), "twist": 0.1, "lean": -0.05, "foot_r": Vector3(0.14, 0.0, 0.1)}],
+				[1.0, {"hand_l": Vector3(-0.1, 1.5, -0.3), "hand_r": Vector3(0.14, 1.46, -0.2), "twist": -0.25, "lean": 0.0, "crouch": 0.05,
+					"foot_r": Vector3(0.14, 0.0, 0.08)}]]
+		"kick":   # roundhouse: chamber the knee, pivot on the standing foot, lean back, whip the shin through, recover
+			return [[0.0, {"hand_l": Vector3(-0.1, 1.5, -0.3), "hand_r": Vector3(0.14, 1.46, -0.2), "foot_r": Vector3(0.14, 0.0, 0.08), "twist": -0.25}],
+				[h * 0.55, {"foot_r": Vector3(0.22, 0.55, -0.12), "twist": -0.55, "lean": 0.12, "crouch": 0.04}],
+				[h, {"foot_r": Vector3(-0.15, 1.0, -0.72), "twist": -0.95, "lean": 0.32, "hand_r": Vector3(0.36, 1.12, 0.12),
+					"hand_l": Vector3(-0.18, 1.45, -0.32), "crouch": 0.06}],
+				[minf(h + 0.28, 0.9), {"foot_r": Vector3(0.05, 0.45, -0.3), "twist": -0.5, "lean": 0.12}],
+				[1.0, {"foot_r": Vector3(0.14, 0.0, 0.08), "hand_l": Vector3(-0.1, 1.5, -0.3), "hand_r": Vector3(0.14, 1.46, -0.2), "twist": -0.25, "lean": 0.0, "crouch": 0.0}]]
 	return [[0.0, {}], [1.0, {}]]
 
 
@@ -529,7 +560,7 @@ static func ik(a: Vector3, t: Vector3, l1: float, l2: float, pole: Vector3) -> A
 	var d := t - a
 	var dist := clampf(d.length(), 0.05, (l1 + l2) * 0.998)
 	var dir := d.normalized() if d.length() > 1e-4 else Vector3.DOWN
-	var x := (l1 * l1 + dist * dist - l2 * l2) / (2.0 * l1 * dist)
+	var x := (l1 * l1 + dist * dist - l2 * l2) / (2.0 * dist)   # how far along the reach the joint sits
 	var hgt := sqrt(maxf(l1 * l1 - x * x, 0.0))
 	var pp := pole - dir * pole.dot(dir)
 	if pp.length_squared() < 1e-6:
@@ -542,11 +573,15 @@ func _arm(side: String, shoulder: Vector3, target: Vector3, pole: Vector3) -> Ve
 	var r := ik(shoulder, target, UPPER_ARM, FOREARM, pole)
 	var elbow: Vector3 = r[0]
 	var hand: Vector3 = r[1]
-	_place_seg("upper_" + side, shoulder, elbow, 0.065)
-	_place_seg("fore_" + side, elbow, hand, 0.052)
-	_place_ball("elbow_" + side, elbow, Vector3.ONE * 0.1)
+	_place_seg("upper_" + side, shoulder, elbow, 0.068)
+	_place_seg("fore_" + side, elbow, hand, 0.05)
+	_place_ball("elbow_" + side, elbow, Vector3.ONE * 0.105)
 	# the hand: a slightly flat mitten along the forearm, the thumb on its inner side
 	var along := (hand - elbow).normalized()
+	if side == "r":
+		_along_r = along
+	else:
+		_along_l = along
 	var across := along.cross(Vector3.UP if absf(along.y) < 0.9 else Vector3.FORWARD).normalized()
 	var hb := Basis(across, along, across.cross(along)).orthonormalized()
 	_place_ball("hand_" + side, hand + along * 0.02, Vector3(0.09, 0.11, 0.07), hb)
@@ -622,6 +657,7 @@ func _draw_weapon(st: Sim.PlayerState, w: int, hand_r: Vector3, hand_l: Vector3,
 		return
 
 	if w == Weapons.BOW:
+		last_grip = hand_l
 		var up := (_wdir as Vector3).normalized()
 		var back := (Vector3(0, 0, 1) - up * up.z).normalized()   # toward the archer, square to the stave
 		var flex := 0.12 + 0.11 * _ease_draw(pull) - 0.05 * spring
@@ -638,8 +674,9 @@ func _draw_weapon(st: Sim.PlayerState, w: int, hand_r: Vector3, hand_l: Vector3,
 		var nock: Vector3 = hand_r if drawing else (tip_a + tip_b) / 2.0 + back * (0.03 * spring)
 		_string_on(tip_a, tip_b, nock, 0.005, WeaponModels.STRING)
 		var nocked := st != null and st.arrows > 0 and (drawing or (pose.has("aim") and st.atk == 0 and st.atk_cd == 0))
-		if nocked:
-			var aim := (hand_l - nock)
+		if nocked:   # the arrow runs from the string to the bow, resting on the bow's left side
+			var side := (Vector3.UP.cross(hand_l - nock)).normalized() * 0.02
+			var aim := (hand_l + side - nock)
 			aim = aim.normalized() if aim.length() > 0.05 else Vector3.FORWARD
 			_arrow.transform = Transform3D(Basis.looking_at(aim, Vector3.UP), nock)
 			_arrow.visible = true
@@ -647,7 +684,8 @@ func _draw_weapon(st: Sim.PlayerState, w: int, hand_r: Vector3, hand_l: Vector3,
 		var y := (_wdir as Vector3).normalized()
 		var x := Vector3.RIGHT.cross(y).cross(y).normalized() * -1.0
 		var z := x.cross(y).normalized()
-		held.transform = Transform3D(Basis(x, y, z), hand_l)
+		held.transform = Transform3D(Basis(x, y, z), hand_l - y * 0.0)
+		last_grip = hand_l
 		held.visible = true
 		var prong_a := held.transform * Vector3(-0.1, 0.27, 0)
 		var prong_b := held.transform * Vector3(0.1, 0.27, 0)
@@ -668,7 +706,10 @@ func _draw_weapon(st: Sim.PlayerState, w: int, hand_r: Vector3, hand_l: Vector3,
 		var x := _wroll.cross(y)
 		x = x.normalized() if x.length() > 0.05 else y.cross(Vector3.FORWARD).normalized()
 		var z := x.cross(y).normalized()
-		held.transform = Transform3D(Basis(x, y, z), hand_r)
+		# the handle's middle in the palm (the sword's grip is 0.04 up from its origin)
+		var grip_mid := 0.04 if w == Weapons.SWORD else 0.0
+		held.transform = Transform3D(Basis(x, y, z), hand_r - y * grip_mid)
+		last_grip = hand_r
 		held.visible = true
 
 

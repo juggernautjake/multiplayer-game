@@ -219,6 +219,11 @@ void fragment() {
 		pillar.position = Vector3(b.cx, b.h / 2.0, b.cz)
 		add_child(pillar)
 
+	var eco := EcoView.new()   # trees, fruit, worms and birds, drawn from the server's events
+	eco.name = "Eco"
+	add_child(eco)
+	eco.setup(net)
+
 	for p: Vector3 in WorldLayout.DUMMIES:
 		var d := Dummy.new()
 		d.position = p

@@ -23,6 +23,7 @@ signal hit(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool, a
 signal local_shot(kind: int, pos0: Vector3, vel0: Vector3, g: float)
 signal item_added(id: int, kind: int, pos: Vector3, count: int)
 signal style_changed(style: String)
+signal eco(kind: String, args: Array)   # the living yard (trees, fruit, worms, birds): see Ecology / EcoView
 signal item_removed(id: int, taker: int)
 
 const COLORS := [Color("e6194b"), Color("3cb44b"), Color("ffe119"), Color("4363d8"), Color("f58231"), Color("911eb4"),
@@ -82,6 +83,7 @@ class Proj:
 
 ## How everyone is drawn, chosen by the host for the whole game: "pip" (sprite) or "figure" (3D test character).
 var style := "pip"
+var ecology: Ecology   # server only
 var projectiles := {}  # id -> Proj (server)
 var LOG := OS.get_cmdline_user_args().has("--log")   # print hits and pick-ups (testing)
 var next_proj := 1
@@ -138,6 +140,8 @@ func host(port: int, player_name: String, with_player := true) -> Error:
 	my_id = 1
 	for i in WorldLayout.ITEM_SPAWNS.size():
 		_spawn_item_at(i)
+	ecology = Ecology.new()
+	ecology.event.connect(_on_eco_event)
 	if with_player:
 		_server_add_player(1, player_name, str(get_meta("character", "pip")))
 		predicted = players[1].state.copy()
@@ -209,6 +213,9 @@ func hello(player_name: String, character := "pip") -> void:
 	_server_add_player(id, player_name, character)
 	welcome.rpc_id(id, server_tick)
 	set_style.rpc_id(id, style)
+	if ecology:
+		for e in ecology.full_state(server_tick):
+			eco_event.rpc_id(id, e[0], e[1])
 	var list := []
 	for it: Item in items.values():
 		list.append([it.id, it.kind, it.pos, it.count])
@@ -228,6 +235,18 @@ func roster_update(list: Array) -> void:
 	for e in list:
 		roster[int(e[0])] = { "name": str(e[1]), "color": e[2], "character": str(e[3]) if e.size() > 3 else "pip" }
 	roster_changed.emit(roster)
+
+
+## The yard's events go to everyone, reliably and in order.
+@rpc("authority", "call_remote", "reliable", 3)
+func eco_event(kind: String, args: Array) -> void:
+	eco.emit(kind, args)
+
+
+func _on_eco_event(kind: String, args: Array) -> void:
+	eco_event.rpc(kind, args)
+	if is_host_player:
+		eco.emit(kind, args)
 
 
 ## The look for everyone (Pip / 3D figure). Only the host sets it; it switches for every player at once, and
@@ -355,6 +374,12 @@ func _server_tick() -> void:
 			p.hist.pop_front()
 	_server_projectiles()
 	_server_items()
+	if ecology:
+		var people := []
+		for p: ServerPlayer in players.values():
+			if p.state.dead == 0:
+				people.append([p.id, p.state.pos, Vector2(p.state.vel.x, p.state.vel.z).length()])
+		ecology.tick(server_tick, people)
 	if server_tick % Config.SNAPSHOT_EVERY == 0:
 		var ents := []
 		for p: ServerPlayer in players.values():
@@ -419,7 +444,10 @@ func _server_step_player(p: ServerPlayer) -> void:
 		p.was_dead = p.state.dead > 0
 		var interact := inp.buttons & Sim.Btn.INTERACT != 0
 		if interact and not p.interact_prev and p.state.dead == 0:
-			_pick_up(p, 2.2, true)
+			if not _pick_up(p, 2.2, true) and ecology:
+				var gain := ecology.try_eat(p.state.pos, server_tick)
+				if gain > 0:
+					p.state.hp = mini(p.state.hp + gain, Sim.MAX_HP)
 		p.interact_prev = interact
 
 
@@ -447,6 +475,12 @@ func _melee(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
 	for i in WorldLayout.DUMMIES.size():
 		targets.append([-(i + 1), WorldLayout.DUMMIES[i]])
 	var impact := me + Vector3(face.x, 0, face.y) * 1.3
+	if ecology:   # a tree within reach in front: shake it (fruit trees drop fruit from the 3rd hit)
+		for i in WorldLayout.TREES.size():
+			var tp: Vector3 = WorldLayout.TREES[i][1]
+			var td := Vector2(tp.x - me.x, tp.z - me.z)
+			if td.length() <= float(w.range) + 0.5 and (td.length() < 0.6 or absf(face.angle_to(td)) <= deg_to_rad(float(w.arc) / 2.0)):
+				ecology.hit_tree(i, int(w.damage), server_tick, Vector3(td.x, 0, td.y))
 	for t in targets:
 		var d: Vector3 = t[1] - me
 		var flat := Vector2(d.x, d.z)
@@ -513,6 +547,12 @@ func _server_projectiles() -> void:
 					done = true
 					break
 			if done:
+				break
+			var tree := WorldLayout.tree_at(pt, 0.4)
+			if tree >= 0 and ecology:
+				ecology.hit_tree(tree, int(pr.damage * 0.6), server_tick, cur - prev)
+				_end_proj(pr, pt, true)
+				done = true
 				break
 			if pt.y <= 0.0 or WorldLayout.ground_height(pt.x, pt.z, pt.y + 0.05) > pt.y or _in_box(pt):
 				_end_proj(pr, Vector3(pt.x, maxf(pt.y, 0.02), pt.z), true)
@@ -586,7 +626,7 @@ func _server_items() -> void:
 			_pick_up(p, 1.3, false)
 
 
-func _pick_up(p: ServerPlayer, reach: float, weapons: bool) -> void:
+func _pick_up(p: ServerPlayer, reach: float, weapons: bool) -> bool:
 	var best: Item = null
 	var best_d := reach
 	for it: Item in items.values():
@@ -598,22 +638,23 @@ func _pick_up(p: ServerPlayer, reach: float, weapons: bool) -> void:
 			best = it
 			best_d = d
 	if best == null:
-		return
+		return false
 	var s := p.state
 	match best.kind:
 		Weapons.Item.ARROWS:
 			if s.arrows >= Weapons.MAX_AMMO:
-				return
+				return false
 			s.arrows = mini(s.arrows + best.count, Weapons.MAX_AMMO)
 		Weapons.Item.ROCKS:
 			if s.rocks >= Weapons.MAX_AMMO:
-				return
+				return false
 			s.rocks = mini(s.rocks + best.count, Weapons.MAX_AMMO)
 		_:
 			s.owned |= 1 << int(Weapons.ITEM_WEAPON[best.kind])
 	if LOG:
 		print("picked up %s" % Weapons.ITEM_NAMES[best.kind])
 	_remove_item(best, p.id)
+	return true
 
 
 ## Damage a player (knockback, death) or a dummy (it just shows the number), and tell everyone.
