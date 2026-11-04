@@ -52,6 +52,7 @@ var aiming := false          # right mouse held: zoomed aim
 var attack_block_until := 0  # msec: the click that grabs the mouse doesn't also swing
 var pause_menu: Control
 var pause_char: OptionButton
+var joining_until := 0     # msec: waiting for the host to answer a Join
 var audit := {}   # --log: counts of every replicated event this client received (network audit)
 
 
@@ -278,6 +279,7 @@ func _on_style(s: String) -> void:
 func _process(_delta: float) -> void:
 	if cam == null:
 		return
+	_process_joining()
 	var frac := Engine.get_physics_interpolation_fraction()
 	for id in avatars.keys():
 		var av = avatars[id]
@@ -639,7 +641,7 @@ func _build_ui() -> void:
 	box.add_child(char_pick)
 	var row := HBoxContainer.new()
 	box.add_child(row)
-	for spec in [["Play solo / Host", _start_host], ["Join", _start_join]]:
+	for spec in [["Play / Host", _start_host], ["Join a friend", _start_join]]:
 		var btn := Button.new()
 		btn.text = spec[0]
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -647,7 +649,7 @@ func _build_ui() -> void:
 		row.add_child(btn)
 	status_label = Label.new()
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-	status_label.text = "Host to play (friends can join you), or enter a host's address and Join."
+	status_label.text = "Play / Host starts a game (alone, or friends join you). To join a friend's game, type their address and click Join a friend."
 	box.add_child(status_label)
 
 
@@ -672,12 +674,32 @@ func _start_host() -> void:
 	_enter_game()
 
 
+## Join: the menu stays up ("Connecting...") until the host answers; after 6 s with no answer, give up with a clear
+## message instead of leaving you in an empty world.
 func _start_join() -> void:
-	var err := net.join(addr_edit.text.strip_edges(), int(port_edit.text), name_edit.text)
+	var addr := addr_edit.text.strip_edges()
+	var err := net.join(addr, int(port_edit.text), name_edit.text)
 	if err != OK:
 		status_label.text = "Could not start: %s" % error_string(err)
 		return
-	_enter_game()
+	status_label.text = "Connecting to %s:%s ..." % [addr, port_edit.text]
+	joining_until = Time.get_ticks_msec() + 6000
+	if bot:
+		_enter_game()
+
+
+func _process_joining() -> void:
+	if joining_until == 0:
+		return
+	if net.my_id != 0 and net.predicted != null:   # in: the host knows us and our player exists
+		joining_until = 0
+		_enter_game()
+	elif Time.get_ticks_msec() > joining_until:
+		joining_until = 0
+		net._reset()
+		menu.visible = true
+		status_label.text = "No game answered at %s:%s. Is the host running and is the address right?
+To play on your own, click Play / Host." % [addr_edit.text.strip_edges(), port_edit.text]
 
 
 func _enter_game() -> void:
