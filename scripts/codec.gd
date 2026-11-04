@@ -1,5 +1,5 @@
 ## Binary packing for the two hot messages (inputs and snapshots). Small packets, no Variant overhead:
-## a 32-player snapshot is about 1.2 KB.
+## an input is 16 bytes, a player in a snapshot 40 bytes.
 class_name Codec
 
 
@@ -11,7 +11,13 @@ static func encode_inputs(inputs: Array) -> PackedByteArray:
 		b.put_u32(i.seq)
 		b.put_u8(i.buttons)
 		b.put_float(i.yaw)
+		b.put_16(int(round(clampf(i.pitch, -1.6, 1.6) * 10000.0)))
+		b.put_u8(i.weapon)
+		b.put_u32(i.view_tick)
 	return b.data_array
+
+
+const INPUT_BYTES := 16
 
 
 static func decode_inputs(data: PackedByteArray) -> Array:
@@ -21,14 +27,17 @@ static func decode_inputs(data: PackedByteArray) -> Array:
 	var b := StreamPeerBuffer.new()
 	b.data_array = data
 	var n := b.get_u8()
-	if data.size() < 1 + n * 9:
+	if data.size() < 1 + n * INPUT_BYTES:
 		return out
 	for k in n:
 		var seq := b.get_u32()
 		var btn := b.get_u8()
 		var yaw := b.get_float()
+		var pitch := b.get_16() / 10000.0
+		var weapon := b.get_u8()
+		var view := b.get_u32()
 		if is_finite(yaw):
-			out.append(Sim.PlayerInput.new(seq, btn, yaw))
+			out.append(Sim.PlayerInput.new(seq, btn, yaw, pitch, weapon, view))
 	return out
 
 
@@ -47,6 +56,13 @@ static func encode_snapshot(tick: int, ack: int, ents: Array) -> PackedByteArray
 		b.put_u8(1 if s.grounded else 0)
 		b.put_u8(s.dash_ticks)
 		b.put_u8(s.dash_cd)
+		b.put_u8(s.weapon)
+		b.put_u8(s.atk)
+		b.put_u8(s.atk_cd)
+		b.put_u8(s.charge)
+		b.put_u8(s.swing_n)
+		b.put_u8(s.hp)
+		b.put_u8(s.dead)
 	return b.data_array
 
 
@@ -67,5 +83,12 @@ static func decode_snapshot(data: PackedByteArray) -> Dictionary:
 		s.grounded = b.get_u8() == 1
 		s.dash_ticks = b.get_u8()
 		s.dash_cd = b.get_u8()
+		s.weapon = b.get_u8()
+		s.atk = b.get_u8()
+		s.atk_cd = b.get_u8()
+		s.charge = b.get_u8()
+		s.swing_n = b.get_u8()
+		s.hp = b.get_u8()
+		s.dead = b.get_u8()
 		ents[id] = s
 	return { "tick": tick, "ack": ack, "ents": ents }

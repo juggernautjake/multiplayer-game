@@ -4,6 +4,7 @@
 ## Command line (after `--`):  --server [--port 7777]   run a dedicated server with no window and no player
 ##                             --host / --join <address>  [--name <name>]   skip the menu
 ##                             --bot          a scripted player (walks, sprints, jumps, dashes) for testing
+##                             --bot fight    a scripted player that walks to a practice dummy and uses every weapon on it
 ##                             --screenshot <file.png> [--shot-frame 240] [--view first]   save one frame and quit
 extends Node3D
 
@@ -32,6 +33,16 @@ var bot_t := 0
 var shot_path := ""
 var shot_frame := 240
 var frames := 0
+var bot_mode := ""
+var weapon_slot := 0
+var aim_pitch := 0.0
+var projs := {}            # server projectile id -> { node, kind, tick0, pos0, vel0, g, end_tick, end_pos, stuck, local_t0 }
+var local_shots: Array = []  # our own shots drawn at once, waiting for the server's launch to give them an id
+var dummies: Array = []    # Dummy nodes, index i = target id -(i+1)
+var hud_weapons: Label
+var hp_fill: ColorRect
+var charge_fill: ColorRect
+var shake := 0.0           # camera shake left (s), when our hit lands
 
 
 func _ready() -> void:
@@ -41,6 +52,10 @@ func _ready() -> void:
 	net.input_source = _sample_input
 	net.roster_changed.connect(_on_roster)
 	net.status.connect(_on_status)
+	net.projectile_spawned.connect(_on_proj_spawn)
+	net.projectile_ended.connect(_on_proj_end)
+	net.hit.connect(_on_hit)
+	net.local_shot.connect(_on_local_shot)
 
 	var args := _args()
 	if args.has("server"):
@@ -51,6 +66,7 @@ func _ready() -> void:
 		return
 
 	bot = args.has("bot")
+	bot_mode = str(args["bot"]) if args.has("bot") and args["bot"] is String else ""
 	shot_path = str(args.get("screenshot", ""))
 	shot_frame = int(args.get("shot-frame", 240))
 	if str(args.get("view", "")) == "first":
@@ -165,6 +181,12 @@ void fragment() {
 		pillar.position = Vector3(b.cx, b.h / 2.0, b.cz)
 		add_child(pillar)
 
+	for p: Vector3 in WorldLayout.DUMMIES:
+		var d := Dummy.new()
+		d.position = p
+		add_child(d)
+		dummies.append(d)
+
 	cam = Camera3D.new()
 	cam.fov = 70.0
 	cam.near = 0.05
@@ -212,6 +234,7 @@ func _process(_delta: float) -> void:
 			av.yaw = cam_yaw
 			av.grounded = net.predicted.grounded
 			av.dashing = net.predicted.dash_ticks > 0
+			av.state = net.predicted
 			av.model.visible = view == View.THIRD
 		else:
 			var d := net.remote_draw(id, frac)
@@ -223,6 +246,7 @@ func _process(_delta: float) -> void:
 			av.yaw = d[1]
 			av.grounded = d[2]
 			av.dashing = d[3]
+			av.state = d[4]
 		av.animate(_delta, cam)
 
 	var me := Vector3.ZERO
@@ -243,7 +267,12 @@ func _process(_delta: float) -> void:
 		cam.position = p
 		cam.look_at(focus, Vector3.UP)
 
+	_update_projectiles(frac)
+	if shake > 0.0:
+		shake = maxf(shake - _delta, 0.0)
+		cam.position += Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.07 * (shake / 0.14)
 	if hud:
+		_update_combat_hud()
 		var dash := "ready"
 		if net.predicted != null and net.predicted.dash_cd > 0:
 			dash = "%.1f s" % (net.predicted.dash_cd * Config.DT)
@@ -267,6 +296,7 @@ func _process(_delta: float) -> void:
 func _sample_input() -> Array:
 	if bot:
 		return _bot_input()
+	_update_aim()
 	var b := 0
 	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or menu == null or not menu.visible:
 		if Input.is_physical_key_pressed(KEY_W): b |= Sim.Btn.FORWARD
@@ -276,11 +306,32 @@ func _sample_input() -> Array:
 		if Input.is_physical_key_pressed(KEY_SPACE): b |= Sim.Btn.JUMP
 		if Input.is_physical_key_pressed(KEY_SHIFT): b |= Sim.Btn.SPRINT
 		if Input.is_physical_key_pressed(KEY_Q): b |= Sim.Btn.DASH
-	return [b, cam_yaw]
+		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			b |= Sim.Btn.ATTACK
+	return [b, cam_yaw, aim_pitch, weapon_slot]
+
+
+## Aim where the crosshair points: find what the camera's centre ray hits (ground, a pillar, or 80 m away) and pitch
+## the shot from the muzzle toward it.
+func _update_aim() -> void:
+	if cam == null or net.predicted == null:
+		return
+	var fwd := -cam.global_transform.basis.z
+	var o := cam.global_position
+	var t := 80.0
+	if fwd.y < -0.001:
+		t = minf(t, -o.y / fwd.y)
+	t = minf(t, WorldLayout.ray_hit(o, fwd, t))
+	var target := o + fwd * t
+	var m := Weapons.muzzle(net.predicted.pos, cam_yaw)
+	var flat := Vector2(target.x - m.x, target.z - m.z).length()
+	aim_pitch = clampf(atan2(target.y - m.y, maxf(flat, 0.5)), -1.2, 1.2)
 
 
 ## Test player: walks in a slow circle, sprints, jumps and dashes on a timetable; logs what it sees every 2 s.
 func _bot_input() -> Array:
+	if bot_mode == "fight":
+		return _bot_fight()
 	bot_t += 1
 	cam_yaw = wrapf(bot_t * 0.01, -PI, PI)
 	var b: int = Sim.Btn.FORWARD
@@ -292,7 +343,43 @@ func _bot_input() -> Array:
 			name_edit.text, net.latest_tick, net.predicted.pos.x, net.predicted.pos.y, net.predicted.pos.z,
 			net.roster.size(), net.ping_ms(), net.corrections, int(net.interp_delay * Config.DT * 1000.0),
 			100.0 * net.extrap_frames / maxf(net.drawn_frames, 1.0)])
-	return [b, cam_yaw]
+	return [b, cam_yaw, 0.0, weapon_slot]
+
+
+## Fighting test bot: walk up to the middle dummy, then use each weapon on it for 6 s (club, sword from close up;
+## bow and slingshot from 10 m back, drawn fully), logging every hit it sees.
+func _bot_fight() -> Array:
+	bot_t += 1
+	weapon_slot = (bot_t / 360) % 4
+	if net.predicted == null:
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var target: Vector3 = WorldLayout.DUMMIES[1]
+	var me := net.predicted.pos
+	var to := target - me
+	cam_yaw = atan2(-to.x, -to.z)
+	var want := 1.6 if Weapons.is_melee(weapon_slot) else 10.0
+	var b := 0
+	var dist := Vector2(to.x, to.z).length()
+	if dist > want + 0.4:
+		b |= Sim.Btn.FORWARD
+	elif dist < want - 0.4:
+		b |= Sim.Btn.BACK
+	var pitch := 0.0
+	if Weapons.is_melee(weapon_slot):
+		if dist < want + 0.8:
+			b |= Sim.Btn.ATTACK
+	else:
+		var m := Weapons.muzzle(me, cam_yaw)
+		var sd := Weapons.shot(weapon_slot, int(Weapons.get_data(weapon_slot).draw))
+		var v := float(sd[0])
+		var g := float(Weapons.get_data(weapon_slot).gravity)
+		var dx := Vector2(target.x - m.x, target.z - m.z).length()
+		var dy := target.y + 1.2 - m.y
+		var disc := v * v * v * v - g * (g * dx * dx + 2.0 * dy * v * v)   # low-arc launch angle to hit the dummy
+		pitch = atan((v * v - sqrt(maxf(disc, 0.0))) / (g * dx)) if dx > 0.1 else 0.0
+		if (bot_t % 70) < 55 and absf(dist - want) < 1.5:
+			b |= Sim.Btn.ATTACK   # hold to draw, then let go
+	return [b, cam_yaw, pitch, weapon_slot]
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -304,6 +391,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var lo := -1.45 if view == View.FIRST else -1.2
 		var hi := 1.45 if view == View.FIRST else 0.5
 		cam_pitch = clampf(cam_pitch - mm.relative.y * MOUSE_SENS, lo, hi)
+	elif key and key.pressed and not key.echo and key.physical_keycode >= KEY_1 and key.physical_keycode <= KEY_4:
+		weapon_slot = key.physical_keycode - KEY_1
 	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_V:
 		view = View.FIRST if view == View.THIRD else View.THIRD
 		cam_pitch = clampf(cam_pitch, -1.2, 0.5)
@@ -325,12 +414,37 @@ func _build_ui() -> void:
 	hud.add_theme_constant_override("outline_size", 6)
 	layer.add_child(hud)
 	var help := Label.new()
-	help.text = "WASD move   Shift sprint   Space jump   Q dash   V first/third person   wheel zoom   mouse look (click to capture, Esc to release)"
+	help.text = "WASD move   Shift sprint   Space jump   Q dash   left click attack (hold to draw a bow)   1-4 weapons   V first/third person   wheel zoom   Esc release mouse"
 	help.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	help.position = Vector2(12, -34)
 	help.add_theme_color_override("font_outline_color", Color.BLACK)
 	help.add_theme_constant_override("outline_size", 6)
 	layer.add_child(help)
+	hud_weapons = Label.new()
+	hud_weapons.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	hud_weapons.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	hud_weapons.position.y -= 92
+	hud_weapons.add_theme_font_size_override("font_size", 20)
+	hud_weapons.add_theme_color_override("font_outline_color", Color.BLACK)
+	hud_weapons.add_theme_constant_override("outline_size", 6)
+	layer.add_child(hud_weapons)
+	var hp_back := ColorRect.new()
+	hp_back.color = Color(0, 0, 0, 0.55)
+	hp_back.size = Vector2(300, 16)
+	hp_back.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	hp_back.position = Vector2(-150, -60)
+	layer.add_child(hp_back)
+	hp_fill = ColorRect.new()
+	hp_fill.color = Color(0.3, 0.85, 0.35)
+	hp_fill.size = Vector2(296, 12)
+	hp_fill.position = Vector2(2, 2)
+	hp_back.add_child(hp_fill)
+	charge_fill = ColorRect.new()  # bow / slingshot draw, under the crosshair
+	charge_fill.color = Color(1, 0.85, 0.3)
+	charge_fill.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	charge_fill.size = Vector2(0, 5)
+	charge_fill.position = Vector2(-30, 22)
+	layer.add_child(charge_fill)
 	var cross := Label.new()  # a crosshair, mostly for first person
 	cross.text = "+"
 	cross.add_theme_font_size_override("font_size", 22)
@@ -416,3 +530,162 @@ func _print_addresses(port: int) -> void:
 	lines.append("  over the internet: your public IP, after forwarding UDP %d on the router (see README)" % port)
 	print("\n".join(lines))
 	host_info = "\n".join(lines)
+
+
+# ================================================================ combat visuals
+func _on_local_shot(kind: int, pos0: Vector3, vel0: Vector3, g: float) -> void:
+	# our own shot, drawn from this instant on our own clock
+	var e := { "node": _proj_node(kind), "kind": kind, "pos0": pos0, "vel0": vel0, "g": g, "local_t0": Engine.get_physics_frames(),
+		"tick0": -1, "end_tick": -1, "end_pos": Vector3.ZERO, "stuck": false }
+	add_child(e.node)
+	local_shots.append(e)
+
+
+func _on_proj_spawn(id: int, owner: int, kind: int, tick0: int, pos0: Vector3, vel0: Vector3, g: float) -> void:
+	if owner == net.my_id and not local_shots.is_empty():
+		var e: Dictionary = local_shots.pop_front()   # the server's copy of a shot we already drew: link them
+		e.tick0 = tick0
+		projs[id] = e
+		return
+	var n := { "node": _proj_node(kind), "kind": kind, "pos0": pos0, "vel0": vel0, "g": g, "local_t0": -1,
+		"tick0": tick0, "end_tick": -1, "end_pos": Vector3.ZERO, "stuck": false }
+	n.node.visible = false
+	add_child(n.node)
+	projs[id] = n
+
+
+func _on_proj_end(id: int, tick: int, pos: Vector3, stuck: bool) -> void:
+	if projs.has(id):
+		var e: Dictionary = projs[id]
+		e.end_tick = tick
+		e.end_pos = pos
+		e.stuck = stuck
+
+
+func _proj_node(kind: int) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var m := StandardMaterial3D.new()
+	if kind == 0:  # arrow: a thin shaft along -Z
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.035, 0.035, 0.75)
+		mi.mesh = bm
+		m.albedo_color = Color("b07840")
+		var head := MeshInstance3D.new()
+		var hm := BoxMesh.new()
+		hm.size = Vector3(0.06, 0.06, 0.1)
+		head.mesh = hm
+		head.position.z = -0.4
+		var hmat := StandardMaterial3D.new()
+		hmat.albedo_color = Color("b8c2ce")
+		head.material_override = hmat
+		mi.add_child(head)
+		var fl := MeshInstance3D.new()
+		var fm := BoxMesh.new()
+		fm.size = Vector3(0.12, 0.02, 0.12)
+		fl.mesh = fm
+		fl.position.z = 0.32
+		var fmat := StandardMaterial3D.new()
+		fmat.albedo_color = Color("d04040")
+		fl.material_override = fmat
+		mi.add_child(fl)
+	else:  # stone
+		var sm := SphereMesh.new()
+		sm.radius = 0.07
+		sm.height = 0.14
+		mi.mesh = sm
+		m.albedo_color = Color("8a8a92")
+	mi.material_override = m
+	return mi
+
+
+## Every projectile follows its fixed path. Others' shots run on the same delayed clock as the players they came from
+## (render_tick), our own on our own clock, so each lines up with the bow it left.
+func _update_projectiles(frac: float) -> void:
+	var now_local := Engine.get_physics_frames() + frac
+	for list in [projs, local_shots]:
+		var keys: Array = list.keys() if list is Dictionary else range(list.size())
+		for k in keys:
+			var e: Dictionary = list[k]
+			var n: float
+			if e.local_t0 >= 0:
+				n = now_local - e.local_t0
+			else:
+				n = net.render_tick + frac - e.tick0
+			var node: MeshInstance3D = e.node
+			if n < 0.0:
+				node.visible = false
+				continue
+			var ended: bool = e.end_tick >= 0 and n >= e.end_tick - e.tick0
+			if ended:
+				if not e.stuck or n > e.end_tick - e.tick0 + 180:   # stuck arrows stay 3 s
+					node.queue_free()
+					if list is Dictionary:
+						list.erase(k)
+					continue
+				node.global_position = e.end_pos
+				continue
+			if n > 320:
+				node.queue_free()
+				if list is Dictionary:
+					list.erase(k)
+				continue
+			node.visible = true
+			var p := Weapons.proj_pos(e.pos0, e.vel0, e.g, n)
+			var v := Weapons.proj_vel(e.vel0, e.g, n)
+			node.global_position = p
+			if v.length_squared() > 0.01:
+				node.look_at(p + v, Vector3.UP if absf(v.normalized().y) < 0.99 else Vector3.RIGHT)
+
+
+func _on_hit(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool, attacker: int) -> void:
+	if cam == null:
+		return
+	var weapon := -1
+	if avatars.has(attacker) and (avatars[attacker] as Avatar).state != null:
+		weapon = (avatars[attacker] as Avatar).state.weapon
+	if target < 0:
+		var i := -target - 1
+		if i < dummies.size():
+			(dummies[i] as Dummy).hit(amount, dir)
+		Fx.burst(self, pos, dir, Color("e2c27a"), 16, 4.5, 0.06)   # straw
+	elif avatars.has(target):
+		(avatars[target] as Avatar).flash()
+		Fx.burst(self, pos, dir, Color("ffe6a0"), 12, 5.5, 0.05)   # sparks
+	if weapon == Weapons.SWORD:
+		Fx.burst(self, pos, dir, Color("dff2ff"), 8, 7.0, 0.04)
+		Fx.word(self, pos, "Shing!", Color("bfe6ff"))
+	elif weapon == Weapons.CLUB:
+		Fx.word(self, pos, "Thock!" if not killed else "WHAM!", Color("ffb066"))
+	if attacker == net.my_id:
+		shake = 0.14
+	# a damage number that floats up and fades
+	var l := Label3D.new()
+	l.text = ("%d" % amount) + ("  KO!" if killed else "")
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.font_size = 64 if attacker == net.my_id else 44
+	l.outline_size = 14
+	l.modulate = Color("ffd34d") if attacker == net.my_id else (Color("ff5a5a") if target == net.my_id else Color.WHITE)
+	add_child(l)
+	l.global_position = pos + Vector3(randf_range(-0.3, 0.3), 0.4, randf_range(-0.3, 0.3))
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(l, "global_position", l.global_position + Vector3(0, 1.1, 0), 0.9)
+	tw.tween_property(l, "modulate:a", 0.0, 0.9).set_delay(0.3)
+	tw.chain().tween_callback(l.queue_free)
+
+
+func _update_combat_hud() -> void:
+	var st := net.predicted
+	var names := []
+	for i in Weapons.NAMES.size():
+		names.append(("[%d %s]" if i == weapon_slot else " %d %s ") % [i + 1, Weapons.NAMES[i]])
+	hud_weapons.text = "   ".join(names)
+	if st == null:
+		return
+	hp_fill.size.x = 296.0 * float(st.hp) / float(Sim.MAX_HP)
+	hp_fill.color = Color(0.9, 0.25, 0.2).lerp(Color(0.3, 0.85, 0.35), float(st.hp) / float(Sim.MAX_HP))
+	var w := Weapons.get_data(st.weapon)
+	charge_fill.size.x = 60.0 * float(st.charge) / float(w.draw) if w.kind == "ranged" else 0.0
+	if st.dead > 0:
+		hud_weapons.text = "Knocked out: back up in %.1f s" % (st.dead * Config.DT)

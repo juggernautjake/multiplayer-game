@@ -12,6 +12,9 @@ class Box:
 
 static var _boxes: Array = []
 
+## Practice dummies near the spawn: hit them to see your damage. Target ids -1, -2, -3.
+const DUMMIES := [Vector3(-4.0, 0.0, -9.0), Vector3(0.0, 0.0, -10.0), Vector3(4.0, 0.0, -9.0)]
+
 
 static func boxes() -> Array:
 	if _boxes.is_empty():

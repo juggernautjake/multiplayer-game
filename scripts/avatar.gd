@@ -1,30 +1,32 @@
 ## A player on screen, drawn as Pip (Jacob's sprite character from 04-games/pip): a pixel-art billboard that stands
 ## upright, picks the view (S, SE, E, NE, N drawn; SW, W, NW mirrored) from where the camera is relative to the way
-## the player faces, and plays the animation that matches what the player is doing: idle, walk, run (sped up with
-## speed), dash, jump start, in the air, land. Every client animates every player from movement it already has, so
-## animation adds no network traffic.
+## the player faces, and plays the animation that matches the player's state: idle, walk, run, dash, jump, air, land,
+## club and sword swings (standing, walking, running, in the air), bow and slingshot draw and release, knocked down.
+## Every client animates every player from the state it already has, so animation adds no network traffic.
 class_name Avatar
 extends Node3D
 
-const SHEET := "res://assets/pip/pip-spritesheet.png"
-const META := "res://assets/pip/pip-spritesheet.json"
+const SHEETS := [["res://assets/pip/pip-spritesheet.png", "res://assets/pip/pip-spritesheet.json"],
+	["res://assets/pip/pip-weapons.png", "res://assets/pip/pip-weapons.json"]]
 const PIXEL := 0.04          # metres per sprite pixel: Pip (~45 px) stands ~1.8 m
 const DIRS := ["S", "SE", "E", "NE", "N", "NW", "W", "SW"]   # clockwise from facing the camera
 const MIRROR := {"SW": "SE", "W": "E", "NW": "NE"}
 
-static var _texture: Texture2D
-static var _anims := {}   # name -> { dir -> { row, frames, durations (s), loop } }
+static var _textures: Array = []
+static var _anims := {}   # name -> { dir -> { sheet, row, frames, durations (s), loop } }
 static var _cell := Vector2i(64, 64)
 static var _anchor := Vector2(32, 58)
 
 var yaw := 0.0
 var grounded := true
 var dashing := false
+var state: Sim.PlayerState   # weapon, attack, charge, death (set by Main every frame)
 
 var model: Node3D         # hidden for your own player in first person
 var sprite: Sprite3D
-var blob: MeshInstance3D  # coloured ring / shadow at the feet
+var blob: MeshInstance3D  # coloured ring at the feet
 var label: Label3D
+var hp_bar: Sprite3D
 
 var _anim := "idle"
 var _frame := 0
@@ -35,31 +37,36 @@ var _vel := Vector3.ZERO
 var _have_last := false
 var _was_grounded := true
 var _landing := 0.0
+var _dir_i := -1
+var _swing_n := -1
+var _flash := 0.0
+var _slashed_n := -1
 
 
-static func _load_sheet() -> void:
-	if _texture != null:
+static func _load_sheets() -> void:
+	if not _textures.is_empty():
 		return
-	_texture = load(SHEET)
-	var f := FileAccess.open(META, FileAccess.READ)
-	var meta: Dictionary = JSON.parse_string(f.get_as_text())
-	_cell = Vector2i(int(meta.cell.w), int(meta.cell.h))
-	_anchor = Vector2(float(meta.anchor.x), float(meta.anchor.y))
-	for a in meta.animations:
-		var by_dir: Dictionary = _anims.get(a.name, {})
-		var durs := PackedFloat32Array()
-		for ms in a.durationsMs:
-			durs.append(float(ms) / 1000.0)
-		by_dir[a.dir] = { "row": int(a.row), "frames": int(a.frames), "durations": durs, "loop": bool(a.loop) }
-		_anims[a.name] = by_dir
+	for i in SHEETS.size():
+		_textures.append(load(SHEETS[i][0]))
+		var f := FileAccess.open(SHEETS[i][1], FileAccess.READ)
+		var meta: Dictionary = JSON.parse_string(f.get_as_text())
+		_cell = Vector2i(int(meta.cell.w), int(meta.cell.h))
+		_anchor = Vector2(float(meta.anchor.x), float(meta.anchor.y))
+		for a in meta.animations:
+			var by_dir: Dictionary = _anims.get(a.name, {})
+			var durs := PackedFloat32Array()
+			for ms in a.durationsMs:
+				durs.append(float(ms) / 1000.0)
+			by_dir[a.dir] = { "sheet": i, "row": int(a.row), "frames": int(a.frames), "durations": durs, "loop": bool(a.loop) }
+			_anims[a.name] = by_dir
 
 
 func _init(player_name: String, color: Color, show_name: bool) -> void:
-	_load_sheet()
+	_load_sheets()
 	model = Node3D.new()
 	add_child(model)
 	sprite = Sprite3D.new()
-	sprite.texture = _texture
+	sprite.texture = _textures[0]
 	sprite.region_enabled = true
 	sprite.pixel_size = PIXEL
 	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y   # stays upright, turns to face the camera
@@ -67,9 +74,8 @@ func _init(player_name: String, color: Color, show_name: bool) -> void:
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 	sprite.shaded = false
 	sprite.double_sided = true
-	# put Pip's feet (the sheet's anchor) on the node's origin
 	sprite.centered = true
-	sprite.offset = Vector2(_cell.x / 2.0 - _anchor.x, _anchor.y - _cell.y / 2.0) * Vector2(1, 1)
+	sprite.offset = Vector2(_cell.x / 2.0 - _anchor.x, _anchor.y - _cell.y / 2.0)  # Pip's feet on the origin
 	model.add_child(sprite)
 
 	blob = MeshInstance3D.new()
@@ -83,23 +89,41 @@ func _init(player_name: String, color: Color, show_name: bool) -> void:
 	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	blob.material_override = bm
-	blob.top_level = true  # placed in world space, on whatever is underneath
+	blob.top_level = true
 	add_child(blob)
 
 	label = Label3D.new()
 	label.text = player_name
 	label.modulate = color.lightened(0.35)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.position.y = 2.2
+	label.position.y = 2.35
 	label.font_size = 44
 	label.outline_size = 12
 	label.no_depth_test = true
 	label.visible = show_name
 	add_child(label)
+
+	# a small health bar over other players' heads
+	hp_bar = Sprite3D.new()
+	var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+	img.fill(Color.WHITE)
+	hp_bar.texture = ImageTexture.create_from_image(img)
+	hp_bar.pixel_size = 1.0
+	hp_bar.scale = Vector3(0.9, 0.08, 1)
+	hp_bar.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	hp_bar.no_depth_test = true
+	hp_bar.position.y = 2.12
+	hp_bar.visible = show_name
+	add_child(hp_bar)
 	_show()
 
 
-## Call every frame after setting position, yaw, grounded and dashing.
+## Briefly tint red (hit).
+func flash() -> void:
+	_flash = 0.18
+
+
+## Call every frame after setting position, yaw, grounded, dashing and state.
 func animate(delta: float, cam: Camera3D) -> void:
 	if not _have_last:
 		_last = position
@@ -110,54 +134,113 @@ func animate(delta: float, cam: Camera3D) -> void:
 	_last = position
 	var speed := Vector2(_vel.x, _vel.z).length()
 
-	# choose the animation from what the player is doing
-	var want := _anim
-	if dashing:
-		want = "dash"
-	elif not grounded:
-		if _was_grounded or (_anim != "jumpStart" and _anim != "air"):
-			want = "jumpStart"
-		elif _anim == "jumpStart" and _done():
-			want = "air"
-	else:
-		if not _was_grounded:
-			_landing = 0.21
-		if _landing > 0.0 and speed < Sim.WALK_SPEED * 0.5:
-			want = "land"
-		elif speed < 0.4:
-			want = "idle"
-		elif speed < Sim.WALK_SPEED + 1.5:
-			want = "walk"
-		else:
-			want = "run"
-	_landing = maxf(_landing - delta, 0.0)
-	_was_grounded = grounded
+	var want := _pick(speed)
+	if state != null and state.swing_n != _swing_n:   # a new swing or shot started: play it from the top
+		if _swing_n != -1 and (want.ends_with("swing") or want.ends_with("back") or want.ends_with("Shot")):
+			_anim = ""
+		_swing_n = state.swing_n
 	if want != _anim:
 		_anim = want
 		_frame = 0
 		_frame_t = 0.0
 	_speed_scale = clampf(speed / Sim.WALK_SPEED, 0.6, 1.6) if _anim == "walk" else (clampf(speed / Sim.SPRINT_SPEED, 0.7, 1.4) if _anim == "run" else 1.0)
 
-	# advance the frame
 	var a := _clip(_dir_for(cam))
-	_frame_t += delta * _speed_scale
-	var durs: PackedFloat32Array = a.durations
-	while _frame_t >= durs[mini(_frame, durs.size() - 1)]:
-		_frame_t -= durs[mini(_frame, durs.size() - 1)]
-		if _frame < a.frames - 1:
-			_frame += 1
-		elif a.loop:
-			_frame = 0
-		else:
-			_frame_t = 0.0
-			break
+	if _anim.ends_with("Draw") and state != null:
+		# the draw follows how far the string is pulled, not the clock
+		var d := Weapons.get_data(state.weapon)
+		_frame = mini(int(float(state.charge) / float(d.draw) * a.frames), a.frames - 1)
+	else:
+		_frame_t += delta * _speed_scale
+		var durs: PackedFloat32Array = a.durations
+		while _frame_t >= durs[mini(_frame, durs.size() - 1)]:
+			_frame_t -= durs[mini(_frame, durs.size() - 1)]
+			if _frame < a.frames - 1:
+				_frame += 1
+			elif a.loop:
+				_frame = 0
+			else:
+				_frame_t = 0.0
+				break
 	_show(cam)
+	_swing_fx()
 
-	# the ring sits on the surface below and shrinks with height above it
+	_flash = maxf(_flash - delta, 0.0)
+	sprite.modulate = Color(1, 0.45, 0.45) if _flash > 0.0 else Color.WHITE
+	if state != null:
+		var k := float(state.hp) / float(Sim.MAX_HP)
+		hp_bar.scale.x = maxf(0.9 * k, 0.001)
+		hp_bar.modulate = Color(0.9, 0.2, 0.2).lerp(Color(0.3, 0.9, 0.3), k)
+		hp_bar.visible = label.visible and state.dead == 0
+
 	var ground := WorldLayout.ground_height(position.x, position.z, position.y)
 	blob.global_position = Vector3(position.x, ground + 0.012, position.z)
 	var s := clampf(1.0 - (position.y - ground) / 6.0, 0.35, 1.0)
 	blob.scale = Vector3(s, 1, s)
+
+
+## The slash trail, on the tick the hit lands: white-blue for the sword, a dusty smear for the club; the smash is an
+## overhead arc with a shockwave along the ground.
+func _swing_fx() -> void:
+	if state == null or state.dead > 0 or not Weapons.is_melee(state.weapon) or state.atk == 0:
+		return
+	var w := Weapons.get_data(state.weapon)
+	if state.atk > int(w.swing) - int(w.windup) + 1 or _slashed_n == state.swing_n:
+		return
+	_slashed_n = state.swing_n
+	var sword := state.weapon == Weapons.SWORD
+	var col := Color(0.75, 0.9, 1.0, 0.95) if sword else Color(1.0, 0.72, 0.4, 0.75)
+	var smash := _anim.ends_with("_smash")
+	var parent := get_parent()
+	Fx.slash(parent, global_position, yaw, float(w.range) * (0.95 if sword else 0.8), float(w.arc), col, smash, state.swing_n % 2 == 1)
+	if smash:
+		var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
+		Fx.shockwave(parent, global_position + fwd * 1.3, Color(1.0, 0.85, 0.6, 0.8))
+		Fx.burst(parent, global_position + fwd * 1.3, Vector3.UP, Color("c9a26b"), 18, 5.0, 0.07)
+
+
+## The animation for this moment.
+func _pick(speed: float) -> String:
+	var st := state
+	if st != null and st.dead > 0:
+		return "lieDown" if st.dead > Sim.RESPAWN_TICKS - 30 else "lieIdle"
+	if st != null:
+		var melee := Weapons.is_melee(st.weapon)
+		var sword := st.weapon == Weapons.SWORD
+		if melee and st.atk > 0:
+			var p := "s" if sword else "c"
+			if not grounded:
+				return "a" + p + "_swing"
+			if speed > Sim.SPRINT_SPEED - 1.5:
+				return "r" + p + "_swing"
+			if speed > 0.6:
+				return "w" + p + ("_swing" if st.swing_n % 2 == 0 else "_back")
+			return p + ("_swing" if st.swing_n % 2 == 0 else "_back") if st.swing_n % 3 != 0 else p + "_smash"
+		if not melee:
+			var b := "bow" if st.weapon == Weapons.BOW else "sling"
+			if st.charge > 0:
+				return b + "Draw"
+			if st.atk > 0:
+				return b + "Shot"
+	_landing = maxf(_landing, 0.0)
+	if dashing:
+		_was_grounded = grounded
+		return "dash"
+	if not grounded:
+		var r := "air" if (not _was_grounded and (_anim == "air" or (_anim == "jumpStart" and _done()))) else "jumpStart"
+		_was_grounded = false
+		return r
+	if not _was_grounded:
+		_landing = 0.21
+	_was_grounded = true
+	_landing = maxf(_landing - get_process_delta_time(), 0.0)
+	if _landing > 0.0 and speed < Sim.WALK_SPEED * 0.5:
+		return "land"
+	if speed < 0.4:
+		return "idle"
+	if speed < Sim.WALK_SPEED + 1.5:
+		return "walk"
+	return "run"
 
 
 func _done() -> bool:
@@ -179,8 +262,14 @@ func _dir_for(cam: Camera3D) -> String:
 	right.y = 0.0
 	right = right.normalized()
 	var ang := atan2(facing.dot(right), facing.dot(to_cam))
-	var i := posmod(int(round(ang / (PI / 4.0))), 8)
-	return DIRS[i]
+	var f := ang / (PI / 4.0)
+	# hysteresis: keep the current view until the angle is clearly into the next one, so Pip doesn't flicker
+	if _dir_i >= 0:
+		var d := fposmod(f - _dir_i + 4.0, 8.0) - 4.0
+		if absf(d) < 0.62:
+			return DIRS[_dir_i]
+	_dir_i = posmod(int(round(f)), 8)
+	return DIRS[_dir_i]
 
 
 func _clip(dir: String) -> Dictionary:
@@ -195,5 +284,9 @@ func _show(cam: Camera3D = null) -> void:
 	var dir := _dir_for(cam)
 	var a := _clip(dir)
 	var f := mini(_frame, a.frames - 1)
+	var tex: Texture2D = _textures[a.sheet]
+	if sprite.texture != tex:
+		sprite.texture = tex
 	sprite.region_rect = Rect2(f * _cell.x, a.row * _cell.y, _cell.x, _cell.y)
-	sprite.flip_h = MIRROR.has(dir)
+	var by_dir: Dictionary = _anims.get(_anim, _anims["idle"])
+	sprite.flip_h = MIRROR.has(dir) and by_dir.has(MIRROR[dir])

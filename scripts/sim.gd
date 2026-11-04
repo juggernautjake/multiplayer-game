@@ -3,7 +3,10 @@
 ## server and corrections are rare and tiny. No randomness, no wall-clock time, only fixed DT steps.
 class_name Sim
 
-enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64 }
+enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64, ATTACK = 128 }
+
+## What a step reports, for the server to act on (hit test, launch a projectile) and the client to show.
+enum Ev { NONE, MELEE_HIT, SHOT }
 
 const WALK_SPEED := 6.0
 const SPRINT_SPEED := 10.0
@@ -17,18 +20,28 @@ const DASH_SPEED := 24.0
 const DASH_TICKS := 9         # 0.15 s burst
 const DASH_COOLDOWN := 54     # 0.9 s
 const RADIUS := 0.4           # the player's collision radius
+const MAX_HP := 100
+const RESPAWN_TICKS := 180    # 3 s on the ground after dying
 
 
-## One tick of player intent. yaw: facing in radians, 0 = looking down -Z (chosen by the camera).
+## One tick of player intent. yaw: facing in radians, 0 = looking down -Z (chosen by the camera). pitch: aim up/down
+## (for projectiles). weapon: the slot wanted. view_tick: the tick the player was seeing other players at (the server
+## rewinds to it for melee hits: lag compensation).
 class PlayerInput:
 	var seq := 0
 	var buttons := 0
 	var yaw := 0.0
+	var pitch := 0.0
+	var weapon := 0
+	var view_tick := 0
 
-	func _init(s := 0, b := 0, y := 0.0) -> void:
+	func _init(s := 0, b := 0, y := 0.0, p := 0.0, w := 0, v := 0) -> void:
 		seq = s
 		buttons = b
 		yaw = y
+		pitch = p
+		weapon = w
+		view_tick = v
 
 
 class PlayerState:
@@ -38,6 +51,14 @@ class PlayerState:
 	var grounded := true
 	var dash_ticks := 0     # ticks of dash left
 	var dash_cd := 0        # ticks until the dash is ready again
+	var weapon := 0         # Weapons.CLUB / SWORD / BOW / SLING
+	var atk := 0            # ticks left in the current swing or shot
+	var atk_cd := 0         # ticks until the next attack
+	var charge := 0         # ticks a bow / slingshot has been drawn
+	var swing_n := 0        # counts attacks (0-255), so every client can tell a new swing started
+	var hp := MAX_HP
+	var dead := 0           # ticks until respawn (0 = alive)
+	var last_charge := 0    # how far the last shot was drawn (not sent: the server reads it at the shot)
 
 	func copy() -> PlayerState:
 		var s := PlayerState.new()
@@ -47,6 +68,14 @@ class PlayerState:
 		s.grounded = grounded
 		s.dash_ticks = dash_ticks
 		s.dash_cd = dash_cd
+		s.weapon = weapon
+		s.atk = atk
+		s.atk_cd = atk_cd
+		s.charge = charge
+		s.swing_n = swing_n
+		s.hp = hp
+		s.dead = dead
+		s.last_charge = last_charge
 		return s
 
 
@@ -59,9 +88,11 @@ static func spawn_state(slot: int) -> PlayerState:
 	return s
 
 
-## Advance a player one fixed tick with this input, in place.
-static func step(s: PlayerState, inp: PlayerInput) -> void:
+## Advance a player one fixed tick with this input, in place. Returns what happened (Ev).
+static func step(s: PlayerState, inp: PlayerInput) -> int:
+	var ev := _combat(s, inp)
 	s.yaw = inp.yaw
+	var alive := s.dead == 0
 
 	var f := 0.0
 	var r := 0.0
@@ -73,13 +104,19 @@ static func step(s: PlayerState, inp: PlayerInput) -> void:
 	var cy := cos(s.yaw)
 	# forward is -Z at yaw 0, right is +X
 	var wish := Vector2(-sy * f + cy * r, -cy * f - sy * r)
-	var speed := SPRINT_SPEED if inp.buttons & Btn.SPRINT else WALK_SPEED
+	var w := Weapons.get_data(s.weapon)
+	var busy: bool = s.charge > 0 or (s.atk > 0 and w.kind == "melee")
+	var speed := SPRINT_SPEED if inp.buttons & Btn.SPRINT and not busy else WALK_SPEED
+	if busy:
+		speed *= w.slow   # drawing a bow or mid-swing: slower
+	if not alive:
+		wish = Vector2.ZERO
 	if wish.length_squared() > 0.0:
 		wish = wish.normalized() * speed
 
 	if s.dash_cd > 0:
 		s.dash_cd -= 1
-	if inp.buttons & Btn.DASH and s.dash_cd == 0:
+	if inp.buttons & Btn.DASH and s.dash_cd == 0 and alive:
 		# dash the way you're moving, or straight ahead if standing still
 		var dir := wish.normalized() if wish.length_squared() > 0.0 else Vector2(-sy, -cy)
 		s.vel.x = dir.x * DASH_SPEED
@@ -102,8 +139,12 @@ static func step(s: PlayerState, inp: PlayerInput) -> void:
 			h += d.normalized() * accel
 		s.vel.x = h.x
 		s.vel.z = h.y
+		# a melee swing steps into the blow: during the wind-up, drive forward at the weapon's lunge speed
+		if alive and s.grounded and w.kind == "melee" and s.atk > int(w.swing) - int(w.windup):
+			s.vel.x = -sy * float(w.lunge)
+			s.vel.z = -cy * float(w.lunge)
 
-	if s.grounded and inp.buttons & Btn.JUMP:
+	if s.grounded and inp.buttons & Btn.JUMP and alive:
 		s.vel.y = JUMP_SPEED
 		s.grounded = false
 	if not s.grounded and s.dash_ticks == 0:
@@ -127,6 +168,43 @@ static func step(s: PlayerState, inp: PlayerInput) -> void:
 		s.vel.z = 0.0
 
 	quantize(s)
+	return ev
+
+
+## Weapons: switching, melee swings (the hit lands `windup` ticks in), drawing and releasing a bow or slingshot.
+## All counted in ticks from the inputs, so the client predicts its own attacks exactly; the server alone decides hits.
+static func _combat(s: PlayerState, inp: PlayerInput) -> int:
+	var ev := Ev.NONE
+	if s.atk_cd > 0:
+		s.atk_cd -= 1
+	if s.atk > 0:
+		s.atk -= 1
+	if s.dead > 0:
+		s.dead -= 1
+		s.charge = 0
+		return ev
+	if inp.weapon != s.weapon and inp.weapon >= 0 and inp.weapon < Weapons.DATA.size() and s.atk == 0 and s.charge == 0:
+		s.weapon = inp.weapon
+	var w := Weapons.get_data(s.weapon)
+	var attack := inp.buttons & Btn.ATTACK != 0
+	if w.kind == "melee":
+		if attack and s.atk_cd == 0:
+			s.atk = w.swing
+			s.atk_cd = w.cooldown
+			s.swing_n = (s.swing_n + 1) % 256
+		elif s.atk > 0 and s.atk == w.swing - w.windup:
+			ev = Ev.MELEE_HIT
+	else:
+		if attack and s.atk_cd == 0 and s.atk == 0:
+			s.charge = mini(s.charge + 1, w.draw)
+		elif not attack and s.charge > 0:
+			s.last_charge = s.charge
+			s.charge = 0
+			s.atk = w.shot
+			s.atk_cd = w.cooldown
+			s.swing_n = (s.swing_n + 1) % 256
+			ev = Ev.SHOT
+	return ev
 
 
 ## The player is an upright cylinder (radius RADIUS) against the pillars: land on a top when coming down onto it,

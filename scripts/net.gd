@@ -16,6 +16,11 @@ extends Node
 
 signal roster_changed(players: Dictionary)  # id -> { name, color }
 signal status(text: String)
+## combat, for Main to show: a projectile launched / landed, something got hit, our own shot left the bow (at once)
+signal projectile_spawned(id: int, owner: int, kind: int, tick0: int, pos0: Vector3, vel0: Vector3, g: float)
+signal projectile_ended(id: int, tick: int, pos: Vector3, stuck: bool)
+signal hit(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool, attacker: int)
+signal local_shot(kind: int, pos0: Vector3, vel0: Vector3, g: float)
 
 const COLORS := [Color("e6194b"), Color("3cb44b"), Color("ffe119"), Color("4363d8"), Color("f58231"), Color("911eb4"),
 	Color("46f0f0"), Color("f032e6"), Color("bcf60c"), Color("fabebe"), Color("008080"), Color("e6beff")]
@@ -37,6 +42,26 @@ class ServerPlayer:
 	var primed := false
 	var calm := 0               # ticks since the buffer last ran dry
 	var starves := 0            # times it ran dry (for the stats)
+	var slot := 0               # spawn slot
+	var hist: Array = []        # [tick, position] for the last 1.5 s: melee hits rewind to what the attacker saw
+	var was_dead := false
+
+
+## A projectile in flight (server). Its path is fixed at launch (Weapons.proj_pos), so clients draw it from the
+## launch message alone.
+class Proj:
+	var id := 0
+	var owner := 0
+	var kind := 0               # 0 arrow, 1 stone
+	var tick0 := 0
+	var pos0 := Vector3.ZERO
+	var vel0 := Vector3.ZERO
+	var g := 0.0
+	var damage := 0
+	var last := Vector3.ZERO
+
+var projectiles := {}  # id -> Proj (server)
+var next_proj := 1
 
 var players := {}  # id -> ServerPlayer (server only)
 var server_tick := 0
@@ -175,6 +200,21 @@ func roster_update(list: Array) -> void:
 	roster_changed.emit(roster)
 
 
+@rpc("authority", "call_remote", "reliable")
+func proj_spawn(id: int, owner: int, kind: int, tick0: int, pos0: Vector3, vel0: Vector3, g: float) -> void:
+	projectile_spawned.emit(id, owner, kind, tick0, pos0, vel0, g)
+
+
+@rpc("authority", "call_remote", "reliable")
+func proj_end(id: int, tick: int, pos: Vector3, stuck: bool) -> void:
+	projectile_ended.emit(id, tick, pos, stuck)
+
+
+@rpc("authority", "call_remote", "reliable")
+func hit_fx(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool, attacker: int) -> void:
+	hit.emit(target, amount, pos, dir, killed, attacker)
+
+
 @rpc("any_peer", "call_remote", "unreliable", 1)
 func inputs(data: PackedByteArray) -> void:
 	if multiplayer.is_server():
@@ -215,7 +255,8 @@ func _server_add_player(id: int, player_name: String) -> void:
 	var clean := player_name.strip_edges().left(Config.MAX_NAME)
 	p.name = clean if clean != "" else "Player %d" % (players.size() + 1)
 	p.color = COLORS[players.size() % COLORS.size()]
-	p.state = Sim.spawn_state(players.size() + 1)
+	p.slot = players.size() + 1
+	p.state = Sim.spawn_state(p.slot)
 	players[id] = p
 	_server_send_roster()
 
@@ -244,6 +285,10 @@ func _server_tick() -> void:
 	server_tick += 1
 	for p: ServerPlayer in players.values():
 		_server_step_player(p)
+		p.hist.append([server_tick, p.state.pos])
+		if p.hist.size() > 90:
+			p.hist.pop_front()
+	_server_projectiles()
 	if server_tick % Config.SNAPSHOT_EVERY == 0:
 		var ents := []
 		for p: ServerPlayer in players.values():
@@ -291,9 +336,152 @@ func _server_step_player(p: ServerPlayer) -> void:
 		p.waited = 0
 		var inp: Sim.PlayerInput = p.queue[nxt]
 		p.queue.erase(nxt)
-		Sim.step(p.state, inp)
+		var ev := Sim.step(p.state, inp)
 		p.last_applied = inp.seq
 		budget -= 1
+		if ev == Sim.Ev.MELEE_HIT:
+			_melee(p, inp)
+		elif ev == Sim.Ev.SHOT:
+			_shoot(p, inp)
+		if p.was_dead and p.state.dead == 0:  # back on your feet: a fresh spawn, same weapon
+			var w := p.state.weapon
+			p.state = Sim.spawn_state(p.slot)
+			p.state.weapon = w
+		p.was_dead = p.state.dead > 0
+
+
+# ---------------------------------------------------------------- server: combat
+## Where a player was at tick t (from the history), for lag compensation.
+func _pos_at(p: ServerPlayer, t: int) -> Vector3:
+	for i in range(p.hist.size() - 1, -1, -1):
+		if p.hist[i][0] <= t:
+			return p.hist[i][1]
+	return p.state.pos if p.hist.is_empty() else p.hist[0][1]
+
+
+## A melee swing lands: everything within reach and inside the arc in front of the attacker takes the hit. Other
+## players are rewound to where the attacker saw them (its view_tick, at most 0.5 s back), so what looked like a hit
+## on your screen is a hit.
+func _melee(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
+	var w := Weapons.get_data(p.state.weapon)
+	var vt := clampi(inp.view_tick, server_tick - 30, server_tick)
+	var me := p.state.pos
+	var face := Vector2(-sin(p.state.yaw), -cos(p.state.yaw))
+	var targets := []
+	for q: ServerPlayer in players.values():
+		if q.id != p.id and q.state.dead == 0:
+			targets.append([q.id, _pos_at(q, vt)])
+	for i in WorldLayout.DUMMIES.size():
+		targets.append([-(i + 1), WorldLayout.DUMMIES[i]])
+	for t in targets:
+		var d: Vector3 = t[1] - me
+		var flat := Vector2(d.x, d.z)
+		if flat.length() > float(w.range) + Sim.RADIUS or absf(d.y) > 1.8:
+			continue
+		if flat.length() > 0.6 and absf(face.angle_to(flat)) > deg_to_rad(float(w.arc) / 2.0):
+			continue
+		_damage(t[0], int(w.damage), p.id, Vector3(flat.x, 0, flat.y), float(w.knock))
+
+
+## A bow or slingshot is released: launch the projectile (speed and damage from how far it was drawn).
+func _shoot(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
+	var w := Weapons.get_data(p.state.weapon)
+	var sd := Weapons.shot(p.state.weapon, p.state.last_charge)
+	var pr := Proj.new()
+	pr.id = next_proj
+	next_proj += 1
+	pr.owner = p.id
+	pr.kind = 0 if w.projectile == "arrow" else 1
+	pr.tick0 = server_tick
+	pr.pos0 = Weapons.muzzle(p.state.pos, inp.yaw)
+	pr.vel0 = Weapons.aim_dir(inp.yaw, inp.pitch) * float(sd[0])
+	pr.g = float(w.gravity)
+	pr.damage = int(sd[1])
+	pr.last = pr.pos0
+	projectiles[pr.id] = pr
+	proj_spawn.rpc(pr.id, pr.owner, pr.kind, pr.tick0, pr.pos0, pr.vel0, pr.g)
+	if is_host_player:
+		proj_spawn(pr.id, pr.owner, pr.kind, pr.tick0, pr.pos0, pr.vel0, pr.g)
+
+
+## Move every projectile one tick along its fixed path; test 4 points along the step against players, dummies,
+## pillars and the ground.
+func _server_projectiles() -> void:
+	for id in projectiles.keys():
+		var pr: Proj = projectiles[id]
+		var n := server_tick - pr.tick0
+		var cur := Weapons.proj_pos(pr.pos0, pr.vel0, pr.g, n)
+		var prev := pr.last
+		pr.last = cur
+		var done := false
+		for k in range(1, 5):
+			var pt := prev.lerp(cur, k / 4.0)
+			for q: ServerPlayer in players.values():
+				if q.id == pr.owner or q.state.dead > 0:
+					continue
+				var qp := q.state.pos
+				if Vector2(pt.x - qp.x, pt.z - qp.z).length() < 0.5 and pt.y > qp.y - 0.1 and pt.y < qp.y + 1.9:
+					_damage(q.id, pr.damage, pr.owner, cur - prev, 1.5)
+					_end_proj(pr, pt, false)
+					done = true
+					break
+			if done:
+				break
+			for i in WorldLayout.DUMMIES.size():
+				var dp: Vector3 = WorldLayout.DUMMIES[i]
+				if Vector2(pt.x - dp.x, pt.z - dp.z).length() < 0.45 and pt.y > 0.0 and pt.y < 1.9:
+					_damage(-(i + 1), pr.damage, pr.owner, cur - prev, 0.0)
+					_end_proj(pr, pt, true)
+					done = true
+					break
+			if done:
+				break
+			if pt.y <= 0.0 or WorldLayout.ground_height(pt.x, pt.z, pt.y + 0.05) > pt.y or _in_box(pt):
+				_end_proj(pr, Vector3(pt.x, maxf(pt.y, 0.02), pt.z), true)
+				done = true
+				break
+		if not done and n > 300:
+			_end_proj(pr, cur, false)
+
+
+func _in_box(pt: Vector3) -> bool:
+	for b: WorldLayout.Box in WorldLayout.boxes():
+		if absf(pt.x - b.cx) < b.hx and absf(pt.z - b.cz) < b.hz and pt.y < b.h and pt.y > 0.0:
+			return true
+	return false
+
+
+func _end_proj(pr: Proj, pos: Vector3, stuck: bool) -> void:
+	projectiles.erase(pr.id)
+	proj_end.rpc(pr.id, server_tick, pos, stuck)
+	if is_host_player:
+		proj_end(pr.id, server_tick, pos, stuck)
+
+
+## Damage a player (knockback, death) or a dummy (it just shows the number), and tell everyone.
+func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) -> void:
+	var killed := false
+	var pos: Vector3
+	if target < 0:
+		pos = WorldLayout.DUMMIES[-target - 1] + Vector3(0, 1.3, 0)
+	else:
+		if not players.has(target):
+			return
+		var q: ServerPlayer = players[target]
+		q.state.hp = maxi(q.state.hp - amount, 0)
+		var push := Vector3(dir.x, 0, dir.z)
+		if push.length_squared() > 1e-6 and knock > 0.0:
+			q.state.vel += push.normalized() * knock + Vector3(0, knock * 0.35, 0)
+			q.state.grounded = false
+		if q.state.hp == 0:
+			q.state.dead = Sim.RESPAWN_TICKS
+			q.state.charge = 0
+			killed = true
+		Sim.quantize(q.state)
+		pos = q.state.pos + Vector3(0, 1.3, 0)
+	hit_fx.rpc(target, amount, pos, dir, killed, from)
+	if is_host_player:
+		hit_fx(target, amount, pos, dir, killed, from)
 
 
 # ---------------------------------------------------------------- client
@@ -322,13 +510,19 @@ func _sim_push(q: Array, data: PackedByteArray) -> void:
 
 
 func _client_tick() -> void:
-	var b_y: Array = input_source.call() if input_source.is_valid() else [0, 0.0]
-	var inp := Sim.PlayerInput.new(next_seq, int(b_y[0]), float(b_y[1]))
+	var b_y: Array = input_source.call() if input_source.is_valid() else [0, 0.0, 0.0, 0]
+	var pitch: float = round(float(b_y[2]) * 10000.0) / 10000.0   # the precision the packet carries, so the server agrees
+	var inp := Sim.PlayerInput.new(next_seq, int(b_y[0]), float(b_y[1]), pitch, int(b_y[3]), int(render_tick))
 	next_seq += 1
 	# predict at once
 	prev_pos = cur_pos
-	Sim.step(predicted, inp)
+	var ev := Sim.step(predicted, inp)
 	cur_pos = predicted.pos
+	if ev == Sim.Ev.SHOT:  # show our own arrow or stone leaving at once; the server's launch follows
+		var w := Weapons.get_data(predicted.weapon)
+		var sd := Weapons.shot(predicted.weapon, predicted.last_charge)
+		local_shot.emit(0 if w.projectile == "arrow" else 1, Weapons.muzzle(predicted.pos, inp.yaw),
+			Weapons.aim_dir(inp.yaw, inp.pitch) * float(sd[0]), float(w.gravity))
 	pending.append(inp)
 	if pending.size() > 240:
 		pending = pending.slice(pending.size() - 240)
@@ -423,16 +617,16 @@ func remote_draw(id: int, frac: float) -> Array:
 		return []
 	if a.is_empty():
 		var sb: Sim.PlayerState = b.ents[id]
-		return [sb.pos, sb.yaw, sb.grounded, sb.dash_ticks > 0]
+		return [sb.pos, sb.yaw, sb.grounded, sb.dash_ticks > 0, sb]
 	var sa: Sim.PlayerState = a.ents[id]
 	if b.is_empty():  # nothing newer yet (packet loss): carry on along the velocity for up to 250 ms
 		extrap_frames += 1
 		var ahead := minf((t - a.tick) * Config.DT, 0.25)
-		return [sa.pos + sa.vel * ahead, sa.yaw, sa.grounded, sa.dash_ticks > 0]
+		return [sa.pos + sa.vel * ahead, sa.yaw, sa.grounded, sa.dash_ticks > 0, sa]
 	var sb2: Sim.PlayerState = b.ents[id]
 	var w := clampf((t - a.tick) / float(b.tick - a.tick), 0.0, 1.0)
 	var near := sa if w < 0.5 else sb2
-	return [sa.pos.lerp(sb2.pos, w), lerp_angle(sa.yaw, sb2.yaw, w), near.grounded, near.dash_ticks > 0]
+	return [sa.pos.lerp(sb2.pos, w), lerp_angle(sa.yaw, sb2.yaw, w), near.grounded, near.dash_ticks > 0, near]
 
 
 func ping_ms() -> int:
