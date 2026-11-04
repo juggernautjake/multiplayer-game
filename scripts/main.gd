@@ -8,8 +8,8 @@
 extends Node3D
 
 const MOUSE_SENS := 0.0025
-const CAM_HEIGHT := 1.6   # third-person focus height
-const EYE_HEIGHT := 1.62  # first-person eye height
+const CAM_HEIGHT := 1.7   # third-person focus height
+const EYE_HEIGHT := 1.82  # first-person eye height (the character's eyes)
 
 enum View { THIRD, FIRST }
 
@@ -176,70 +176,10 @@ func _mat(c: Color, rough := 0.8) -> StandardMaterial3D:
 	return m
 
 
-## A simple placeholder character: a body in the player's colour, a head, eyes facing forward (-Z), hands, and a
-## contact shadow. The "model" node holds the meshes, so first person can hide your own.
-func _make_avatar(id: int, info: Dictionary) -> Node3D:
-	var root := Node3D.new()
-	var model := Node3D.new()
-	model.name = "model"
-	root.add_child(model)
-	var col: Color = info.get("color", Color.WHITE)
-	var body := MeshInstance3D.new()
-	var cap := CapsuleMesh.new()
-	cap.radius = 0.36
-	cap.height = 1.25
-	body.mesh = cap
-	body.position.y = 0.72
-	body.material_override = _mat(col)
-	model.add_child(body)
-	var head := MeshInstance3D.new()
-	var hs := SphereMesh.new()
-	hs.radius = 0.27
-	hs.height = 0.54
-	head.mesh = hs
-	head.position.y = 1.58
-	head.material_override = _mat(Color("f1c9a5"))
-	model.add_child(head)
-	for sx in [-0.1, 0.1]:
-		var eye := MeshInstance3D.new()
-		var es := SphereMesh.new()
-		es.radius = 0.05
-		es.height = 0.1
-		eye.mesh = es
-		eye.position = Vector3(sx, 1.63, -0.24)
-		eye.material_override = _mat(Color(0.08, 0.08, 0.1), 0.3)
-		model.add_child(eye)
-	for sx in [-0.46, 0.46]:
-		var hand := MeshInstance3D.new()
-		var hm := SphereMesh.new()
-		hm.radius = 0.11
-		hm.height = 0.22
-		hand.mesh = hm
-		hand.position = Vector3(sx, 0.85, -0.05)
-		hand.material_override = _mat(col.darkened(0.25))
-		model.add_child(hand)
-	var blob := MeshInstance3D.new()  # a soft contact shadow, so height reads while jumping
-	var disc := CylinderMesh.new()
-	disc.top_radius = 0.45
-	disc.bottom_radius = 0.45
-	disc.height = 0.01
-	blob.mesh = disc
-	blob.name = "blob"
-	var bmat := _mat(Color(0, 0, 0, 0.35))
-	bmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	blob.material_override = bmat
-	root.add_child(blob)
-	var label := Label3D.new()
-	label.text = str(info.get("name", "?"))
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.position.y = 2.15
-	label.font_size = 48
-	label.outline_size = 12
-	label.no_depth_test = true
-	label.visible = id != net.my_id
-	root.add_child(label)
-	add_child(root)
-	return root
+func _make_avatar(id: int, info: Dictionary) -> Avatar:
+	var av := Avatar.new(str(info.get("name", "?")), info.get("color", Color.WHITE), id != net.my_id)
+	add_child(av)
+	return av
 
 
 func _on_roster(r: Dictionary) -> void:
@@ -260,11 +200,12 @@ func _process(_delta: float) -> void:
 		return
 	var frac := Engine.get_physics_interpolation_fraction()
 	for id in avatars.keys():
-		var av: Node3D = avatars[id]
+		var av: Avatar = avatars[id]
 		if id == net.my_id and net.predicted != null:
+			av.visible = true
 			av.position = net.own_draw_position(frac)
 			av.rotation.y = cam_yaw
-			(av.get_node("model") as Node3D).visible = view == View.THIRD
+			av.model.visible = view == View.THIRD
 		else:
 			var d := net.remote_draw(id, frac)
 			if d.is_empty():
@@ -273,11 +214,7 @@ func _process(_delta: float) -> void:
 			av.visible = true
 			av.position = d[0]
 			av.rotation.y = d[1]
-		# the contact shadow stays on the ground and shrinks with height
-		var blob := av.get_node("blob") as Node3D
-		blob.global_position = Vector3(av.position.x, 0.01, av.position.z)
-		var k := clampf(1.0 - av.position.y / 6.0, 0.35, 1.0)
-		blob.scale = Vector3(k, 1, k)
+		av.animate(_delta)
 
 	var me := Vector3.ZERO
 	if avatars.has(net.my_id):
@@ -286,7 +223,7 @@ func _process(_delta: float) -> void:
 		cam.position = me + Vector3(0, EYE_HEIGHT, 0)
 		cam.rotation = Vector3(cam_pitch, cam_yaw, 0)
 	else:
-		var focus := me + Vector3(0, CAM_HEIGHT, 0)
+		var focus := me + Vector3(0, CAM_HEIGHT, 0) + Vector3(cos(cam_yaw), 0, -sin(cam_yaw)) * 0.55  # over the right shoulder
 		var back := Vector3(sin(cam_yaw) * cos(cam_pitch), -sin(cam_pitch), cos(cam_yaw) * cos(cam_pitch))
 		var dist := cam_dist
 		var hit := WorldLayout.ray_hit(focus, back, cam_dist)  # pull in so a pillar never hides the player

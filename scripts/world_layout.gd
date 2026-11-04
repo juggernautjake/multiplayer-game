@@ -35,6 +35,16 @@ static func boxes() -> Array:
 	return _boxes
 
 
+## Height of the surface under (x, z) at or below y: the top of a pillar or step, or the ground (0). For shadows and
+## animation (on the ground or in the air).
+static func ground_height(x: float, z: float, y: float) -> float:
+	var best := 0.0
+	for b: Box in boxes():
+		if absf(x - b.cx) <= b.hx + Sim.RADIUS and absf(z - b.cz) <= b.hz + Sim.RADIUS and b.h <= y + 0.05 and b.h > best:
+			best = b.h
+	return best
+
+
 ## Distance along a ray (origin o, unit direction d) to the first box it enters, or INF. For the camera.
 static func ray_hit(o: Vector3, d: Vector3, max_t: float) -> float:
 	var best := INF

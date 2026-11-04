@@ -5,7 +5,8 @@ A 3D online multiplayer game in **Godot 4** (GDScript). This first stage is the 
 - a server that several people can join (or a host who plays and serves at once; solo is just hosting alone);
 - an open plane in 3D with solid pillars and steps to jump on (collision is part of the shared simulation), each player a simple character with a name;
 - movement: WASD, sprint (Shift), jump (Space), dash (Q, the first ability: predicted, with a cooldown);
-- camera: third person or first person (V), mouse-wheel zoom, crosshair;
+- camera: third person over the shoulder or first person (V), mouse-wheel zoom, crosshair;
+- an animated placeholder character (scripts/avatar.gd): walk and run cycles that follow speed, a jump pose, a dash lean, idle breathing; ready to swap for a rigged glTF model;
 - netcode built for fast action, with no lag felt on your own moves and no rubber-banding.
 
 ## Getting started
