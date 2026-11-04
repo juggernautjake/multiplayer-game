@@ -4,7 +4,8 @@ A 3D online multiplayer game in **Godot 4** (GDScript). This first stage is the 
 
 - a server that several people can join (or a host who plays and serves at once; solo is just hosting alone);
 - an open plane in 3D with landmarks, each player a capsule with a name;
-- movement: WASD, sprint (Shift), jump (Space), third-person mouse look;
+- movement: WASD, sprint (Shift), jump (Space), dash (Q, the first ability: predicted, with a cooldown);
+- camera: third person or first person (V), mouse-wheel zoom, crosshair;
 - netcode built for fast action, with no lag felt on your own moves and no rubber-banding.
 
 ## Getting started

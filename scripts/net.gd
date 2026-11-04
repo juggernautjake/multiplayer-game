@@ -51,6 +51,7 @@ var correction := Vector3.ZERO  # visual offset after a misprediction, decays to
 var prev_pos := Vector3.ZERO    # own position before / after the last tick, for smooth drawing between ticks
 var cur_pos := Vector3.ZERO
 var input_source: Callable  # () -> [buttons, yaw], set by Main
+var corrections := 0        # times the server disagreed with our prediction (should stay 0)
 
 
 func _ready() -> void:
@@ -303,6 +304,7 @@ func _client_receive_snapshot(s: Dictionary) -> void:
 		Sim.step(replay, inp)
 	var diff := replay.pos - predicted.pos
 	if diff.length_squared() > 1e-10:
+		corrections += 1
 		if diff.length() > 4.0:  # far off (teleport, long stall): snap
 			correction = Vector3.ZERO
 		else:  # small: keep drawing where we were and blend the error away
@@ -346,7 +348,9 @@ func remote_draw(id: int, frac: float) -> Array:
 
 
 func ping_ms() -> int:
-	if peer == null or multiplayer.is_server():
+	if peer == null or multiplayer.multiplayer_peer == null or multiplayer.is_server():
+		return 0
+	if peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
 		return 0
 	var p := peer.get_peer(1)
 	return int(p.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)) if p else 0

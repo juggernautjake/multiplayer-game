@@ -45,6 +45,8 @@ static func encode_snapshot(tick: int, ack: int, ents: Array) -> PackedByteArray
 		b.put_float(s.vel.x); b.put_float(s.vel.y); b.put_float(s.vel.z)
 		b.put_float(s.yaw)
 		b.put_u8(1 if s.grounded else 0)
+		b.put_u8(s.dash_ticks)
+		b.put_u8(s.dash_cd)
 	return b.data_array
 
 
@@ -63,5 +65,7 @@ static func decode_snapshot(data: PackedByteArray) -> Dictionary:
 		s.vel = Vector3(b.get_float(), b.get_float(), b.get_float())
 		s.yaw = b.get_float()
 		s.grounded = b.get_u8() == 1
+		s.dash_ticks = b.get_u8()
+		s.dash_cd = b.get_u8()
 		ents[id] = s
 	return { "tick": tick, "ack": ack, "ents": ents }

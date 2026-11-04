@@ -3,7 +3,7 @@
 ## server and corrections are rare and tiny. No randomness, no wall-clock time, only fixed DT steps.
 class_name Sim
 
-enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32 }
+enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64 }
 
 const WALK_SPEED := 6.0
 const SPRINT_SPEED := 10.0
@@ -11,6 +11,11 @@ const GROUND_ACCEL := 70.0  # m/s^2 toward the wanted velocity on the ground: sn
 const AIR_ACCEL := 18.0     # some air control
 const GRAVITY := 28.0
 const JUMP_SPEED := 10.0
+# Dash: the first ability, and the pattern for the rest: deterministic, counted in ticks, part of the state, so the
+# client predicts it exactly and the server confirms it.
+const DASH_SPEED := 24.0
+const DASH_TICKS := 9         # 0.15 s burst
+const DASH_COOLDOWN := 54     # 0.9 s
 
 
 ## One tick of player intent. yaw: facing in radians, 0 = looking down -Z (chosen by the camera).
@@ -30,6 +35,8 @@ class PlayerState:
 	var vel := Vector3.ZERO
 	var yaw := 0.0
 	var grounded := true
+	var dash_ticks := 0     # ticks of dash left
+	var dash_cd := 0        # ticks until the dash is ready again
 
 	func copy() -> PlayerState:
 		var s := PlayerState.new()
@@ -37,6 +44,8 @@ class PlayerState:
 		s.vel = vel
 		s.yaw = yaw
 		s.grounded = grounded
+		s.dash_ticks = dash_ticks
+		s.dash_cd = dash_cd
 		return s
 
 
@@ -67,21 +76,36 @@ static func step(s: PlayerState, inp: PlayerInput) -> void:
 	if wish.length_squared() > 0.0:
 		wish = wish.normalized() * speed
 
-	# accelerate the horizontal velocity toward the wanted one, at most accel * DT this tick
-	var accel := (GROUND_ACCEL if s.grounded else AIR_ACCEL) * Config.DT
-	var h := Vector2(s.vel.x, s.vel.z)
-	var d := wish - h
-	if d.length() <= accel:
-		h = wish
+	if s.dash_cd > 0:
+		s.dash_cd -= 1
+	if inp.buttons & Btn.DASH and s.dash_cd == 0:
+		# dash the way you're moving, or straight ahead if standing still
+		var dir := wish.normalized() if wish.length_squared() > 0.0 else Vector2(-sy, -cy)
+		s.vel.x = dir.x * DASH_SPEED
+		s.vel.z = dir.y * DASH_SPEED
+		s.dash_ticks = DASH_TICKS
+		s.dash_cd = DASH_COOLDOWN
+
+	if s.dash_ticks > 0:
+		s.dash_ticks -= 1  # keep the burst: no steering, no gravity
+		if s.vel.y < 0.0:
+			s.vel.y = 0.0
 	else:
-		h += d.normalized() * accel
-	s.vel.x = h.x
-	s.vel.z = h.y
+		# accelerate the horizontal velocity toward the wanted one, at most accel * DT this tick
+		var accel := (GROUND_ACCEL if s.grounded else AIR_ACCEL) * Config.DT
+		var h := Vector2(s.vel.x, s.vel.z)
+		var d := wish - h
+		if d.length() <= accel:
+			h = wish
+		else:
+			h += d.normalized() * accel
+		s.vel.x = h.x
+		s.vel.z = h.y
 
 	if s.grounded and inp.buttons & Btn.JUMP:
 		s.vel.y = JUMP_SPEED
 		s.grounded = false
-	if not s.grounded:
+	if not s.grounded and s.dash_ticks == 0:
 		s.vel.y -= GRAVITY * Config.DT
 
 	s.pos += s.vel * Config.DT
