@@ -123,8 +123,25 @@ func flash() -> void:
 	_flash = 0.18
 
 
+var _hitstop := 0.0
+var _hit_shake := false
+
+
+## Freeze the frame for a moment when a hit lands; the victim shakes.
+func hitstop(seconds: float, shake: bool) -> void:
+	_hitstop = maxf(_hitstop, seconds)
+	_hit_shake = _hit_shake or shake
+
+
 ## Call every frame after setting position, yaw, grounded, dashing and state.
 func animate(delta: float, cam: Camera3D) -> void:
+	if _hitstop > 0.0:
+		_hitstop -= delta
+		sprite.position.x = randf_range(-0.03, 0.03) if _hit_shake else 0.0
+		if _hitstop <= 0.0:
+			sprite.position.x = 0.0
+			_hit_shake = false
+		return
 	if not _have_last:
 		_last = position
 		_have_last = true

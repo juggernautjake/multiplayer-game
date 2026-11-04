@@ -924,6 +924,12 @@ func _on_hit(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool,
 		Fx.word(self, pos, "Shing!", Color("bfe6ff"))
 	elif weapon == Weapons.CLUB:
 		Fx.word(self, pos, "Thock!" if not killed else "WHAM!", Color("ffb066"))
+	# hit-stop: both fighters freeze a moment on impact (3-6 frames light, 8-12 heavy), the victim shakes
+	var stop := (4.0 if amount <= 7 else 9.0) / 60.0
+	if avatars.has(attacker):
+		avatars[attacker].hitstop(stop, false)
+	if target >= 0 and avatars.has(target):
+		avatars[target].hitstop(stop, true)
 	if attacker == net.my_id:
 		shake = 0.14
 	# a damage number that floats up and fades

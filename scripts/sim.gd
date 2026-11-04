@@ -213,9 +213,13 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 	var attack := inp.buttons & Btn.ATTACK != 0
 	if w.kind == "melee":
 		var moves: Array = w.moves
-		if attack and s.atk == 0 and s.atk_cd == 0:
-			# chain the next move if still inside the window after the last one, else start the combo over
-			s.combo = (s.combo + 1) % moves.size() if s.combo_t > 0 else 0
+		var cur: Dictionary = moves[s.combo]
+		var recovery := int(cur.swing) - int(cur.windup)
+		# cancel into the next move late in this one's recovery (not after the finisher)
+		var can_cancel: bool = s.atk > 0 and s.atk <= int(recovery * Weapons.CANCEL_AT) and s.combo < moves.size() - 1
+		if attack and ((s.atk == 0 and s.atk_cd == 0) or can_cancel):
+			# chain the next move if mid-move or still inside the window after the last one, else start the combo over
+			s.combo = (s.combo + 1) % moves.size() if (s.combo_t > 0 or can_cancel) else 0
 			var mv: Dictionary = moves[s.combo]
 			s.atk = int(mv.swing)
 			s.atk_cd = int(mv.swing) + int(mv.recover)

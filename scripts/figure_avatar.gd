@@ -83,6 +83,20 @@ var last_hand_r := Vector3.ZERO   # palms and the weapon's grip this frame (pose
 var last_hand_l := Vector3.ZERO
 var last_grip := Vector3.ZERO
 var _fight_t := 99.0           # seconds since the last attack (fists keep their guard up for a while)
+# critically damped springs (Holden, "Spring-It-On"): velocities of the smoothed pose
+var _v_hand_r := Vector3.ZERO
+var _v_hand_l := Vector3.ZERO
+var _v_twist := 0.0
+var _v_lean := 0.0
+var _v_crouch := 0.0
+var _hitstop := 0.0            # seconds of hit-stop left (pose frozen)
+var _hit_shake := false
+var _accel_lean := 0.0
+var _v_accel_lean := 0.0
+var _bank := 0.0
+var _last_vel := Vector3.ZERO
+var _last_yaw := 0.0
+var _prev_hand_r := Vector3.ZERO
 
 
 func _init(player_name: String, color: Color, show_name: bool) -> void:
@@ -195,8 +209,38 @@ func flash() -> void:
 	_flash = 0.15
 
 
+## Freeze the pose for a few frames when a hit lands (attacker and victim); the victim shakes.
+func hitstop(seconds: float, shake: bool) -> void:
+	_hitstop = maxf(_hitstop, seconds)
+	_hit_shake = _hit_shake or shake
+
+
+## Critically damped spring toward a goal, framerate independent. -> [value, velocity]
+static func spring_v(x: Vector3, v: Vector3, goal: Vector3, halflife: float, dt: float) -> Array:
+	var y := (4.0 * 0.6931 / maxf(halflife, 0.001)) / 2.0
+	var j0 := x - goal
+	var j1 := v + j0 * y
+	var e := exp(-y * dt)
+	return [e * (j0 + j1 * dt) + goal, e * (v - j1 * y * dt)]
+
+
+static func spring_f(x: float, v: float, goal: float, halflife: float, dt: float) -> Array:
+	var y := (4.0 * 0.6931 / maxf(halflife, 0.001)) / 2.0
+	var j0 := x - goal
+	var j1 := v + j0 * y
+	var e := exp(-y * dt)
+	return [e * (j0 + j1 * dt) + goal, e * (v - j1 * y * dt)]
+
+
 # ================================================================ per frame
 func animate(delta: float, _cam: Camera3D) -> void:
+	if _hitstop > 0.0:   # the pose holds still on impact; the victim shakes
+		_hitstop -= delta
+		model.position.x = randf_range(-0.02, 0.02) if _hit_shake else 0.0
+		if _hitstop <= 0.0:
+			model.position.x = 0.0
+			_hit_shake = false
+		return
 	_t += delta
 	if not _have_last:
 		_last = position
@@ -215,24 +259,58 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	_fight_t = 0.0 if st != null and st.atk > 0 else _fight_t + delta
 	var pose := _pose(st, speed)
 	var a := 1.0 if instant else clampf(delta * (30.0 if pose.get("snap", false) else 12.0), 0.0, 1.0)
-	_hand_r = _hand_r.lerp(pose.hand_r, a)
-	_hand_l = _hand_l.lerp(pose.hand_l, a)
+	# hands, torso: critically damped springs (snappy into attacks, softer settling back)
+	var hl := 0.025 if pose.get("snap", false) else 0.1
+	if instant:
+		_hand_r = pose.hand_r
+		_hand_l = pose.hand_l
+	else:
+		var sr := spring_v(_hand_r, _v_hand_r, pose.hand_r, hl, delta)
+		_hand_r = sr[0]
+		_v_hand_r = sr[1]
+		var sl := spring_v(_hand_l, _v_hand_l, pose.hand_l, hl * 1.2, delta)   # the off hand lags a touch (overlap)
+		_hand_l = sl[0]
+		_v_hand_l = sl[1]
 	_pole_r = _pole_r.lerp(pose.get("pole_r", Vector3(0.45, -0.45, 1.0)), a)
 	var wd: Vector3 = (pose.wdir as Vector3).normalized()
 	_wdir = _wdir.slerp(wd, a) if _wdir.normalized().dot(wd) > -0.99 else wd
 	_wroll = _wroll.lerp(pose.wroll, a).normalized()
-	_twist = lerpf(_twist, pose.twist, a)
-	_lean = lerpf(_lean, pose.lean, a)
-	_crouch = lerpf(_crouch, pose.crouch, a)
+	if instant:
+		_twist = pose.twist
+		_lean = pose.lean
+		_crouch = pose.crouch
+	else:
+		var tw := spring_f(_twist, _v_twist, pose.twist, hl * 0.9, delta)   # the hips lead
+		_twist = tw[0]
+		_v_twist = tw[1]
+		var ln := spring_f(_lean, _v_lean, pose.lean, 0.1, delta)
+		_lean = ln[0]
+		_v_lean = ln[1]
+		var cr := spring_f(_crouch, _v_crouch, pose.crouch, 0.08, delta)
+		_crouch = cr[0]
+		_v_crouch = cr[1]
 	_look = lerpf(_look, pose.look, a if pose.has("aim") else (clampf(delta * 3.0, 0.0, 1.0) if not instant else 1.0))
 
 	# ---- feet
-	var stride := clampf(speed * 0.11, 0.0, 0.85)
-	var lift := clampf(speed * 0.03, 0.0, 0.2)
+	# stride locked to the distance covered (no foot sliding): one full cycle covers `stride_full` metres
+	var stride_full := clampf(1.3 + 0.16 * speed, 1.3, 2.9)
+	var stride := stride_full * 0.5 if speed > 0.3 else 0.0   # each foot sweeps half the cycle length
+	var run := clampf((speed - Sim.WALK_SPEED * 0.6) / (Sim.SPRINT_SPEED - Sim.WALK_SPEED * 0.6), 0.0, 1.0)
+	var lift := (0.11 + 0.12 * run) * clampf(speed / 1.5, 0.0, 1.0)
 	var fwd_dir := Vector2(local_vel.x, local_vel.z)
 	fwd_dir = fwd_dir.normalized() if fwd_dir.length() > 0.2 else Vector2(0, -1)
 	if grounded and speed > 0.3:
-		_phase += delta * (4.0 + speed * 1.1)
+		_phase += TAU * speed * delta / stride_full
+	# leaning: forward with speed, into acceleration, banking into turns (all smoothed)
+	if delta > 0.0 and not instant:
+		var acc := global_transform.basis.inverse() * ((_vel - _last_vel) / delta)
+		var al := spring_f(_accel_lean, _v_accel_lean, clampf(-acc.z * 0.03, -0.26, 0.26), 0.1, delta)
+		_accel_lean = al[0]
+		_v_accel_lean = al[1]
+		var yaw_rate := wrapf(yaw - _last_yaw, -PI, PI) / delta
+		_bank = lerpf(_bank, clampf(atan(speed * yaw_rate / 9.8), -0.35, 0.35), clampf(delta * 8.0, 0.0, 1.0))
+	_last_vel = _vel
+	_last_yaw = yaw
 	var stance := 0.13 + (0.05 if pose.has("aim") else 0.0)   # archers stand a little wider
 	var fr := _step_foot(_phase, stride, lift, fwd_dir, stance)
 	var fl := _step_foot(_phase + PI, stride, lift, fwd_dir, -stance)
@@ -254,22 +332,38 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	var dead := st != null and st.dead > 0
 	model.rotation.x = lerpf(model.rotation.x, -PI / 2.0 if dead else 0.0, a)
 	model.position.y = lerpf(model.position.y, 0.25 if dead else 0.0, a)
-	var breathe := sin(_t * 2.1) * 0.012
-	var sway := sin(_t * 0.55) * 0.025 * (1.0 - clampf(speed, 0.0, 1.0))
-	var bob := absf(sin(_phase)) * 0.045 * clampf(speed / Sim.WALK_SPEED, 0.0, 1.0) if grounded else 0.0
-	var run_lean := 0.12 * clampf(speed / Sim.SPRINT_SPEED, 0.0, 1.0) + (0.4 if dashing else 0.0)
+	var breathe := sin(_t * 1.6) * 0.01                                    # ~15 breaths a minute
+	var moving := clampf(speed / 1.5, 0.0, 1.0) if grounded else 0.0
+	var idle_shift := sin(_t * 0.9) * sin(_t * 0.31) * 0.03 * (1.0 - moving)   # a slow weight shift now and then
+	# walking: hips highest at mid-stance (twice a cycle), swaying toward the standing leg, turning with the swinging
+	# leg; running: the bob flips (lowest at stance) and grows, the sway shrinks
+	var bob := (-cos(2.0 * _phase) * lerpf(0.025, -0.04, run)) * moving
+	var sway := -sin(_phase) * lerpf(0.025, 0.008, run) * moving + idle_shift
+	var hip_yaw := sin(_phase) * lerpf(0.1, 0.14, run) * moving
+	var chest_yaw := -sin(_phase) * lerpf(0.12, 0.22, run) * moving   # the chest counter-rotates
+	var speed_lean := lerpf(0.05, 0.2, clampf(speed / Sim.SPRINT_SPEED, 0.0, 1.0)) * moving + (0.4 if dashing else 0.0)
+	var run_lean := speed_lean + _accel_lean
 	var pelvis := Vector3(sway, 0.95 - _crouch + bob, 0)
-	var low := Basis(Vector3.UP, _twist * 0.45) * Basis(Vector3.RIGHT, (_lean - run_lean) * 0.5)
-	var spine := Basis(Vector3.UP, _twist) * Basis(Vector3.RIGHT, _lean - run_lean)
+	var low := Basis(Vector3.UP, _twist * 0.3 + hip_yaw) * Basis(Vector3.BACK, _bank * 0.5) * Basis(Vector3.RIGHT, (_lean - run_lean) * 0.5)
+	var spine := Basis(Vector3.UP, _twist + chest_yaw) * Basis(Vector3.BACK, _bank) * Basis(Vector3.RIGHT, _lean - run_lean)
 	var waist := pelvis + low * Vector3(0, 0.2, 0)
 	var chest := waist + spine * Vector3(0, 0.24 + breathe, 0)
 	var sh_r := chest + spine * Vector3(0.235, 0.1, 0)
 	var sh_l := chest + spine * Vector3(-0.235, 0.1, 0)
-	# the shoulder rises a little when its arm is raised high
-	sh_r.y += clampf((_hand_r.y - sh_r.y) * 0.08, 0.0, 0.04)
-	sh_l.y += clampf((_hand_l.y - sh_l.y) * 0.08, 0.0, 0.04)
+	# clavicles: the shoulder shrugs up when its arm goes high and reaches forward on a punch or thrust
+	for side in [[1.0, _hand_r], [-1.0, _hand_l]]:
+		var hnd: Vector3 = side[1]
+		var shp := sh_r if side[0] > 0 else sh_l
+		var up := clampf((hnd.y - shp.y) * 0.12, -0.01, 0.05)
+		var fwd := clampf((-(hnd.z - shp.z) - 0.25) * 0.18, 0.0, 0.05)
+		shp += Vector3(0, up, -fwd)
+		if side[0] > 0:
+			sh_r = shp
+		else:
+			sh_l = shp
 	var neck := chest + spine * Vector3(0, 0.17, 0)
-	var head_basis := Basis(Vector3.UP, _twist + _look) * Basis(Vector3.RIGHT, (_lean - run_lean) * 0.3)
+	# the head stays steady: it undoes most of the gait's twist and keeps looking ahead
+	var head_basis := Basis(Vector3.UP, _twist + _look - chest_yaw * 0.8) * Basis(Vector3.RIGHT, (_lean - run_lean) * 0.3)
 	var head := neck + head_basis * Vector3(0, 0.15, 0)
 	var hip_r := pelvis + low * Vector3(0.1, -0.04, 0)
 	var hip_l := pelvis + low * Vector3(-0.1, -0.04, 0)
@@ -358,9 +452,14 @@ func _track_release(st: Sim.PlayerState, w: int, delta: float) -> void:
 ## Where the hands go (body frame), the weapon's direction and the way its flat faces, torso twist and lean, hip
 ## drop, head turn, the right elbow's pole, and a right-foot target for kicks. "aim" marks the archery stance.
 func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
-	var swing := sin(_phase) * clampf(speed / Sim.WALK_SPEED, 0.0, 1.4) * 0.22 if grounded else 0.0
-	var glance := sin(_t * 0.37) * sin(_t * 0.23) * 0.7 * (1.0 - clampf(speed, 0.0, 1.0))   # an idle look around
-	var p := { "hand_r": Vector3(0.27, 1.07 + 0.01 * sin(_t * 2.1), -0.1 - swing), "hand_l": Vector3(-0.27, 1.07, -0.1 + swing),
+	var mv_k := clampf(speed / 1.5, 0.0, 1.0) if grounded else 0.0
+	var run := clampf((speed - Sim.WALK_SPEED * 0.6) / (Sim.SPRINT_SPEED - Sim.WALK_SPEED * 0.6), 0.0, 1.0)
+	# each arm swings with the opposite leg (the right arm forward while the right foot is back)
+	var swing := cos(_phase) * lerpf(0.2, 0.32, run) * mv_k
+	var hand_y := lerpf(1.07, 1.22, run * mv_k)         # running: elbows bend toward 90 degrees
+	var hand_x := lerpf(0.27, 0.22, run * mv_k)
+	var glance := sin(_t * 0.37) * sin(_t * 0.23) * 0.22 * (1.0 - clampf(speed, 0.0, 1.0))   # an idle look around
+	var p := { "hand_r": Vector3(hand_x, hand_y + 0.006 * sin(_t * 1.6), -0.1 - swing), "hand_l": Vector3(-hand_x, hand_y, -0.1 + swing),
 		"wdir": Vector3(0, -0.3, -1), "wroll": Vector3(1, 0, 0), "twist": 0.0, "lean": 0.0, "crouch": 0.0, "look": glance }
 	if st == null or st.dead > 0:
 		return p
@@ -392,10 +491,28 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 		var mv := Weapons.move(w, st.combo)
 		var t := 1.0 - float(st.atk) / float(mv.swing)
 		var h := float(mv.windup) / float(mv.swing)
-		var k := _sample(_move_keys(mv.name, h, p), t)
+		var keys := _move_keys(mv.name, h, p)
+		var frame := 1.0 / float(mv.swing)
+		var k := _sample(keys, t, h)
+		# the kinetic chain: the body leads the arms by ~2 frames, the weapon trails the hand by ~1
+		var kb := _sample(keys, minf(t + 2.0 * frame, 1.0), h)
+		for key in ["twist", "lean", "crouch", "foot_r", "foot_l"]:
+			if kb.has(key):
+				k[key] = kb[key]
+		var kw := _sample(keys, maxf(t - frame, 0.0), h)
+		if kw.has("wdir"):
+			k.wdir = kw.wdir
 		for key in k.keys():
 			p[key] = k[key]
 		p.snap = true
+		# the blade's edge faces the way it's travelling through the strike
+		if w == Weapons.SWORD and t > h * 0.8 and t < h + 0.3:
+			var hv := (p.hand_r as Vector3) - _prev_hand_r
+			var wd := (p.wdir as Vector3).normalized()
+			var edge := hv - wd * hv.dot(wd)
+			if edge.length() > 0.002:
+				p.wroll = edge.normalized().cross(wd).normalized()
+		_prev_hand_r = p.hand_r
 		if not p.has("foot_l") and speed < 0.5:   # step the lead foot into the strike, settle back after
 			var step := _smooth(clampf(t / maxf(h, 0.01), 0.0, 1.0)) * (1.0 - _smooth(clampf((t - h - 0.3) / 0.4, 0.0, 1.0)))
 			p.foot_l = Vector3(-0.15, 0.0, -0.05 - 0.22 * step)
@@ -430,9 +547,10 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 			var nock := grip + Vector3(0.0, 0.0, 0.12)
 			if drawing:
 				p.hand_r = nock.lerp(anchor, _ease_draw(pull))
-			elif releasing:   # the hand follows through past the ear
+			elif releasing:   # the hand recoils back along the jaw past the ear; the bow arm kicks and settles
 				var f := clampf(1.0 - float(st.atk) / float(d.shot), 0.0, 1.0)
-				p.hand_r = anchor + Vector3(0.1, 0.03, 0.16) * _smooth(minf(f * 3.0, 1.0))
+				p.hand_r = anchor + Vector3(0.08, 0.03, 0.14) * (1.0 - pow(1.0 - minf(f * 3.0, 1.0), 3.0))
+				p.hand_l = grip + Vector3(0, -0.035, -0.02) * exp(-f * 5.0) * sin(minf(f * 8.0, PI))
 				p.snap = true
 			else:             # reach back to the quiver over the right shoulder, then come back to the string
 				var f := 1.0 - float(st.atk_cd) / float(int(d.cooldown) - int(d.shot))
@@ -503,14 +621,16 @@ func _move_keys(name: String, h: float, rest: Dictionary) -> Array:
 			return [[0.0, {"hand_l": Vector3(-0.1, 1.5, -0.3), "hand_r": Vector3(0.14, 1.46, -0.2), "twist": -0.25, "crouch": 0.05}],
 				[h * 0.5, {"hand_l": Vector3(-0.1, 1.47, -0.26), "twist": -0.2}],
 				[h, {"hand_l": Vector3(-0.04, 1.53, -0.74), "hand_r": Vector3(0.14, 1.47, -0.18), "twist": -0.45, "lean": -0.08, "crouch": 0.07}],
-				[minf(h + 0.22, 0.9), {"hand_l": Vector3(-0.1, 1.5, -0.32), "twist": -0.28, "lean": 0.0}],
+				[minf(h + 0.12, 0.9), {"hand_l": Vector3(-0.04, 1.53, -0.72), "twist": -0.42}],   # held out a moment
+				[minf(h + 0.34, 0.92), {"hand_l": Vector3(-0.1, 1.5, -0.32), "twist": -0.28, "lean": 0.0}],
 				[1.0, {"hand_l": Vector3(-0.1, 1.5, -0.3), "hand_r": Vector3(0.14, 1.46, -0.2), "twist": -0.25, "crouch": 0.05}]]
 		"cross":   # the rear (right) hand, driven by the hips and shoulders turning through; the back heel pivots
 			return [[0.0, {"hand_l": Vector3(-0.1, 1.5, -0.3), "hand_r": Vector3(0.14, 1.46, -0.2), "twist": -0.3, "crouch": 0.05}],
 				[h * 0.6, {"hand_r": Vector3(0.16, 1.44, -0.12), "twist": -0.4, "crouch": 0.08}],
 				[h, {"hand_r": Vector3(0.02, 1.52, -0.76), "hand_l": Vector3(-0.16, 1.48, -0.16), "twist": 0.55, "lean": -0.15, "crouch": 0.1,
 					"foot_r": Vector3(0.15, 0.03, 0.14)}],
-				[minf(h + 0.25, 0.9), {"hand_r": Vector3(0.12, 1.47, -0.3), "twist": 0.1, "lean": -0.05, "foot_r": Vector3(0.14, 0.0, 0.1)}],
+				[minf(h + 0.12, 0.9), {"hand_r": Vector3(0.03, 1.52, -0.74), "twist": 0.5}],   # held out a moment
+				[minf(h + 0.36, 0.92), {"hand_r": Vector3(0.12, 1.47, -0.3), "twist": 0.1, "lean": -0.05, "foot_r": Vector3(0.14, 0.0, 0.1)}],
 				[1.0, {"hand_l": Vector3(-0.1, 1.5, -0.3), "hand_r": Vector3(0.14, 1.46, -0.2), "twist": -0.25, "lean": 0.0, "crouch": 0.05,
 					"foot_r": Vector3(0.14, 0.0, 0.08)}]]
 		"kick":   # roundhouse: chamber the knee, pivot on the standing foot, lean back, whip the shin through, recover
@@ -523,8 +643,10 @@ func _move_keys(name: String, h: float, rest: Dictionary) -> Array:
 	return [[0.0, {}], [1.0, {}]]
 
 
-## The pose at time t: blend the two keys around it (smoothstep), carrying values forward from earlier keys.
-func _sample(keys: Array, t: float) -> Dictionary:
+## The pose at time t. Into the strike (the key at h) the extreme wind-up pose holds, then the strike covers the
+## last ~20% of the wind-up with a fast ease-out (most of the arc in its first half); other spans ease in-out. Hands
+## travel on arcs around their shoulder, not in straight lines through the body.
+func _sample(keys: Array, t: float, h := -1.0) -> Dictionary:
 	var acc := {}
 	var prev: Dictionary = {}
 	var prev_t := 0.0
@@ -537,11 +659,20 @@ func _sample(keys: Array, t: float) -> Dictionary:
 			prev = acc.duplicate()
 			prev_t = kt
 			continue
-		var f := _smooth(clampf((t - prev_t) / maxf(kt - prev_t, 0.001), 0.0, 1.0))
+		var x := clampf((t - prev_t) / maxf(kt - prev_t, 0.001), 0.0, 1.0)
+		var f := _smooth(x)
+		if h >= 0.0 and absf(kt - h) < 0.0001:   # the strike: hold the wind-up, then snap through with ease-out
+			var start := prev_t + (kt - prev_t) * 0.78
+			var s := clampf((t - start) / maxf(kt - start, 0.001), 0.0, 1.0)
+			f = 1.0 - pow(1.0 - s, 3.0)
+		elif h >= 0.0 and prev_t >= h - 0.0001:   # after the hit: ease-out into the follow-through and recovery
+			f = 1.0 - pow(1.0 - x, 2.0)
 		var out := prev.duplicate()
 		for key in kv.keys():
 			if prev.has(key):
-				if prev[key] is Vector3:
+				if key == "hand_r" or key == "hand_l":
+					out[key] = _arc_lerp(prev[key], kv[key], f, Vector3(0.235 if key == "hand_r" else -0.235, 1.47, 0.0))
+				elif prev[key] is Vector3:
 					out[key] = (prev[key] as Vector3).lerp(kv[key], f)
 				else:
 					out[key] = lerpf(prev[key], kv[key], f)
@@ -551,6 +682,18 @@ func _sample(keys: Array, t: float) -> Dictionary:
 
 func _smooth(x: float) -> float:
 	return x * x * (3.0 - 2.0 * x)
+
+
+## Move from a to b around `center` (the shoulder): angles and reach blend, so the hand sweeps on an arc.
+func _arc_lerp(a: Vector3, b: Vector3, f: float, center: Vector3) -> Vector3:
+	var da := a - center
+	var db := b - center
+	var ra := da.length()
+	var rb := db.length()
+	if ra < 0.01 or rb < 0.01:
+		return a.lerp(b, f)
+	var dir := da.normalized().slerp(db.normalized(), f) if da.normalized().dot(db.normalized()) > -0.98 else da.normalized().lerp(db.normalized(), f).normalized()
+	return center + dir * lerpf(ra, rb, f)
 
 
 # ================================================================ the rig

@@ -10,25 +10,28 @@ class_name Weapons
 enum { FISTS, CLUB, SWORD, BOW, SLING }
 const NAMES := ["Fists", "Club", "Sword", "Bow", "Slingshot"]
 const COMBO_WINDOW := 18   # ticks after a move ends in which pressing attack chains the next
+const CANCEL_AT := 0.35    # a combo can cancel into its next move once only this much of the recovery is left
 
+## Timings follow how souls-likes feel (readable wind-up, a very fast strike, a long committed recovery; the next
+## combo move can cancel in 65% of the way through the recovery).
 ## Melee moves: windup (ticks before the hit lands), swing (whole move), recover (extra cooldown after it),
 ## range (m), arc (degrees in front), damage, knock (m/s), lunge (m/s forward during the windup), anim (Pip's row),
 ## shape: "arc" sweep, "thrust" narrow stab, "smash" overhead with a ground shockwave (aoe metres around the impact).
 const DATA := [
 	{ "kind": "melee", "slow": 0.8, "moves": [
-		{ "name": "jab", "windup": 4, "swing": 14, "recover": 0, "range": 1.5, "arc": 50.0, "damage": 6, "knock": 1.0, "lunge": 2.0, "anim": "jab", "shape": "thrust" },
-		{ "name": "cross", "windup": 5, "swing": 16, "recover": 0, "range": 1.6, "arc": 55.0, "damage": 6, "knock": 1.5, "lunge": 2.5, "anim": "cross", "shape": "thrust" },
-		{ "name": "kick", "windup": 9, "swing": 26, "recover": 10, "range": 1.9, "arc": 80.0, "damage": 7, "knock": 3.5, "lunge": 1.5, "anim": "kick", "shape": "arc" },
+		{ "name": "jab", "windup": 7, "swing": 24, "recover": 0, "range": 1.5, "arc": 50.0, "damage": 6, "knock": 1.0, "lunge": 2.0, "anim": "jab", "shape": "thrust" },
+		{ "name": "cross", "windup": 9, "swing": 28, "recover": 0, "range": 1.6, "arc": 55.0, "damage": 6, "knock": 1.5, "lunge": 2.5, "anim": "cross", "shape": "thrust" },
+		{ "name": "kick", "windup": 14, "swing": 40, "recover": 8, "range": 1.9, "arc": 80.0, "damage": 7, "knock": 3.5, "lunge": 1.5, "anim": "kick", "shape": "arc" },
 	] },
 	{ "kind": "melee", "slow": 0.55, "moves": [
-		{ "name": "bash", "windup": 13, "swing": 30, "recover": 0, "range": 2.2, "arc": 120.0, "damage": 7, "knock": 3.5, "lunge": 2.5, "anim": "c_swing", "shape": "arc" },
-		{ "name": "backhand", "windup": 11, "swing": 28, "recover": 0, "range": 2.2, "arc": 120.0, "damage": 7, "knock": 3.5, "lunge": 2.0, "anim": "c_back", "shape": "arc" },
-		{ "name": "smash", "windup": 20, "swing": 42, "recover": 18, "range": 2.4, "arc": 70.0, "damage": 9, "knock": 6.0, "lunge": 1.5, "anim": "c_smash", "shape": "smash", "aoe": 2.3 },
+		{ "name": "bash", "windup": 24, "swing": 60, "recover": 0, "range": 2.2, "arc": 120.0, "damage": 7, "knock": 3.5, "lunge": 2.5, "anim": "c_swing", "shape": "arc" },
+		{ "name": "backhand", "windup": 22, "swing": 56, "recover": 0, "range": 2.2, "arc": 120.0, "damage": 7, "knock": 3.5, "lunge": 2.0, "anim": "c_back", "shape": "arc" },
+		{ "name": "smash", "windup": 34, "swing": 78, "recover": 10, "range": 2.4, "arc": 70.0, "damage": 9, "knock": 6.0, "lunge": 1.5, "anim": "c_smash", "shape": "smash", "aoe": 2.3 },
 	] },
 	{ "kind": "melee", "slow": 0.75, "moves": [
-		{ "name": "slash", "windup": 5, "swing": 17, "recover": 0, "range": 2.5, "arc": 100.0, "damage": 8, "knock": 1.5, "lunge": 4.0, "anim": "s_swing", "shape": "arc" },
-		{ "name": "backslash", "windup": 5, "swing": 17, "recover": 0, "range": 2.5, "arc": 100.0, "damage": 8, "knock": 1.5, "lunge": 4.0, "anim": "s_back", "shape": "arc" },
-		{ "name": "thrust", "windup": 9, "swing": 28, "recover": 14, "range": 3.3, "arc": 28.0, "damage": 10, "knock": 4.5, "lunge": 10.0, "anim": "s_smash", "shape": "thrust" },
+		{ "name": "slash", "windup": 12, "swing": 36, "recover": 0, "range": 2.5, "arc": 100.0, "damage": 8, "knock": 1.5, "lunge": 4.0, "anim": "s_swing", "shape": "arc" },
+		{ "name": "backslash", "windup": 11, "swing": 34, "recover": 0, "range": 2.5, "arc": 100.0, "damage": 8, "knock": 1.5, "lunge": 4.0, "anim": "s_back", "shape": "arc" },
+		{ "name": "thrust", "windup": 16, "swing": 44, "recover": 8, "range": 3.3, "arc": 28.0, "damage": 10, "knock": 4.5, "lunge": 10.0, "anim": "s_smash", "shape": "thrust" },
 	] },
 	{ "kind": "ranged", "draw": 45, "min_speed": 22.0, "max_speed": 58.0, "min_damage": 6, "max_damage": 10,
 	  "gravity": 9.8, "shot": 16, "cooldown": 28, "slow": 0.35, "projectile": "arrow", "ammo": "arrows" },
