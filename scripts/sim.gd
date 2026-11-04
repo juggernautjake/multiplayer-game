@@ -3,7 +3,8 @@
 ## server and corrections are rare and tiny. No randomness, no wall-clock time, only fixed DT steps.
 class_name Sim
 
-enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64, ATTACK = 128, INTERACT = 256 }
+## FACE_CAM: face where the camera looks (aiming, first person) instead of the way you walk.
+enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64, ATTACK = 128, INTERACT = 256, FACE_CAM = 512 }
 
 ## What a step reports, for the server to act on (hit test, launch a projectile) and the client to show.
 enum Ev { NONE, MELEE_HIT, SHOT }
@@ -20,11 +21,13 @@ const DASH_SPEED := 24.0
 const DASH_TICKS := 9         # 0.15 s burst
 const DASH_COOLDOWN := 54     # 0.9 s
 const RADIUS := 0.4           # the player's collision radius
+const TURN_RATE := 14.0       # rad/s: how fast you turn to face the way you walk
 const MAX_HP := 100
 const RESPAWN_TICKS := 180    # 3 s on the ground after dying
 
 
-## One tick of player intent. yaw: facing in radians, 0 = looking down -Z (chosen by the camera). pitch: aim up/down
+## One tick of player intent. yaw: the camera's heading (radians, 0 = looking down -Z): WASD move relative to it.
+## The body's facing is worked out in the simulation (it turns toward the way you walk). pitch: aim up/down
 ## (for projectiles). weapon: the slot wanted. view_tick: the tick the player was seeing other players at (the server
 ## rewinds to it for melee hits: lag compensation).
 class PlayerInput:
@@ -103,7 +106,6 @@ static func spawn_state(slot: int) -> PlayerState:
 ## Advance a player one fixed tick with this input, in place. Returns what happened (Ev).
 static func step(s: PlayerState, inp: PlayerInput) -> int:
 	var ev := _combat(s, inp)
-	s.yaw = inp.yaw
 	var alive := s.dead == 0
 
 	var f := 0.0
@@ -112,10 +114,10 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 	if inp.buttons & Btn.BACK: f -= 1.0
 	if inp.buttons & Btn.RIGHT: r += 1.0
 	if inp.buttons & Btn.LEFT: r -= 1.0
-	var sy := sin(s.yaw)
-	var cy := cos(s.yaw)
-	# forward is -Z at yaw 0, right is +X
-	var wish := Vector2(-sy * f + cy * r, -cy * f - sy * r)
+	# WASD relative to the camera: forward is -Z at yaw 0, right is +X
+	var csy := sin(inp.yaw)
+	var ccy := cos(inp.yaw)
+	var wish := Vector2(-csy * f + ccy * r, -ccy * f - csy * r)
 	var w := Weapons.get_data(s.weapon)
 	var mv := Weapons.move(s.weapon, s.combo)
 	var busy: bool = s.charge > 0 or (s.atk > 0 and w.kind == "melee")
@@ -126,6 +128,9 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 		wish = Vector2.ZERO
 	if wish.length_squared() > 0.0:
 		wish = wish.normalized() * speed
+	_face(s, inp, wish, w, mv, alive)
+	var sy := sin(s.yaw)
+	var cy := cos(s.yaw)
 
 	if s.dash_cd > 0:
 		s.dash_cd -= 1
@@ -152,8 +157,9 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 			h += d.normalized() * accel
 		s.vel.x = h.x
 		s.vel.z = h.y
-		# a melee swing steps into the blow: during the wind-up, drive forward at the weapon's lunge speed
-		if alive and s.grounded and w.kind == "melee" and s.atk > int(mv.swing) - int(mv.windup):
+		# a melee swing steps into the blow only if you're moving: then, during the wind-up, drive forward at the
+		# weapon's lunge speed; with no movement keys you attack where you stand
+		if alive and s.grounded and w.kind == "melee" and s.atk > int(mv.swing) - int(mv.windup) and wish.length_squared() > 0.0:
 			s.vel.x = -sy * float(mv.lunge)
 			s.vel.z = -cy * float(mv.lunge)
 
@@ -237,6 +243,27 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 				s.rocks -= 1
 			ev = Ev.SHOT
 	return ev
+
+
+## Which way the body faces: where the camera looks while aiming / drawing / in first person; otherwise it turns
+## toward the way you walk. A melee swing is committed to its direction, except that pressing a direction as it starts
+## turns you to it.
+static func _face(s: PlayerState, inp: PlayerInput, wish: Vector2, w: Dictionary, mv: Dictionary, alive: bool) -> void:
+	if not alive:
+		return
+	var moving := wish.length_squared() > 0.0
+	var want := atan2(-wish.x, -wish.y) if moving else s.yaw
+	if inp.buttons & Btn.FACE_CAM or s.charge > 0:
+		s.yaw = inp.aim_yaw
+		return
+	if w.kind == "melee" and s.atk > 0:
+		if s.atk == int(mv.swing) and moving:
+			s.yaw = want
+		return
+	if moving:
+		var d := wrapf(want - s.yaw, -PI, PI)
+		var step := TURN_RATE * Config.DT
+		s.yaw = wrapf(s.yaw + clampf(d, -step, step), -PI, PI)
 
 
 ## The player is an upright cylinder (radius RADIUS) against the pillars: land on a top when coming down onto it,

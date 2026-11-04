@@ -20,7 +20,7 @@ var avatars := {}  # id -> Node3D
 var cam_yaw := 0.0
 var cam_pitch := -0.25
 var view := View.THIRD
-var cam_dist := 6.0
+var cam_dist := 4.6
 var menu: Control
 var hud: Label
 var status_label: Label
@@ -37,6 +37,8 @@ var bot_mode := ""
 var weapon_slot := 0
 var aim_pitch := 0.0
 var aim_yaw := 0.0
+var cam_focus := Vector3.INF    # smoothed point the camera orbits
+var cam_shoulder := 0.3
 var projs := {}            # server projectile id -> { node, kind, tick0, pos0, vel0, g, end_tick, end_pos, stuck, local_t0 }
 var local_shots: Array = []  # our own shots drawn at once, waiting for the server's launch to give them an id
 var dummies: Array = []    # Dummy nodes, index i = target id -(i+1)
@@ -287,7 +289,7 @@ func _process(_delta: float) -> void:
 		if id == net.my_id and net.predicted != null:
 			av.visible = true
 			av.position = net.own_draw_position(frac)
-			av.yaw = cam_yaw
+			av.yaw = net.predicted.yaw
 			av.grounded = net.predicted.grounded
 			av.dashing = net.predicted.dash_ticks > 0
 			av.state = net.predicted
@@ -310,11 +312,15 @@ func _process(_delta: float) -> void:
 		me = (avatars[net.my_id] as Node3D).position
 	aiming = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	cam.fov = lerpf(cam.fov, 46.0 if aiming else 70.0, clampf(_delta * 12.0, 0.0, 1.0))
+	# the camera follows a smoothed focus point: steady, without lagging behind fast moves
+	cam_focus = me if cam_focus == Vector3.INF else cam_focus.lerp(me, 1.0 - exp(-_delta * 18.0))
 	if view == View.FIRST:
 		cam.position = me + Vector3(0, EYE_HEIGHT, 0)
 		cam.rotation = Vector3(cam_pitch, cam_yaw, 0)
 	else:
-		var focus := me + Vector3(0, CAM_HEIGHT, 0) + Vector3(cos(cam_yaw), 0, -sin(cam_yaw)) * 0.55  # over the right shoulder
+		var shoulder := 0.6 if aiming or (net.predicted != null and net.predicted.charge > 0) else 0.3
+		cam_shoulder = lerpf(cam_shoulder, shoulder, 1.0 - exp(-_delta * 10.0))
+		var focus := cam_focus + Vector3(0, CAM_HEIGHT, 0) + Vector3(cos(cam_yaw), 0, -sin(cam_yaw)) * cam_shoulder
 		var back := Vector3(sin(cam_yaw) * cos(cam_pitch), -sin(cam_pitch), cos(cam_yaw) * cos(cam_pitch))
 		var dist := cam_dist * (0.55 if aiming else 1.0)
 		var hit := WorldLayout.ray_hit(focus, back, dist)  # pull in so a pillar never hides the player
@@ -368,6 +374,7 @@ func _sample_input() -> Array:
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and Time.get_ticks_msec() > attack_block_until:
 			b |= Sim.Btn.ATTACK
 		if Input.is_physical_key_pressed(KEY_E): b |= Sim.Btn.INTERACT
+		if view == View.FIRST or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT): b |= Sim.Btn.FACE_CAM
 	return [b, cam_yaw, aim_pitch, weapon_slot, aim_yaw]
 
 
@@ -447,7 +454,7 @@ func _bot_input() -> Array:
 			name_edit.text, net.latest_tick, net.predicted.pos.x, net.predicted.pos.y, net.predicted.pos.z,
 			net.roster.size(), net.ping_ms(), net.corrections, int(net.interp_delay * Config.DT * 1000.0),
 			100.0 * net.extrap_frames / maxf(net.drawn_frames, 1.0)])
-	return [b, cam_yaw, 0.0, weapon_slot]
+	return [b | Sim.Btn.FACE_CAM, cam_yaw, 0.0, weapon_slot]
 
 
 ## Fighting test bot: walk up to the middle dummy, then use each weapon on it for 6 s (club, sword from close up;
@@ -512,7 +519,7 @@ func _bot_fight() -> Array:
 		pitch = aim_pitch
 		if (bot_t % 70) < 55 and absf(dist - want) < 1.0:
 			b |= Sim.Btn.ATTACK
-		return [b, cam_yaw, pitch, weapon_slot, aim_yaw]
+		return [b | Sim.Btn.FACE_CAM, cam_yaw, pitch, weapon_slot, aim_yaw]
 	else:
 		var m := Weapons.muzzle(me, cam_yaw)
 		var sd := Weapons.shot(weapon_slot, int(Weapons.get_data(weapon_slot).draw))
@@ -524,7 +531,7 @@ func _bot_fight() -> Array:
 		pitch = atan((v * v - sqrt(maxf(disc, 0.0))) / (g * dx)) if dx > 0.1 else 0.0
 		if (bot_t % 70) < 55 and absf(dist - want) < 1.5:
 			b |= Sim.Btn.ATTACK   # hold to draw, then let go
-	return [b, cam_yaw, pitch, weapon_slot]
+	return [b | Sim.Btn.FACE_CAM, cam_yaw, pitch, weapon_slot]
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -534,8 +541,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if mm and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var sens := mouse_sens * (0.55 if aiming else 1.0)
 		cam_yaw = wrapf(cam_yaw - mm.relative.x * sens, -PI, PI)
-		var lo := -1.45 if view == View.FIRST else -1.2
-		var hi := 1.45 if view == View.FIRST else 0.5
+		var lo := -1.45 if view == View.FIRST else -1.25
+		var hi := 1.45 if view == View.FIRST else 0.85
 		cam_pitch = clampf(cam_pitch - mm.relative.y * sens, lo, hi)
 	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_TAB and net.predicted != null:
 		for k in range(1, Weapons.NAMES.size() + 1):   # next weapon you own

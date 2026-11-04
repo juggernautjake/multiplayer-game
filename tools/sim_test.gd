@@ -68,5 +68,29 @@ func _init() -> void:
 		Sim.step(b, Sim.PlayerInput.new(i, btn, i * 0.013))
 	check(a.pos == b.pos and a.vel == b.vel, "same inputs, same result")
 
+	# 6) attacking with no movement keys stays in place; attacking while walking steps into it
+	for w in [Weapons.FISTS, Weapons.CLUB, Weapons.SWORD]:
+		var st := Sim.PlayerState.new()
+		st.owned = 0b11111
+		st.weapon = w
+		var p0 := st.pos
+		for i in 120:
+			Sim.step(st, Sim.PlayerInput.new(i, Sim.Btn.ATTACK if i % 3 == 0 else 0, 0.0, 0.0, w))
+		check(st.pos.distance_to(p0) < 0.001, "%s combo with no keys held: stays put (moved %.3f m)" % [Weapons.NAMES[w], st.pos.distance_to(p0)])
+		var mv := Sim.PlayerState.new()
+		mv.owned = 0b11111
+		mv.weapon = w
+		for i in 20:
+			Sim.step(mv, Sim.PlayerInput.new(i, Sim.Btn.FORWARD | (Sim.Btn.ATTACK if i == 0 else 0), 0.0, 0.0, w))
+		check(mv.pos.z < -0.3, "%s swing while walking: steps forward (%.2f m)" % [Weapons.NAMES[w], -mv.pos.z])
+
+	# 7) walking turns the body toward the way you go; aiming faces the camera
+	var f := Sim.PlayerState.new()
+	for i in 60:
+		Sim.step(f, Sim.PlayerInput.new(i, Sim.Btn.RIGHT, 0.0))
+	check(absf(wrapf(f.yaw - (-PI / 2.0), -PI, PI)) < 0.01, "walking right turns to face right (yaw %.2f)" % f.yaw)
+	Sim.step(f, Sim.PlayerInput.new(61, Sim.Btn.FACE_CAM, 0.0, 0.0, 0, 0, 1.0))
+	check(absf(f.yaw - 1.0) < 0.001, "aiming faces where the camera looks")
+
 	print("%d failed" % fails)
 	quit(1 if fails else 0)

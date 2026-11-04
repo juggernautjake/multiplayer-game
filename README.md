@@ -13,9 +13,10 @@ A 3D online multiplayer game in **Godot 4** (GDScript). This first stage is the 
 
 | Key | Action |
 |---|---|
-| WASD, Shift, Space, Q | move, sprint, jump, dash |
-| Left mouse | attack; click again during a move for the combo; hold to draw a bow or slingshot, let go to shoot |
-| Right mouse | aim (zoom in, finer mouse) |
+| Mouse | orbit the camera around you (action-RPG style, like Valheim / Dark Souls) |
+| WASD, Shift, Space, Q | move relative to the camera (you turn to face the way you walk), sprint, jump, dash |
+| Left mouse | attack the way you face (in place, or stepping into it if you're moving); click again for the combo; hold to draw a bow or slingshot, let go to shoot |
+| Right mouse | aim: face where the camera looks, zoom in, finer mouse |
 | E | pick up the weapon you're standing at (ammo is picked up by walking over it) |
 | 1-5 / Tab | fists, club, sword, bow, slingshot (the ones you have) |
 | V, mouse wheel | first / third person, camera distance |

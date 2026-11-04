@@ -10,12 +10,11 @@ var cam: Camera3D
 
 # [label, weapon, combo, t through the move (or -1 = idle), charge fraction (ranged)]
 const POSES := [
-	["sword idle", Weapons.SWORD, 0, -1.0, 0.0], ["slash windup", Weapons.SWORD, 0, 0.0, 0.0], ["slash hit", Weapons.SWORD, 0, 0.3, 0.0],
-	["backslash hit", Weapons.SWORD, 1, 0.3, 0.0], ["thrust hit", Weapons.SWORD, 2, 0.33, 0.0],
-	["club idle", Weapons.CLUB, 0, -1.0, 0.0], ["bash windup", Weapons.CLUB, 0, 0.05, 0.0], ["bash hit", Weapons.CLUB, 0, 0.44, 0.0],
-	["smash raised", Weapons.CLUB, 2, 0.36, 0.0], ["smash hit", Weapons.CLUB, 2, 0.5, 0.0],
-	["bow idle", Weapons.BOW, 0, -1.0, 0.0], ["bow full draw", Weapons.BOW, 0, -1.0, 1.0],
-	["sling draw", Weapons.SLING, 0, -1.0, 1.0], ["jab", Weapons.FISTS, 0, 0.3, 0.0], ["kick", Weapons.FISTS, 2, 0.36, 0.0],
+	["sword idle", Weapons.SWORD, 0, -1.0, 0.0], ["slash hit", Weapons.SWORD, 0, 0.3, 0.0], ["thrust hit", Weapons.SWORD, 2, 0.33, 0.0],
+	["club idle", Weapons.CLUB, 0, -1.0, 0.0], ["smash raised", Weapons.CLUB, 2, 0.36, 0.0],
+	["bow idle", Weapons.BOW, 0, -1.0, 0.0], ["bow draw 40%", Weapons.BOW, 0, -1.0, 0.4], ["bow full draw", Weapons.BOW, 0, -1.0, 1.0],
+	["sling idle", Weapons.SLING, 0, -1.0, 0.0], ["sling half", Weapons.SLING, 0, -1.0, 0.5], ["sling full", Weapons.SLING, 0, -1.0, 1.0],
+	["jab", Weapons.FISTS, 0, 0.3, 0.0], ["kick", Weapons.FISTS, 2, 0.36, 0.0], ["unarmed idle", Weapons.FISTS, 0, -1.0, 0.0], ["bow side view", Weapons.BOW, 0, -1.0, 1.0],
 ]
 
 
@@ -52,6 +51,11 @@ func _init() -> void:
 			st.atk = maxi(1, int(round(float(mv.swing) * (1.0 - float(p[3])))))
 		if float(p[4]) > 0.0:
 			st.charge = int(float(Weapons.get_data(st.weapon).draw) * float(p[4]))
+		st.owned = 0b11111
+		st.arrows = 10
+		st.rocks = 10
+		if p[0] == "bow side view":
+			f.yaw = view_yaw - PI / 2.0
 		f.state = st
 		root.add_child(f)
 		figs.append(f)
