@@ -59,6 +59,11 @@ func _ready() -> void:
 	_build_ui()
 	if args.has("name"):
 		name_edit.text = str(args["name"])
+	if args.has("netsim"):  # --netsim ping_ms,jitter_ms,loss_percent: test this client over a bad connection
+		var p := str(args["netsim"]).split(",")
+		net.sim_lat_ms = float(p[0])
+		net.sim_jit_ms = float(p[1]) if p.size() > 1 else 0.0
+		net.sim_loss = float(p[2]) / 100.0 if p.size() > 2 else 0.0
 	if args.has("port"):
 		port_edit.text = str(args["port"])
 	if args.has("host"):
@@ -204,7 +209,9 @@ func _process(_delta: float) -> void:
 		if id == net.my_id and net.predicted != null:
 			av.visible = true
 			av.position = net.own_draw_position(frac)
-			av.rotation.y = cam_yaw
+			av.yaw = cam_yaw
+			av.grounded = net.predicted.grounded
+			av.dashing = net.predicted.dash_ticks > 0
 			av.model.visible = view == View.THIRD
 		else:
 			var d := net.remote_draw(id, frac)
@@ -213,8 +220,10 @@ func _process(_delta: float) -> void:
 				continue
 			av.visible = true
 			av.position = d[0]
-			av.rotation.y = d[1]
-		av.animate(_delta)
+			av.yaw = d[1]
+			av.grounded = d[2]
+			av.dashing = d[3]
+		av.animate(_delta, cam)
 
 	var me := Vector3.ZERO
 	if avatars.has(net.my_id):
@@ -238,10 +247,12 @@ func _process(_delta: float) -> void:
 		var dash := "ready"
 		if net.predicted != null and net.predicted.dash_cd > 0:
 			dash = "%.1f s" % (net.predicted.dash_cd * Config.DT)
-		hud.text = "%s   players %d   ping %d ms   fps %d   view %s   dash %s   corrections %d" % [
+		var extrap := 100.0 * net.extrap_frames / maxf(net.drawn_frames, 1.0)
+		hud.text = "%s   players %d   ping %d ms   fps %d   view %s   dash %s\nnet: corrections %d   others drawn %d ms behind   guessed %.1f%%" % [
 			"HOST" if multiplayer.multiplayer_peer and multiplayer.is_server() else "CLIENT",
 			net.roster.size(), net.ping_ms(), Engine.get_frames_per_second(),
-			"1st person" if view == View.FIRST else "3rd person", dash, net.corrections]
+			"1st person" if view == View.FIRST else "3rd person", dash, net.corrections,
+			int(net.interp_delay * Config.DT * 1000.0), extrap]
 		if host_info != "" and multiplayer.multiplayer_peer and multiplayer.is_server():
 			hud.text += "\n\n" + host_info
 
@@ -277,9 +288,10 @@ func _bot_input() -> Array:
 	if bot_t % 90 == 45: b |= Sim.Btn.JUMP
 	if bot_t % 150 == 100: b |= Sim.Btn.DASH
 	if bot_t % 120 == 0 and net.predicted != null:
-		print("[bot %s] tick %d  pos (%.1f, %.1f, %.1f)  sees %d players  ping %d ms  corrections %d" % [
+		print("[bot %s] tick %d  pos (%.1f, %.1f, %.1f)  sees %d players  ping %d ms  corrections %d  others %d ms behind  guessed %.1f%%" % [
 			name_edit.text, net.latest_tick, net.predicted.pos.x, net.predicted.pos.y, net.predicted.pos.z,
-			net.roster.size(), net.ping_ms(), net.corrections])
+			net.roster.size(), net.ping_ms(), net.corrections, int(net.interp_delay * Config.DT * 1000.0),
+			100.0 * net.extrap_frames / maxf(net.drawn_frames, 1.0)])
 	return [b, cam_yaw]
 
 

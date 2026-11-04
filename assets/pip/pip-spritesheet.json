@@ -1,0 +1,5325 @@
+{
+ "character": "Pip the Peasant",
+ "outfit": "peasant",
+ "cell": {
+  "w": 64,
+  "h": 64
+ },
+ "anchor": {
+  "x": 32,
+  "y": 58,
+  "note": "the feet touch the ground here in every cell"
+ },
+ "directions": {
+  "drawn": [
+   "S",
+   "SE",
+   "E",
+   "NE",
+   "N"
+  ],
+  "mirrored": {
+   "SW": "SE",
+   "W": "E",
+   "NW": "NE"
+  }
+ },
+ "animations": [
+  {
+   "name": "idle",
+   "group": "Moving",
+   "label": "Idle · breathing",
+   "dir": "S",
+   "row": 0,
+   "frames": 6,
+   "durationsMs": [
+    260,
+    200,
+    260,
+    260,
+    200,
+    260
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "idle",
+   "group": "Moving",
+   "label": "Idle · breathing",
+   "dir": "SE",
+   "row": 1,
+   "frames": 6,
+   "durationsMs": [
+    260,
+    200,
+    260,
+    260,
+    200,
+    260
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "idle",
+   "group": "Moving",
+   "label": "Idle · breathing",
+   "dir": "E",
+   "row": 2,
+   "frames": 6,
+   "durationsMs": [
+    260,
+    200,
+    260,
+    260,
+    200,
+    260
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "idle",
+   "group": "Moving",
+   "label": "Idle · breathing",
+   "dir": "NE",
+   "row": 3,
+   "frames": 6,
+   "durationsMs": [
+    260,
+    200,
+    260,
+    260,
+    200,
+    260
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "idle",
+   "group": "Moving",
+   "label": "Idle · breathing",
+   "dir": "N",
+   "row": 4,
+   "frames": 6,
+   "durationsMs": [
+    260,
+    200,
+    260,
+    260,
+    200,
+    260
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "walk",
+   "group": "Moving",
+   "label": "Walk",
+   "dir": "S",
+   "row": 5,
+   "frames": 8,
+   "durationsMs": [
+    105,
+    105,
+    105,
+    105,
+    105,
+    105,
+    105,
+    105
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "walk",
+   "group": "Moving",
+   "label": "Walk",
+   "dir": "SE",
+   "row": 6,
+   "frames": 8,
+   "durationsMs": [
+    105,
+    105,
+    105,
+    105,
+    105,
+    105,
+    105,
+    105
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "walk",
+   "group": "Moving",
+   "label": "Walk",
+   "dir": "E",
+   "row": 7,
+   "frames": 8,
+   "durationsMs": [
+    105,
+    105,
+    105,
+    105,
+    105,
+    105,
+    105,
+    105
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "walk",
+   "group": "Moving",
+   "label": "Walk",
+   "dir": "NE",
+   "row": 8,
+   "frames": 8,
+   "durationsMs": [
+    105,
+    105,
+    105,
+    105,
+    105,
+    105,
+    105,
+    105
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "walk",
+   "group": "Moving",
+   "label": "Walk",
+   "dir": "N",
+   "row": 9,
+   "frames": 8,
+   "durationsMs": [
+    105,
+    105,
+    105,
+    105,
+    105,
+    105,
+    105,
+    105
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "run",
+   "group": "Moving",
+   "label": "Run (double-tap)",
+   "dir": "S",
+   "row": 10,
+   "frames": 8,
+   "durationsMs": [
+    68,
+    68,
+    68,
+    68,
+    68,
+    68,
+    68,
+    68
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "run",
+   "group": "Moving",
+   "label": "Run (double-tap)",
+   "dir": "SE",
+   "row": 11,
+   "frames": 8,
+   "durationsMs": [
+    68,
+    68,
+    68,
+    68,
+    68,
+    68,
+    68,
+    68
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "run",
+   "group": "Moving",
+   "label": "Run (double-tap)",
+   "dir": "E",
+   "row": 12,
+   "frames": 8,
+   "durationsMs": [
+    68,
+    68,
+    68,
+    68,
+    68,
+    68,
+    68,
+    68
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "run",
+   "group": "Moving",
+   "label": "Run (double-tap)",
+   "dir": "NE",
+   "row": 13,
+   "frames": 8,
+   "durationsMs": [
+    68,
+    68,
+    68,
+    68,
+    68,
+    68,
+    68,
+    68
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "run",
+   "group": "Moving",
+   "label": "Run (double-tap)",
+   "dir": "N",
+   "row": 14,
+   "frames": 8,
+   "durationsMs": [
+    68,
+    68,
+    68,
+    68,
+    68,
+    68,
+    68,
+    68
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "dash",
+   "group": "Moving",
+   "label": "Dash (locked: later)",
+   "dir": "S",
+   "row": 15,
+   "frames": 7,
+   "durationsMs": [
+    70,
+    60,
+    48,
+    70,
+    90,
+    72,
+    110
+   ],
+   "events": [
+    null,
+    "dash",
+    null,
+    null,
+    "skid",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "dash",
+   "group": "Moving",
+   "label": "Dash (locked: later)",
+   "dir": "SE",
+   "row": 16,
+   "frames": 7,
+   "durationsMs": [
+    70,
+    60,
+    48,
+    70,
+    90,
+    72,
+    110
+   ],
+   "events": [
+    null,
+    "dash",
+    null,
+    null,
+    "skid",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "dash",
+   "group": "Moving",
+   "label": "Dash (locked: later)",
+   "dir": "E",
+   "row": 17,
+   "frames": 7,
+   "durationsMs": [
+    70,
+    60,
+    48,
+    70,
+    90,
+    72,
+    110
+   ],
+   "events": [
+    null,
+    "dash",
+    null,
+    null,
+    "skid",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "dash",
+   "group": "Moving",
+   "label": "Dash (locked: later)",
+   "dir": "NE",
+   "row": 18,
+   "frames": 7,
+   "durationsMs": [
+    70,
+    60,
+    48,
+    70,
+    90,
+    72,
+    110
+   ],
+   "events": [
+    null,
+    "dash",
+    null,
+    null,
+    "skid",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "dash",
+   "group": "Moving",
+   "label": "Dash (locked: later)",
+   "dir": "N",
+   "row": 19,
+   "frames": 7,
+   "durationsMs": [
+    70,
+    60,
+    48,
+    70,
+    90,
+    72,
+    110
+   ],
+   "events": [
+    null,
+    "dash",
+    null,
+    null,
+    "skid",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "jumpStart",
+   "group": "Jumping",
+   "label": "Jump · take-off",
+   "dir": "S",
+   "row": 20,
+   "frames": 3,
+   "durationsMs": [
+    40,
+    60,
+    60
+   ],
+   "events": [
+    null,
+    null,
+    "jump"
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "jumpStart",
+   "group": "Jumping",
+   "label": "Jump · take-off",
+   "dir": "SE",
+   "row": 21,
+   "frames": 3,
+   "durationsMs": [
+    40,
+    60,
+    60
+   ],
+   "events": [
+    null,
+    null,
+    "jump"
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "jumpStart",
+   "group": "Jumping",
+   "label": "Jump · take-off",
+   "dir": "E",
+   "row": 22,
+   "frames": 3,
+   "durationsMs": [
+    40,
+    60,
+    60
+   ],
+   "events": [
+    null,
+    null,
+    "jump"
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "jumpStart",
+   "group": "Jumping",
+   "label": "Jump · take-off",
+   "dir": "NE",
+   "row": 23,
+   "frames": 3,
+   "durationsMs": [
+    40,
+    60,
+    60
+   ],
+   "events": [
+    null,
+    null,
+    "jump"
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "jumpStart",
+   "group": "Jumping",
+   "label": "Jump · take-off",
+   "dir": "N",
+   "row": 24,
+   "frames": 3,
+   "durationsMs": [
+    40,
+    60,
+    60
+   ],
+   "events": [
+    null,
+    null,
+    "jump"
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "air",
+   "group": "Jumping",
+   "label": "Jump · rise, hang, fall",
+   "dir": "S",
+   "row": 25,
+   "frames": 3,
+   "durationsMs": [
+    90,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "air",
+   "group": "Jumping",
+   "label": "Jump · rise, hang, fall",
+   "dir": "SE",
+   "row": 26,
+   "frames": 3,
+   "durationsMs": [
+    90,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "air",
+   "group": "Jumping",
+   "label": "Jump · rise, hang, fall",
+   "dir": "E",
+   "row": 27,
+   "frames": 3,
+   "durationsMs": [
+    90,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "air",
+   "group": "Jumping",
+   "label": "Jump · rise, hang, fall",
+   "dir": "NE",
+   "row": 28,
+   "frames": 3,
+   "durationsMs": [
+    90,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "air",
+   "group": "Jumping",
+   "label": "Jump · rise, hang, fall",
+   "dir": "N",
+   "row": 29,
+   "frames": 3,
+   "durationsMs": [
+    90,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "land",
+   "group": "Jumping",
+   "label": "Jump · land",
+   "dir": "S",
+   "row": 30,
+   "frames": 3,
+   "durationsMs": [
+    70,
+    70,
+    70
+   ],
+   "events": [
+    "land",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "land",
+   "group": "Jumping",
+   "label": "Jump · land",
+   "dir": "SE",
+   "row": 31,
+   "frames": 3,
+   "durationsMs": [
+    70,
+    70,
+    70
+   ],
+   "events": [
+    "land",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "land",
+   "group": "Jumping",
+   "label": "Jump · land",
+   "dir": "E",
+   "row": 32,
+   "frames": 3,
+   "durationsMs": [
+    70,
+    70,
+    70
+   ],
+   "events": [
+    "land",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "land",
+   "group": "Jumping",
+   "label": "Jump · land",
+   "dir": "NE",
+   "row": 33,
+   "frames": 3,
+   "durationsMs": [
+    70,
+    70,
+    70
+   ],
+   "events": [
+    "land",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "land",
+   "group": "Jumping",
+   "label": "Jump · land",
+   "dir": "N",
+   "row": 34,
+   "frames": 3,
+   "durationsMs": [
+    70,
+    70,
+    70
+   ],
+   "events": [
+    "land",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "jab",
+   "group": "Ground combo",
+   "label": "Punch 1 · jab (standing)",
+   "dir": "S",
+   "row": 35,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    40,
+    70,
+    60,
+    80
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "jab",
+   "group": "Ground combo",
+   "label": "Punch 1 · jab (standing)",
+   "dir": "SE",
+   "row": 36,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    40,
+    70,
+    60,
+    80
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "jab",
+   "group": "Ground combo",
+   "label": "Punch 1 · jab (standing)",
+   "dir": "E",
+   "row": 37,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    40,
+    70,
+    60,
+    80
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "jab",
+   "group": "Ground combo",
+   "label": "Punch 1 · jab (standing)",
+   "dir": "NE",
+   "row": 38,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    40,
+    70,
+    60,
+    80
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "jab",
+   "group": "Ground combo",
+   "label": "Punch 1 · jab (standing)",
+   "dir": "N",
+   "row": 39,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    40,
+    70,
+    60,
+    80
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "cross",
+   "group": "Ground combo",
+   "label": "Punch 2 · cross (standing)",
+   "dir": "S",
+   "row": 40,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    80,
+    60,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "cross",
+   "group": "Ground combo",
+   "label": "Punch 2 · cross (standing)",
+   "dir": "SE",
+   "row": 41,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    80,
+    60,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "cross",
+   "group": "Ground combo",
+   "label": "Punch 2 · cross (standing)",
+   "dir": "E",
+   "row": 42,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    80,
+    60,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "cross",
+   "group": "Ground combo",
+   "label": "Punch 2 · cross (standing)",
+   "dir": "NE",
+   "row": 43,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    80,
+    60,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "cross",
+   "group": "Ground combo",
+   "label": "Punch 2 · cross (standing)",
+   "dir": "N",
+   "row": 44,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    80,
+    60,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "kick",
+   "group": "Ground combo",
+   "label": "Kick · finisher (standing)",
+   "dir": "S",
+   "row": 45,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    50,
+    100,
+    70,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    "plant",
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "kick",
+   "group": "Ground combo",
+   "label": "Kick · finisher (standing)",
+   "dir": "SE",
+   "row": 46,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    50,
+    100,
+    70,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    "plant",
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "kick",
+   "group": "Ground combo",
+   "label": "Kick · finisher (standing)",
+   "dir": "E",
+   "row": 47,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    50,
+    100,
+    70,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    "plant",
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "kick",
+   "group": "Ground combo",
+   "label": "Kick · finisher (standing)",
+   "dir": "NE",
+   "row": 48,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    50,
+    100,
+    70,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    "plant",
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "kick",
+   "group": "Ground combo",
+   "label": "Kick · finisher (standing)",
+   "dir": "N",
+   "row": 49,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    50,
+    100,
+    70,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    "plant",
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wjab",
+   "group": "Ground combo",
+   "label": "Walking jab",
+   "dir": "S",
+   "row": 50,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    40,
+    70,
+    60,
+    80
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wjab",
+   "group": "Ground combo",
+   "label": "Walking jab",
+   "dir": "SE",
+   "row": 51,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    40,
+    70,
+    60,
+    80
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wjab",
+   "group": "Ground combo",
+   "label": "Walking jab",
+   "dir": "E",
+   "row": 52,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    40,
+    70,
+    60,
+    80
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wjab",
+   "group": "Ground combo",
+   "label": "Walking jab",
+   "dir": "NE",
+   "row": 53,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    40,
+    70,
+    60,
+    80
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wjab",
+   "group": "Ground combo",
+   "label": "Walking jab",
+   "dir": "N",
+   "row": 54,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    40,
+    70,
+    60,
+    80
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wcross",
+   "group": "Ground combo",
+   "label": "Walking cross",
+   "dir": "S",
+   "row": 55,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    80,
+    60,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wcross",
+   "group": "Ground combo",
+   "label": "Walking cross",
+   "dir": "SE",
+   "row": 56,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    80,
+    60,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wcross",
+   "group": "Ground combo",
+   "label": "Walking cross",
+   "dir": "E",
+   "row": 57,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    80,
+    60,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wcross",
+   "group": "Ground combo",
+   "label": "Walking cross",
+   "dir": "NE",
+   "row": 58,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    80,
+    60,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wcross",
+   "group": "Ground combo",
+   "label": "Walking cross",
+   "dir": "N",
+   "row": 59,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    80,
+    60,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "runAtk",
+   "group": "Ground combo",
+   "label": "Running uppercut (run + attack)",
+   "dir": "S",
+   "row": 60,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    50,
+    100,
+    80,
+    64,
+    100
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "runAtk",
+   "group": "Ground combo",
+   "label": "Running uppercut (run + attack)",
+   "dir": "SE",
+   "row": 61,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    50,
+    100,
+    80,
+    64,
+    100
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "runAtk",
+   "group": "Ground combo",
+   "label": "Running uppercut (run + attack)",
+   "dir": "E",
+   "row": 62,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    50,
+    100,
+    80,
+    64,
+    100
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "runAtk",
+   "group": "Ground combo",
+   "label": "Running uppercut (run + attack)",
+   "dir": "NE",
+   "row": 63,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    50,
+    100,
+    80,
+    64,
+    100
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "runAtk",
+   "group": "Ground combo",
+   "label": "Running uppercut (run + attack)",
+   "dir": "N",
+   "row": 64,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    50,
+    100,
+    80,
+    64,
+    100
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "huff",
+   "group": "Moods & rest",
+   "label": "Too tired: huff",
+   "dir": "S",
+   "row": 65,
+   "frames": 5,
+   "durationsMs": [
+    90,
+    72,
+    140,
+    112,
+    160
+   ],
+   "events": [
+    null,
+    null,
+    "huff",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "huff",
+   "group": "Moods & rest",
+   "label": "Too tired: huff",
+   "dir": "SE",
+   "row": 66,
+   "frames": 5,
+   "durationsMs": [
+    90,
+    72,
+    140,
+    112,
+    160
+   ],
+   "events": [
+    null,
+    null,
+    "huff",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "huff",
+   "group": "Moods & rest",
+   "label": "Too tired: huff",
+   "dir": "E",
+   "row": 67,
+   "frames": 5,
+   "durationsMs": [
+    90,
+    72,
+    140,
+    112,
+    160
+   ],
+   "events": [
+    null,
+    null,
+    "huff",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "huff",
+   "group": "Moods & rest",
+   "label": "Too tired: huff",
+   "dir": "NE",
+   "row": 68,
+   "frames": 5,
+   "durationsMs": [
+    90,
+    72,
+    140,
+    112,
+    160
+   ],
+   "events": [
+    null,
+    null,
+    "huff",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "huff",
+   "group": "Moods & rest",
+   "label": "Too tired: huff",
+   "dir": "N",
+   "row": 69,
+   "frames": 5,
+   "durationsMs": [
+    90,
+    72,
+    140,
+    112,
+    160
+   ],
+   "events": [
+    null,
+    null,
+    "huff",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "airPunch",
+   "group": "Air combos",
+   "label": "Air punch",
+   "dir": "S",
+   "row": 70,
+   "frames": 5,
+   "durationsMs": [
+    45,
+    40,
+    80,
+    64,
+    70
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "airPunch",
+   "group": "Air combos",
+   "label": "Air punch",
+   "dir": "SE",
+   "row": 71,
+   "frames": 5,
+   "durationsMs": [
+    45,
+    40,
+    80,
+    64,
+    70
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "airPunch",
+   "group": "Air combos",
+   "label": "Air punch",
+   "dir": "E",
+   "row": 72,
+   "frames": 5,
+   "durationsMs": [
+    45,
+    40,
+    80,
+    64,
+    70
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "airPunch",
+   "group": "Air combos",
+   "label": "Air punch",
+   "dir": "NE",
+   "row": 73,
+   "frames": 5,
+   "durationsMs": [
+    45,
+    40,
+    80,
+    64,
+    70
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "airPunch",
+   "group": "Air combos",
+   "label": "Air punch",
+   "dir": "N",
+   "row": 74,
+   "frames": 5,
+   "durationsMs": [
+    45,
+    40,
+    80,
+    64,
+    70
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "airKick",
+   "group": "Air combos",
+   "label": "Air kick",
+   "dir": "S",
+   "row": 75,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    90,
+    72,
+    70
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "airKick",
+   "group": "Air combos",
+   "label": "Air kick",
+   "dir": "SE",
+   "row": 76,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    90,
+    72,
+    70
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "airKick",
+   "group": "Air combos",
+   "label": "Air kick",
+   "dir": "E",
+   "row": 77,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    90,
+    72,
+    70
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "airKick",
+   "group": "Air combos",
+   "label": "Air kick",
+   "dir": "NE",
+   "row": 78,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    90,
+    72,
+    70
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "airKick",
+   "group": "Air combos",
+   "label": "Air kick",
+   "dir": "N",
+   "row": 79,
+   "frames": 5,
+   "durationsMs": [
+    50,
+    45,
+    90,
+    72,
+    70
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "dive",
+   "group": "Air combos",
+   "label": "Dive kick (air ×3)",
+   "dir": "S",
+   "row": 80,
+   "frames": 2,
+   "durationsMs": [
+    60,
+    60
+   ],
+   "events": [
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "dive",
+   "group": "Air combos",
+   "label": "Dive kick (air ×3)",
+   "dir": "SE",
+   "row": 81,
+   "frames": 2,
+   "durationsMs": [
+    60,
+    60
+   ],
+   "events": [
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "dive",
+   "group": "Air combos",
+   "label": "Dive kick (air ×3)",
+   "dir": "E",
+   "row": 82,
+   "frames": 2,
+   "durationsMs": [
+    60,
+    60
+   ],
+   "events": [
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "dive",
+   "group": "Air combos",
+   "label": "Dive kick (air ×3)",
+   "dir": "NE",
+   "row": 83,
+   "frames": 2,
+   "durationsMs": [
+    60,
+    60
+   ],
+   "events": [
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "dive",
+   "group": "Air combos",
+   "label": "Dive kick (air ×3)",
+   "dir": "N",
+   "row": 84,
+   "frames": 2,
+   "durationsMs": [
+    60,
+    60
+   ],
+   "events": [
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "flyKick",
+   "group": "Air combos",
+   "label": "Flying kick (run + jump + attack)",
+   "dir": "S",
+   "row": 85,
+   "frames": 4,
+   "durationsMs": [
+    60,
+    60,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "flyKick",
+   "group": "Air combos",
+   "label": "Flying kick (run + jump + attack)",
+   "dir": "SE",
+   "row": 86,
+   "frames": 4,
+   "durationsMs": [
+    60,
+    60,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "flyKick",
+   "group": "Air combos",
+   "label": "Flying kick (run + jump + attack)",
+   "dir": "E",
+   "row": 87,
+   "frames": 4,
+   "durationsMs": [
+    60,
+    60,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "flyKick",
+   "group": "Air combos",
+   "label": "Flying kick (run + jump + attack)",
+   "dir": "NE",
+   "row": 88,
+   "frames": 4,
+   "durationsMs": [
+    60,
+    60,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "flyKick",
+   "group": "Air combos",
+   "label": "Flying kick (run + jump + attack)",
+   "dir": "N",
+   "row": 89,
+   "frames": 4,
+   "durationsMs": [
+    60,
+    60,
+    90,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_swing",
+   "group": "Wooden club",
+   "label": "Club swing (standing)",
+   "dir": "S",
+   "row": 90,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_swing",
+   "group": "Wooden club",
+   "label": "Club swing (standing)",
+   "dir": "SE",
+   "row": 91,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_swing",
+   "group": "Wooden club",
+   "label": "Club swing (standing)",
+   "dir": "E",
+   "row": 92,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_swing",
+   "group": "Wooden club",
+   "label": "Club swing (standing)",
+   "dir": "NE",
+   "row": 93,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_swing",
+   "group": "Wooden club",
+   "label": "Club swing (standing)",
+   "dir": "N",
+   "row": 94,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_back",
+   "group": "Wooden club",
+   "label": "Club backswing (standing)",
+   "dir": "S",
+   "row": 95,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_back",
+   "group": "Wooden club",
+   "label": "Club backswing (standing)",
+   "dir": "SE",
+   "row": 96,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_back",
+   "group": "Wooden club",
+   "label": "Club backswing (standing)",
+   "dir": "E",
+   "row": 97,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_back",
+   "group": "Wooden club",
+   "label": "Club backswing (standing)",
+   "dir": "NE",
+   "row": 98,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_back",
+   "group": "Wooden club",
+   "label": "Club backswing (standing)",
+   "dir": "N",
+   "row": 99,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_smash",
+   "group": "Wooden club",
+   "label": "Overhead smash · finisher",
+   "dir": "S",
+   "row": 100,
+   "frames": 7,
+   "durationsMs": [
+    110,
+    88,
+    50,
+    110,
+    90,
+    72,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    "plant",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_smash",
+   "group": "Wooden club",
+   "label": "Overhead smash · finisher",
+   "dir": "SE",
+   "row": 101,
+   "frames": 7,
+   "durationsMs": [
+    110,
+    88,
+    50,
+    110,
+    90,
+    72,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    "plant",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_smash",
+   "group": "Wooden club",
+   "label": "Overhead smash · finisher",
+   "dir": "E",
+   "row": 102,
+   "frames": 7,
+   "durationsMs": [
+    110,
+    88,
+    50,
+    110,
+    90,
+    72,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    "plant",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_smash",
+   "group": "Wooden club",
+   "label": "Overhead smash · finisher",
+   "dir": "NE",
+   "row": 103,
+   "frames": 7,
+   "durationsMs": [
+    110,
+    88,
+    50,
+    110,
+    90,
+    72,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    "plant",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "c_smash",
+   "group": "Wooden club",
+   "label": "Overhead smash · finisher",
+   "dir": "N",
+   "row": 104,
+   "frames": 7,
+   "durationsMs": [
+    110,
+    88,
+    50,
+    110,
+    90,
+    72,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    "plant",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wc_swing",
+   "group": "Wooden club",
+   "label": "Walking swing",
+   "dir": "S",
+   "row": 105,
+   "frames": 5,
+   "durationsMs": [
+    70,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wc_swing",
+   "group": "Wooden club",
+   "label": "Walking swing",
+   "dir": "SE",
+   "row": 106,
+   "frames": 5,
+   "durationsMs": [
+    70,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wc_swing",
+   "group": "Wooden club",
+   "label": "Walking swing",
+   "dir": "E",
+   "row": 107,
+   "frames": 5,
+   "durationsMs": [
+    70,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wc_swing",
+   "group": "Wooden club",
+   "label": "Walking swing",
+   "dir": "NE",
+   "row": 108,
+   "frames": 5,
+   "durationsMs": [
+    70,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wc_swing",
+   "group": "Wooden club",
+   "label": "Walking swing",
+   "dir": "N",
+   "row": 109,
+   "frames": 5,
+   "durationsMs": [
+    70,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wc_back",
+   "group": "Wooden club",
+   "label": "Walking backswing",
+   "dir": "S",
+   "row": 110,
+   "frames": 5,
+   "durationsMs": [
+    70,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wc_back",
+   "group": "Wooden club",
+   "label": "Walking backswing",
+   "dir": "SE",
+   "row": 111,
+   "frames": 5,
+   "durationsMs": [
+    70,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wc_back",
+   "group": "Wooden club",
+   "label": "Walking backswing",
+   "dir": "E",
+   "row": 112,
+   "frames": 5,
+   "durationsMs": [
+    70,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wc_back",
+   "group": "Wooden club",
+   "label": "Walking backswing",
+   "dir": "NE",
+   "row": 113,
+   "frames": 5,
+   "durationsMs": [
+    70,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "wc_back",
+   "group": "Wooden club",
+   "label": "Walking backswing",
+   "dir": "N",
+   "row": 114,
+   "frames": 5,
+   "durationsMs": [
+    70,
+    45,
+    80,
+    70,
+    90
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "rc_swing",
+   "group": "Wooden club",
+   "label": "Running swing (run + attack)",
+   "dir": "S",
+   "row": 115,
+   "frames": 5,
+   "durationsMs": [
+    60,
+    50,
+    100,
+    80,
+    100
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "rc_swing",
+   "group": "Wooden club",
+   "label": "Running swing (run + attack)",
+   "dir": "SE",
+   "row": 116,
+   "frames": 5,
+   "durationsMs": [
+    60,
+    50,
+    100,
+    80,
+    100
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "rc_swing",
+   "group": "Wooden club",
+   "label": "Running swing (run + attack)",
+   "dir": "E",
+   "row": 117,
+   "frames": 5,
+   "durationsMs": [
+    60,
+    50,
+    100,
+    80,
+    100
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "rc_swing",
+   "group": "Wooden club",
+   "label": "Running swing (run + attack)",
+   "dir": "NE",
+   "row": 118,
+   "frames": 5,
+   "durationsMs": [
+    60,
+    50,
+    100,
+    80,
+    100
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "rc_swing",
+   "group": "Wooden club",
+   "label": "Running swing (run + attack)",
+   "dir": "N",
+   "row": 119,
+   "frames": 5,
+   "durationsMs": [
+    60,
+    50,
+    100,
+    80,
+    100
+   ],
+   "events": [
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "ac_swing",
+   "group": "Wooden club",
+   "label": "Air swing (one simple swing)",
+   "dir": "S",
+   "row": 120,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    50,
+    110,
+    88,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "ac_swing",
+   "group": "Wooden club",
+   "label": "Air swing (one simple swing)",
+   "dir": "SE",
+   "row": 121,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    50,
+    110,
+    88,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "ac_swing",
+   "group": "Wooden club",
+   "label": "Air swing (one simple swing)",
+   "dir": "E",
+   "row": 122,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    50,
+    110,
+    88,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "ac_swing",
+   "group": "Wooden club",
+   "label": "Air swing (one simple swing)",
+   "dir": "NE",
+   "row": 123,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    50,
+    110,
+    88,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "ac_swing",
+   "group": "Wooden club",
+   "label": "Air swing (one simple swing)",
+   "dir": "N",
+   "row": 124,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    56,
+    50,
+    110,
+    88,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    "active",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "pant",
+   "group": "Moods & rest",
+   "label": "Out of breath (exhausted)",
+   "dir": "S",
+   "row": 125,
+   "frames": 6,
+   "durationsMs": [
+    150,
+    150,
+    150,
+    150,
+    150,
+    150
+   ],
+   "events": [
+    "huff",
+    null,
+    null,
+    "puff",
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "pant",
+   "group": "Moods & rest",
+   "label": "Out of breath (exhausted)",
+   "dir": "SE",
+   "row": 126,
+   "frames": 6,
+   "durationsMs": [
+    150,
+    150,
+    150,
+    150,
+    150,
+    150
+   ],
+   "events": [
+    "huff",
+    null,
+    null,
+    "puff",
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "pant",
+   "group": "Moods & rest",
+   "label": "Out of breath (exhausted)",
+   "dir": "E",
+   "row": 127,
+   "frames": 6,
+   "durationsMs": [
+    150,
+    150,
+    150,
+    150,
+    150,
+    150
+   ],
+   "events": [
+    "huff",
+    null,
+    null,
+    "puff",
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "pant",
+   "group": "Moods & rest",
+   "label": "Out of breath (exhausted)",
+   "dir": "NE",
+   "row": 128,
+   "frames": 6,
+   "durationsMs": [
+    150,
+    150,
+    150,
+    150,
+    150,
+    150
+   ],
+   "events": [
+    "huff",
+    null,
+    null,
+    "puff",
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "pant",
+   "group": "Moods & rest",
+   "label": "Out of breath (exhausted)",
+   "dir": "N",
+   "row": 129,
+   "frames": 6,
+   "durationsMs": [
+    150,
+    150,
+    150,
+    150,
+    150,
+    150
+   ],
+   "events": [
+    "huff",
+    null,
+    null,
+    "puff",
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "sleep",
+   "group": "Moods & rest",
+   "label": "Dozing off",
+   "dir": "S",
+   "row": 130,
+   "frames": 4,
+   "durationsMs": [
+    420,
+    420,
+    420,
+    420
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": true
+  },
+  {
+   "name": "sitGround",
+   "group": "Moods & rest",
+   "label": "Sit on the ground (emote)",
+   "dir": "S",
+   "row": 131,
+   "frames": 11,
+   "durationsMs": [
+    70,
+    56,
+    80,
+    64,
+    90,
+    260,
+    260,
+    260,
+    260,
+    260,
+    260
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "sit",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": true
+  },
+  {
+   "name": "e_happy",
+   "group": "Moods & rest",
+   "label": "Happy · \"Oh yeah!\"",
+   "dir": "S",
+   "row": 132,
+   "frames": 9,
+   "durationsMs": [
+    60,
+    48,
+    70,
+    56,
+    90,
+    140,
+    140,
+    112,
+    160
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "pump",
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "e_excited",
+   "group": "Moods & rest",
+   "label": "Excited · \"Yahoo!\"",
+   "dir": "S",
+   "row": 133,
+   "frames": 10,
+   "durationsMs": [
+    50,
+    70,
+    70,
+    56,
+    120,
+    96,
+    50,
+    70,
+    56,
+    140
+   ],
+   "events": [
+    null,
+    null,
+    "hop",
+    null,
+    null,
+    null,
+    null,
+    "land",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "e_sad",
+   "group": "Moods & rest",
+   "label": "Bummed · \"Aww man...\"",
+   "dir": "S",
+   "row": 134,
+   "frames": 11,
+   "durationsMs": [
+    120,
+    96,
+    96,
+    260,
+    208,
+    300,
+    240,
+    300,
+    240,
+    240,
+    200
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    "sigh",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "e_angry",
+   "group": "Moods & rest",
+   "label": "Angry · \"Grrr!\"",
+   "dir": "S",
+   "row": 135,
+   "frames": 8,
+   "durationsMs": [
+    60,
+    100,
+    70,
+    80,
+    80,
+    80,
+    80,
+    140
+   ],
+   "events": [
+    null,
+    null,
+    "stomp",
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "e_cry",
+   "group": "Moods & rest",
+   "label": "Crying · \"Waaah!\"",
+   "dir": "S",
+   "row": 136,
+   "frames": 7,
+   "durationsMs": [
+    150,
+    120,
+    150,
+    120,
+    150,
+    120,
+    150
+   ],
+   "events": [
+    "sob",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": true
+  },
+  {
+   "name": "e_tired",
+   "group": "Moods & rest",
+   "label": "Tired · \"*yawn*\"",
+   "dir": "S",
+   "row": 137,
+   "frames": 10,
+   "durationsMs": [
+    120,
+    96,
+    220,
+    176,
+    360,
+    288,
+    288,
+    300,
+    240,
+    220
+   ],
+   "events": [
+    null,
+    null,
+    "yawn",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "sitDown",
+   "group": "Make yourself at home",
+   "label": "Sit down (chair)",
+   "dir": "S",
+   "row": 138,
+   "frames": 7,
+   "durationsMs": [
+    60,
+    48,
+    80,
+    64,
+    90,
+    72,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "sit",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "sitDown",
+   "group": "Make yourself at home",
+   "label": "Sit down (chair)",
+   "dir": "SE",
+   "row": 139,
+   "frames": 7,
+   "durationsMs": [
+    60,
+    48,
+    80,
+    64,
+    90,
+    72,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "sit",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "sitDown",
+   "group": "Make yourself at home",
+   "label": "Sit down (chair)",
+   "dir": "E",
+   "row": 140,
+   "frames": 7,
+   "durationsMs": [
+    60,
+    48,
+    80,
+    64,
+    90,
+    72,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "sit",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "sitDown",
+   "group": "Make yourself at home",
+   "label": "Sit down (chair)",
+   "dir": "NE",
+   "row": 141,
+   "frames": 7,
+   "durationsMs": [
+    60,
+    48,
+    80,
+    64,
+    90,
+    72,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "sit",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "sitDown",
+   "group": "Make yourself at home",
+   "label": "Sit down (chair)",
+   "dir": "N",
+   "row": 142,
+   "frames": 7,
+   "durationsMs": [
+    60,
+    48,
+    80,
+    64,
+    90,
+    72,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "sit",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "sitIdle",
+   "group": "Make yourself at home",
+   "label": "Sitting · swinging legs",
+   "dir": "S",
+   "row": 143,
+   "frames": 8,
+   "durationsMs": [
+    220,
+    220,
+    220,
+    220,
+    220,
+    220,
+    220,
+    220
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "sitIdle",
+   "group": "Make yourself at home",
+   "label": "Sitting · swinging legs",
+   "dir": "SE",
+   "row": 144,
+   "frames": 8,
+   "durationsMs": [
+    220,
+    220,
+    220,
+    220,
+    220,
+    220,
+    220,
+    220
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "sitIdle",
+   "group": "Make yourself at home",
+   "label": "Sitting · swinging legs",
+   "dir": "E",
+   "row": 145,
+   "frames": 8,
+   "durationsMs": [
+    220,
+    220,
+    220,
+    220,
+    220,
+    220,
+    220,
+    220
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "sitIdle",
+   "group": "Make yourself at home",
+   "label": "Sitting · swinging legs",
+   "dir": "NE",
+   "row": 146,
+   "frames": 8,
+   "durationsMs": [
+    220,
+    220,
+    220,
+    220,
+    220,
+    220,
+    220,
+    220
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "sitIdle",
+   "group": "Make yourself at home",
+   "label": "Sitting · swinging legs",
+   "dir": "N",
+   "row": 147,
+   "frames": 8,
+   "durationsMs": [
+    220,
+    220,
+    220,
+    220,
+    220,
+    220,
+    220,
+    220
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "standUp",
+   "group": "Make yourself at home",
+   "label": "Stand up",
+   "dir": "S",
+   "row": 148,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    48,
+    80,
+    64,
+    80,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "stand",
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "standUp",
+   "group": "Make yourself at home",
+   "label": "Stand up",
+   "dir": "SE",
+   "row": 149,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    48,
+    80,
+    64,
+    80,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "stand",
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "standUp",
+   "group": "Make yourself at home",
+   "label": "Stand up",
+   "dir": "E",
+   "row": 150,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    48,
+    80,
+    64,
+    80,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "stand",
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "standUp",
+   "group": "Make yourself at home",
+   "label": "Stand up",
+   "dir": "NE",
+   "row": 151,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    48,
+    80,
+    64,
+    80,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "stand",
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "standUp",
+   "group": "Make yourself at home",
+   "label": "Stand up",
+   "dir": "N",
+   "row": 152,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    48,
+    80,
+    64,
+    80,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "stand",
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "lieDown",
+   "group": "Make yourself at home",
+   "label": "Get into bed",
+   "dir": "E",
+   "row": 153,
+   "frames": 6,
+   "durationsMs": [
+    70,
+    90,
+    72,
+    90,
+    72,
+    120
+   ],
+   "events": [
+    null,
+    "sit",
+    null,
+    null,
+    null,
+    "flop"
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "lieIdle",
+   "group": "Make yourself at home",
+   "label": "In bed · breathing",
+   "dir": "E",
+   "row": 154,
+   "frames": 4,
+   "durationsMs": [
+    400,
+    400,
+    400,
+    400
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": true
+  },
+  {
+   "name": "lieSleep",
+   "group": "Make yourself at home",
+   "label": "In bed · asleep",
+   "dir": "E",
+   "row": 155,
+   "frames": 4,
+   "durationsMs": [
+    520,
+    520,
+    520,
+    520
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": true
+  },
+  {
+   "name": "getUp",
+   "group": "Make yourself at home",
+   "label": "Get up · stretch, yawn",
+   "dir": "E",
+   "row": 156,
+   "frames": 7,
+   "durationsMs": [
+    80,
+    64,
+    90,
+    72,
+    380,
+    304,
+    100
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "yawn",
+    null,
+    "stand"
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "pickUp",
+   "group": "Make yourself at home",
+   "label": "Pick up (knees bend)",
+   "dir": "S",
+   "row": 157,
+   "frames": 8,
+   "durationsMs": [
+    60,
+    48,
+    70,
+    90,
+    90,
+    72,
+    80,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "grab",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "pickUp",
+   "group": "Make yourself at home",
+   "label": "Pick up (knees bend)",
+   "dir": "SE",
+   "row": 158,
+   "frames": 8,
+   "durationsMs": [
+    60,
+    48,
+    70,
+    90,
+    90,
+    72,
+    80,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "grab",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "pickUp",
+   "group": "Make yourself at home",
+   "label": "Pick up (knees bend)",
+   "dir": "E",
+   "row": 159,
+   "frames": 8,
+   "durationsMs": [
+    60,
+    48,
+    70,
+    90,
+    90,
+    72,
+    80,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "grab",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "pickUp",
+   "group": "Make yourself at home",
+   "label": "Pick up (knees bend)",
+   "dir": "NE",
+   "row": 160,
+   "frames": 8,
+   "durationsMs": [
+    60,
+    48,
+    70,
+    90,
+    90,
+    72,
+    80,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "grab",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "pickUp",
+   "group": "Make yourself at home",
+   "label": "Pick up (knees bend)",
+   "dir": "N",
+   "row": 161,
+   "frames": 8,
+   "durationsMs": [
+    60,
+    48,
+    70,
+    90,
+    90,
+    72,
+    80,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    "grab",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "putDown",
+   "group": "Make yourself at home",
+   "label": "Put down",
+   "dir": "S",
+   "row": 162,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    48,
+    100,
+    70,
+    56,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    "drop",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "putDown",
+   "group": "Make yourself at home",
+   "label": "Put down",
+   "dir": "SE",
+   "row": 163,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    48,
+    100,
+    70,
+    56,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    "drop",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "putDown",
+   "group": "Make yourself at home",
+   "label": "Put down",
+   "dir": "E",
+   "row": 164,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    48,
+    100,
+    70,
+    56,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    "drop",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "putDown",
+   "group": "Make yourself at home",
+   "label": "Put down",
+   "dir": "NE",
+   "row": 165,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    48,
+    100,
+    70,
+    56,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    "drop",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "putDown",
+   "group": "Make yourself at home",
+   "label": "Put down",
+   "dir": "N",
+   "row": 166,
+   "frames": 6,
+   "durationsMs": [
+    60,
+    48,
+    100,
+    70,
+    56,
+    80
+   ],
+   "events": [
+    null,
+    null,
+    "drop",
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": false
+  },
+  {
+   "name": "carryIdle",
+   "group": "Make yourself at home",
+   "label": "Carrying · idle",
+   "dir": "S",
+   "row": 167,
+   "frames": 6,
+   "durationsMs": [
+    240,
+    240,
+    240,
+    240,
+    240,
+    240
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryIdle",
+   "group": "Make yourself at home",
+   "label": "Carrying · idle",
+   "dir": "SE",
+   "row": 168,
+   "frames": 6,
+   "durationsMs": [
+    240,
+    240,
+    240,
+    240,
+    240,
+    240
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryIdle",
+   "group": "Make yourself at home",
+   "label": "Carrying · idle",
+   "dir": "E",
+   "row": 169,
+   "frames": 6,
+   "durationsMs": [
+    240,
+    240,
+    240,
+    240,
+    240,
+    240
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryIdle",
+   "group": "Make yourself at home",
+   "label": "Carrying · idle",
+   "dir": "NE",
+   "row": 170,
+   "frames": 6,
+   "durationsMs": [
+    240,
+    240,
+    240,
+    240,
+    240,
+    240
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryIdle",
+   "group": "Make yourself at home",
+   "label": "Carrying · idle",
+   "dir": "N",
+   "row": 171,
+   "frames": 6,
+   "durationsMs": [
+    240,
+    240,
+    240,
+    240,
+    240,
+    240
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryWalk",
+   "group": "Make yourself at home",
+   "label": "Carrying · walk",
+   "dir": "S",
+   "row": 172,
+   "frames": 8,
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryWalk",
+   "group": "Make yourself at home",
+   "label": "Carrying · walk",
+   "dir": "SE",
+   "row": 173,
+   "frames": 8,
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryWalk",
+   "group": "Make yourself at home",
+   "label": "Carrying · walk",
+   "dir": "E",
+   "row": 174,
+   "frames": 8,
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryWalk",
+   "group": "Make yourself at home",
+   "label": "Carrying · walk",
+   "dir": "NE",
+   "row": 175,
+   "frames": 8,
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryWalk",
+   "group": "Make yourself at home",
+   "label": "Carrying · walk",
+   "dir": "N",
+   "row": 176,
+   "frames": 8,
+   "durationsMs": [
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryRun",
+   "group": "Make yourself at home",
+   "label": "Carrying · run",
+   "dir": "S",
+   "row": 177,
+   "frames": 8,
+   "durationsMs": [
+    74,
+    74,
+    74,
+    74,
+    74,
+    74,
+    74,
+    74
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryRun",
+   "group": "Make yourself at home",
+   "label": "Carrying · run",
+   "dir": "SE",
+   "row": 178,
+   "frames": 8,
+   "durationsMs": [
+    74,
+    74,
+    74,
+    74,
+    74,
+    74,
+    74,
+    74
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryRun",
+   "group": "Make yourself at home",
+   "label": "Carrying · run",
+   "dir": "E",
+   "row": 179,
+   "frames": 8,
+   "durationsMs": [
+    74,
+    74,
+    74,
+    74,
+    74,
+    74,
+    74,
+    74
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryRun",
+   "group": "Make yourself at home",
+   "label": "Carrying · run",
+   "dir": "NE",
+   "row": 180,
+   "frames": 8,
+   "durationsMs": [
+    74,
+    74,
+    74,
+    74,
+    74,
+    74,
+    74,
+    74
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "carryRun",
+   "group": "Make yourself at home",
+   "label": "Carrying · run",
+   "dir": "N",
+   "row": 181,
+   "frames": 8,
+   "durationsMs": [
+    74,
+    74,
+    74,
+    74,
+    74,
+    74,
+    74,
+    74
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": false
+  },
+  {
+   "name": "scratch",
+   "group": "Avatar",
+   "label": "Scratch head",
+   "dir": "S",
+   "row": 182,
+   "frames": 8,
+   "durationsMs": [
+    80,
+    64,
+    120,
+    120,
+    120,
+    120,
+    120,
+    140
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "lookAround",
+   "group": "Avatar",
+   "label": "Look around",
+   "dir": "S",
+   "row": 183,
+   "frames": 11,
+   "durationsMs": [
+    200,
+    90,
+    90,
+    500,
+    90,
+    90,
+    90,
+    90,
+    500,
+    90,
+    200
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "think",
+   "group": "Avatar",
+   "label": "Thinking",
+   "dir": "S",
+   "row": 184,
+   "frames": 4,
+   "durationsMs": [
+    300,
+    300,
+    300,
+    300
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": true
+  },
+  {
+   "name": "listen",
+   "group": "Avatar",
+   "label": "Listening",
+   "dir": "S",
+   "row": 185,
+   "frames": 2,
+   "durationsMs": [
+    500,
+    500
+   ],
+   "events": [
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": true
+  },
+  {
+   "name": "wave",
+   "group": "Avatar",
+   "label": "Wave hello",
+   "dir": "S",
+   "row": 186,
+   "frames": 11,
+   "durationsMs": [
+    60,
+    48,
+    140,
+    112,
+    140,
+    112,
+    140,
+    112,
+    140,
+    112,
+    160
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "hum",
+   "group": "Avatar",
+   "label": "Humming",
+   "dir": "S",
+   "row": 187,
+   "frames": 6,
+   "durationsMs": [
+    200,
+    200,
+    200,
+    200,
+    200,
+    200
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": true,
+   "facesCamera": true
+  },
+  {
+   "name": "f_candy",
+   "group": "Idle fidgets",
+   "label": "Eat a candy",
+   "dir": "S",
+   "row": 188,
+   "frames": 16,
+   "durationsMs": [
+    80,
+    64,
+    140,
+    112,
+    200,
+    110,
+    110,
+    110,
+    120,
+    96,
+    110,
+    150,
+    150,
+    150,
+    150,
+    300
+   ],
+   "events": [
+    null,
+    null,
+    "pocket",
+    null,
+    "candy",
+    "crinkle",
+    null,
+    "crinkle",
+    null,
+    null,
+    "pop",
+    "nom",
+    null,
+    "nom",
+    null,
+    "yum"
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "f_nose",
+   "group": "Idle fidgets",
+   "label": "Blow nose",
+   "dir": "S",
+   "row": 189,
+   "frames": 13,
+   "durationsMs": [
+    80,
+    64,
+    120,
+    96,
+    140,
+    360,
+    288,
+    180,
+    160,
+    128,
+    140,
+    112,
+    140
+   ],
+   "events": [
+    null,
+    null,
+    "pocket",
+    null,
+    null,
+    "inhale",
+    null,
+    "honk",
+    "sniff",
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "f_pick",
+   "group": "Idle fidgets",
+   "label": "Pick nose",
+   "dir": "S",
+   "row": 190,
+   "frames": 11,
+   "durationsMs": [
+    80,
+    64,
+    160,
+    130,
+    130,
+    130,
+    130,
+    300,
+    240,
+    70,
+    260
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    "look",
+    null,
+    "flick",
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "f_sing",
+   "group": "Idle fidgets",
+   "label": "Sing a little song",
+   "dir": "S",
+   "row": 191,
+   "frames": 12,
+   "durationsMs": [
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200,
+    200
+   ],
+   "events": [
+    "sing",
+    null,
+    null,
+    "note",
+    null,
+    null,
+    "note",
+    null,
+    null,
+    "note",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "f_jig",
+   "group": "Idle fidgets",
+   "label": "A little jig",
+   "dir": "S",
+   "row": 192,
+   "frames": 21,
+   "durationsMs": [
+    80,
+    64,
+    110,
+    88,
+    90,
+    110,
+    88,
+    90,
+    110,
+    88,
+    90,
+    110,
+    88,
+    90,
+    110,
+    88,
+    90,
+    110,
+    88,
+    90,
+    200
+   ],
+   "events": [
+    "jig",
+    null,
+    null,
+    null,
+    "tap",
+    null,
+    null,
+    "tap",
+    null,
+    null,
+    "tap",
+    null,
+    null,
+    "tap",
+    null,
+    null,
+    "tap",
+    null,
+    null,
+    "tap",
+    "ta-da"
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "f_juggle",
+   "group": "Idle fidgets",
+   "label": "Toss a pebble",
+   "dir": "S",
+   "row": 193,
+   "frames": 17,
+   "durationsMs": [
+    80,
+    64,
+    120,
+    70,
+    70,
+    90,
+    120,
+    80,
+    70,
+    90,
+    70,
+    80,
+    130,
+    80,
+    120,
+    96,
+    160
+   ],
+   "events": [
+    "pocket",
+    null,
+    null,
+    "toss",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "catch",
+    "toss",
+    null,
+    null,
+    null,
+    "catch",
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "f_yawn",
+   "group": "Idle fidgets",
+   "label": "Yawn and stretch",
+   "dir": "S",
+   "row": 194,
+   "frames": 7,
+   "durationsMs": [
+    100,
+    80,
+    420,
+    336,
+    260,
+    208,
+    160
+   ],
+   "events": [
+    null,
+    null,
+    "yawn",
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "scratchQ",
+   "group": "Idle fidgets",
+   "label": "Scratch head",
+   "dir": "S",
+   "row": 195,
+   "frames": 8,
+   "durationsMs": [
+    80,
+    64,
+    120,
+    120,
+    120,
+    120,
+    120,
+    140
+   ],
+   "events": [
+    null,
+    "huh",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "hop",
+   "group": "Talking",
+   "label": "Happy hops",
+   "dir": "S",
+   "row": 196,
+   "frames": 17,
+   "durationsMs": [
+    50,
+    60,
+    110,
+    88,
+    70,
+    56,
+    60,
+    110,
+    88,
+    70,
+    56,
+    60,
+    110,
+    88,
+    70,
+    56,
+    120
+   ],
+   "events": [
+    null,
+    null,
+    "hop",
+    null,
+    null,
+    null,
+    null,
+    "hop",
+    null,
+    null,
+    null,
+    null,
+    "hop",
+    null,
+    null,
+    null,
+    "land"
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "shy",
+   "group": "Talking",
+   "label": "Shy · blushing",
+   "dir": "S",
+   "row": 197,
+   "frames": 7,
+   "durationsMs": [
+    70,
+    56,
+    300,
+    240,
+    400,
+    320,
+    160
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "proud",
+   "group": "Talking",
+   "label": "Proud · hands on hips",
+   "dir": "S",
+   "row": 198,
+   "frames": 7,
+   "durationsMs": [
+    70,
+    56,
+    500,
+    400,
+    400,
+    320,
+    140
+   ],
+   "events": [
+    null,
+    null,
+    "ta-da",
+    null,
+    null,
+    null,
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  },
+  {
+   "name": "laugh",
+   "group": "Talking",
+   "label": "Belly laugh",
+   "dir": "S",
+   "row": 199,
+   "frames": 9,
+   "durationsMs": [
+    60,
+    48,
+    110,
+    110,
+    110,
+    110,
+    110,
+    110,
+    140
+   ],
+   "events": [
+    null,
+    null,
+    null,
+    "ha",
+    null,
+    "ha",
+    null,
+    "ha",
+    null
+   ],
+   "loop": false,
+   "facesCamera": true
+  }
+ ]
+}

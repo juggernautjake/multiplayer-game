@@ -33,6 +33,10 @@ class ServerPlayer:
 	var queue := {}             # seq -> PlayerInput, not yet applied (packets may arrive out of order)
 	var last_applied := 0       # acked to the client
 	var waited := 0             # ticks spent waiting for a missing input
+	var target_buf := 2         # jitter buffer: inputs to hold before applying (grows when it runs dry)
+	var primed := false
+	var calm := 0               # ticks since the buffer last ran dry
+	var starves := 0            # times it ran dry (for the stats)
 
 var players := {}  # id -> ServerPlayer (server only)
 var server_tick := 0
@@ -52,6 +56,17 @@ var prev_pos := Vector3.ZERO    # own position before / after the last tick, for
 var cur_pos := Vector3.ZERO
 var input_source: Callable  # () -> [buttons, yaw], set by Main
 var corrections := 0        # times the server disagreed with our prediction (should stay 0)
+var interp_delay := float(Config.INTERP_DELAY_TICKS)  # ticks behind the newest snapshot that others are drawn
+var _late_ms: Array = []    # how late each recent snapshot arrived, relative to the earliest seen
+var _off_base := INF
+var extrap_frames := 0      # frames where another player had to be guessed ahead (no newer snapshot yet)
+var drawn_frames := 0
+# network simulator (testing): extra one-way delay, jitter and loss on this client's traffic
+var sim_lat_ms := 0.0
+var sim_jit_ms := 0.0
+var sim_loss := 0.0
+var _sim_out: Array = []    # [deliver_ms, data]
+var _sim_in: Array = []
 
 
 func _ready() -> void:
@@ -166,9 +181,12 @@ func inputs(data: PackedByteArray) -> void:
 		_server_receive_inputs(multiplayer.get_remote_sender_id(), Codec.decode_inputs(data))
 
 
-@rpc("authority", "call_remote", "unreliable_ordered", 2)
+@rpc("authority", "call_remote", "unreliable", 2)
 func snapshot(data: PackedByteArray) -> void:
-	_client_receive_snapshot(Codec.decode_snapshot(data))
+	if sim_lat_ms > 0.0 or sim_loss > 0.0:
+		_sim_push(_sim_in, data)
+	else:
+		_client_receive_snapshot(Codec.decode_snapshot(data))
 
 
 # ================================================================ the fixed tick
@@ -181,8 +199,8 @@ func _physics_process(_delta: float) -> void:
 		_server_tick()
 	if my_id != 0:
 		render_tick += 1.0
-		# stay INTERP_DELAY_TICKS behind the newest snapshot; nudge gently so motion never jumps
-		var target := latest_tick - Config.INTERP_DELAY_TICKS
+		# stay interp_delay ticks behind the newest snapshot; nudge gently so motion never jumps
+		var target := latest_tick - interp_delay
 		var err := target - render_tick
 		if absf(err) > 30.0:
 			render_tick = target
@@ -225,24 +243,7 @@ func _server_receive_inputs(id: int, list: Array) -> void:
 func _server_tick() -> void:
 	server_tick += 1
 	for p: ServerPlayer in players.values():
-		# one input per tick; if some bunched up on the network, catch up a little faster
-		var budget := 3 if p.queue.size() > 4 else 1
-		while budget > 0 and not p.queue.is_empty():
-			var nxt := p.last_applied + 1
-			if not p.queue.has(nxt):
-				# the next input is missing (lost or overtaken): wait a few ticks for it to arrive, then skip it
-				p.waited += 1
-				if p.waited < 8:
-					break
-				nxt = p.queue.keys().min()
-			p.waited = 0
-			var inp: Sim.PlayerInput = p.queue[nxt]
-			p.queue.erase(nxt)
-			Sim.step(p.state, inp)
-			p.last_applied = inp.seq
-			budget -= 1
-		# no input arrived this tick: the player does not move on the server's own guess. The client predicted this
-		# step with its real input, which will arrive and be applied, so both sides apply exactly the same inputs.
+		_server_step_player(p)
 	if server_tick % Config.SNAPSHOT_EVERY == 0:
 		var ents := []
 		for p: ServerPlayer in players.values():
@@ -255,7 +256,71 @@ func _server_tick() -> void:
 				snapshot.rpc_id(p.id, data)
 
 
+## Each player's inputs pass through a small jitter buffer. Over the internet inputs arrive unevenly; applied as they
+## land, a late one stalls the player for a tick and the next tick lurches, which everyone else sees as stutter. So the
+## server waits until target_buf inputs are queued, then applies exactly one per tick. If the buffer runs dry it grows
+## (up to 8 ticks); after 10 s without running dry it shrinks again. The player's own view never waits on this: their
+## client predicts. Never moves a player on a guess: the server applies exactly the client's inputs, in order.
+func _server_step_player(p: ServerPlayer) -> void:
+	var n := p.queue.size()
+	if not p.primed:
+		if n >= p.target_buf or (p.id == 1 and is_host_player and n > 0):
+			p.primed = true
+		else:
+			return
+	if n == 0:
+		p.primed = false
+		p.starves += 1
+		p.target_buf = mini(p.target_buf + 1, 8)
+		p.calm = 0
+		return
+	p.calm += 1
+	if p.calm > 600 and p.target_buf > 1:
+		p.target_buf -= 1
+		p.calm = 0
+	# one input per tick; drain gently if too many have piled up (a burst after a hiccup)
+	var budget := 2 if n > p.target_buf + 3 else 1
+	while budget > 0 and not p.queue.is_empty():
+		var nxt := p.last_applied + 1
+		if not p.queue.has(nxt):
+			# the next input is missing (lost or overtaken): wait a few ticks for it, then skip it
+			p.waited += 1
+			if p.waited < 8:
+				break
+			nxt = p.queue.keys().min()
+		p.waited = 0
+		var inp: Sim.PlayerInput = p.queue[nxt]
+		p.queue.erase(nxt)
+		Sim.step(p.state, inp)
+		p.last_applied = inp.seq
+		budget -= 1
+
+
 # ---------------------------------------------------------------- client
+func _process(_delta: float) -> void:
+	if _sim_out.is_empty() and _sim_in.is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	while not _sim_out.is_empty() and _sim_out[0][0] <= now:
+		var d: PackedByteArray = _sim_out.pop_front()[1]
+		if multiplayer.multiplayer_peer != null:
+			inputs.rpc_id(1, d)
+	while not _sim_in.is_empty() and _sim_in[0][0] <= now:
+		_client_receive_snapshot(Codec.decode_snapshot(_sim_in.pop_front()[1]))
+
+
+func _sim_delay() -> float:
+	return Time.get_ticks_msec() + sim_lat_ms / 2.0 + randf() * sim_jit_ms
+
+
+## Queue for later delivery, in arrival order (a later send can overtake an earlier one, as on the real internet).
+func _sim_push(q: Array, data: PackedByteArray) -> void:
+	if randf() < sim_loss:
+		return
+	q.append([_sim_delay(), data])
+	q.sort_custom(func(x, y): return x[0] < y[0])
+
+
 func _client_tick() -> void:
 	var b_y: Array = input_source.call() if input_source.is_valid() else [0, 0.0]
 	var inp := Sim.PlayerInput.new(next_seq, int(b_y[0]), float(b_y[1]))
@@ -273,6 +338,8 @@ func _client_tick() -> void:
 		sent_recent.pop_front()
 	if is_host_player:
 		_server_receive_inputs(1, [inp])
+	elif sim_lat_ms > 0.0 or sim_loss > 0.0:
+		_sim_push(_sim_out, Codec.encode_inputs(sent_recent))
 	else:
 		inputs.rpc_id(1, Codec.encode_inputs(sent_recent))
 	correction = correction.lerp(Vector3.ZERO, 0.15)
@@ -286,6 +353,7 @@ func _client_receive_snapshot(s: Dictionary) -> void:
 	snapshots.append(s)
 	while snapshots.size() > 40:
 		snapshots.pop_front()
+	_measure_jitter(tick)
 	# reconcile our own player
 	var ents: Dictionary = s.ents
 	if not ents.has(my_id):
@@ -314,14 +382,32 @@ func _client_receive_snapshot(s: Dictionary) -> void:
 		prev_pos += diff
 
 
+## Set the interpolation delay from how unevenly snapshots really arrive: enough to cover 95% of them late plus one
+## snapshot interval, no more. Grows at once when the connection gets worse, shrinks slowly when it settles.
+func _measure_jitter(tick: int) -> void:
+	var now := Time.get_ticks_usec() / 1000.0
+	var off := now - tick * Config.DT * 1000.0     # arrival time minus send time, plus an unknown constant
+	_off_base = minf(_off_base + 0.01, off)         # the fastest arrival seen (drifting up slowly, in case clocks move)
+	_late_ms.append(off - _off_base)
+	if _late_ms.size() > 90:
+		_late_ms.pop_front()
+	var sorted := _late_ms.duplicate()
+	sorted.sort()
+	var p95: float = sorted[int((sorted.size() - 1) * 0.95)]
+	var want := (p95 + 6.0) / (Config.DT * 1000.0) + Config.SNAPSHOT_EVERY
+	want = clampf(want, Config.SNAPSHOT_EVERY + 1.0, 20.0)
+	interp_delay = want if want > interp_delay else lerpf(interp_delay, want, 0.02)
+
+
 ## Where to draw our own player this frame (between the last two ticks, plus any correction being blended out).
 func own_draw_position(frac: float) -> Vector3:
 	return prev_pos.lerp(cur_pos, frac) + correction
 
 
 ## Where to draw another player: interpolated between the two snapshots around render_tick.
-## -> [position, yaw] or [] if unknown.
+## -> [position, yaw, grounded, dashing] or [] if unknown.
 func remote_draw(id: int, frac: float) -> Array:
+	drawn_frames += 1
 	var t := render_tick + frac
 	var a: Dictionary = {}
 	var b: Dictionary = {}
@@ -337,14 +423,16 @@ func remote_draw(id: int, frac: float) -> Array:
 		return []
 	if a.is_empty():
 		var sb: Sim.PlayerState = b.ents[id]
-		return [sb.pos, sb.yaw]
+		return [sb.pos, sb.yaw, sb.grounded, sb.dash_ticks > 0]
 	var sa: Sim.PlayerState = a.ents[id]
 	if b.is_empty():  # nothing newer yet (packet loss): carry on along the velocity for up to 250 ms
+		extrap_frames += 1
 		var ahead := minf((t - a.tick) * Config.DT, 0.25)
-		return [sa.pos + sa.vel * ahead, sa.yaw]
+		return [sa.pos + sa.vel * ahead, sa.yaw, sa.grounded, sa.dash_ticks > 0]
 	var sb2: Sim.PlayerState = b.ents[id]
 	var w := clampf((t - a.tick) / float(b.tick - a.tick), 0.0, 1.0)
-	return [sa.pos.lerp(sb2.pos, w), lerp_angle(sa.yaw, sb2.yaw, w)]
+	var near := sa if w < 0.5 else sb2
+	return [sa.pos.lerp(sb2.pos, w), lerp_angle(sa.yaw, sb2.yaw, w), near.grounded, near.dash_ticks > 0]
 
 
 func ping_ms() -> int:
