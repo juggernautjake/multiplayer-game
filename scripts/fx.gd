@@ -62,6 +62,33 @@ static func slash(parent: Node, pos: Vector3, yaw: float, r: float, span: float,
 	tw.tween_callback(mi.queue_free)
 
 
+## A straight streak driven forward from the chest (a thrust or a punch).
+static func thrust(parent: Node, pos: Vector3, yaw: float, reach: float, color: Color) -> void:
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.05, 0.05, 1.0)
+	mi.mesh = bm
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.albedo_color = color
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(mi)
+	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
+	var start := pos + Vector3(0, 1.2, 0) + fwd * 0.4
+	mi.global_position = start
+	mi.rotation.y = yaw
+	mi.scale = Vector3(1, 1, 0.05)
+	var tw := mi.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(mi, "scale", Vector3(1.6, 1.6, reach), 0.08).set_ease(Tween.EASE_OUT)
+	tw.tween_property(mi, "global_position", start + fwd * reach * 0.5, 0.08)
+	tw.chain().tween_property(m, "albedo_color:a", 0.0, 0.14)
+	tw.chain().tween_callback(mi.queue_free)
+
+
 ## A flat ring that grows along the ground (smash).
 static func shockwave(parent: Node, pos: Vector3, color: Color) -> void:
 	var mi := MeshInstance3D.new()

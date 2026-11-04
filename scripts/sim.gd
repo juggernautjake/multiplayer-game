@@ -3,7 +3,7 @@
 ## server and corrections are rare and tiny. No randomness, no wall-clock time, only fixed DT steps.
 class_name Sim
 
-enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64, ATTACK = 128 }
+enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64, ATTACK = 128, INTERACT = 256 }
 
 ## What a step reports, for the server to act on (hit test, launch a projectile) and the client to show.
 enum Ev { NONE, MELEE_HIT, SHOT }
@@ -51,7 +51,12 @@ class PlayerState:
 	var grounded := true
 	var dash_ticks := 0     # ticks of dash left
 	var dash_cd := 0        # ticks until the dash is ready again
-	var weapon := 0         # Weapons.CLUB / SWORD / BOW / SLING
+	var weapon := 0         # Weapons.FISTS / CLUB / SWORD / BOW / SLING
+	var owned := 1          # weapons picked up, one bit each (fists always)
+	var arrows := 0
+	var rocks := 0
+	var combo := 0          # which move of the weapon's combo
+	var combo_t := 0        # ticks left to chain the next move
 	var atk := 0            # ticks left in the current swing or shot
 	var atk_cd := 0         # ticks until the next attack
 	var charge := 0         # ticks a bow / slingshot has been drawn
@@ -69,6 +74,11 @@ class PlayerState:
 		s.dash_ticks = dash_ticks
 		s.dash_cd = dash_cd
 		s.weapon = weapon
+		s.owned = owned
+		s.arrows = arrows
+		s.rocks = rocks
+		s.combo = combo
+		s.combo_t = combo_t
 		s.atk = atk
 		s.atk_cd = atk_cd
 		s.charge = charge
@@ -105,6 +115,7 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 	# forward is -Z at yaw 0, right is +X
 	var wish := Vector2(-sy * f + cy * r, -cy * f - sy * r)
 	var w := Weapons.get_data(s.weapon)
+	var mv := Weapons.move(s.weapon, s.combo)
 	var busy: bool = s.charge > 0 or (s.atk > 0 and w.kind == "melee")
 	var speed := SPRINT_SPEED if inp.buttons & Btn.SPRINT and not busy else WALK_SPEED
 	if busy:
@@ -140,9 +151,9 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 		s.vel.x = h.x
 		s.vel.z = h.y
 		# a melee swing steps into the blow: during the wind-up, drive forward at the weapon's lunge speed
-		if alive and s.grounded and w.kind == "melee" and s.atk > int(w.swing) - int(w.windup):
-			s.vel.x = -sy * float(w.lunge)
-			s.vel.z = -cy * float(w.lunge)
+		if alive and s.grounded and w.kind == "melee" and s.atk > int(mv.swing) - int(mv.windup):
+			s.vel.x = -sy * float(mv.lunge)
+			s.vel.z = -cy * float(mv.lunge)
 
 	if s.grounded and inp.buttons & Btn.JUMP and alive:
 		s.vel.y = JUMP_SPEED
@@ -179,30 +190,49 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 		s.atk_cd -= 1
 	if s.atk > 0:
 		s.atk -= 1
+	if s.combo_t > 0:
+		s.combo_t -= 1
 	if s.dead > 0:
 		s.dead -= 1
 		s.charge = 0
 		return ev
-	if inp.weapon != s.weapon and inp.weapon >= 0 and inp.weapon < Weapons.DATA.size() and s.atk == 0 and s.charge == 0:
-		s.weapon = inp.weapon
+	var want := inp.weapon
+	if want != s.weapon and want >= 0 and want < Weapons.DATA.size() and (s.owned >> want) & 1 and s.atk == 0 and s.charge == 0:
+		s.weapon = want
+		s.combo = 0
+		s.combo_t = 0
 	var w := Weapons.get_data(s.weapon)
 	var attack := inp.buttons & Btn.ATTACK != 0
 	if w.kind == "melee":
-		if attack and s.atk_cd == 0:
-			s.atk = w.swing
-			s.atk_cd = w.cooldown
+		var moves: Array = w.moves
+		if attack and s.atk == 0 and s.atk_cd == 0:
+			# chain the next move if still inside the window after the last one, else start the combo over
+			s.combo = (s.combo + 1) % moves.size() if s.combo_t > 0 else 0
+			var mv: Dictionary = moves[s.combo]
+			s.atk = int(mv.swing)
+			s.atk_cd = int(mv.swing) + int(mv.recover)
+			s.combo_t = 0
 			s.swing_n = (s.swing_n + 1) % 256
-		elif s.atk > 0 and s.atk == w.swing - w.windup:
-			ev = Ev.MELEE_HIT
+		elif s.atk > 0:
+			var mv: Dictionary = moves[s.combo]
+			if s.atk == int(mv.swing) - int(mv.windup):
+				ev = Ev.MELEE_HIT
+			if s.atk == 1:
+				s.combo_t = Weapons.COMBO_WINDOW
 	else:
-		if attack and s.atk_cd == 0 and s.atk == 0:
-			s.charge = mini(s.charge + 1, w.draw)
+		var ammo := s.arrows if w.ammo == "arrows" else s.rocks
+		if attack and s.atk_cd == 0 and s.atk == 0 and ammo > 0:
+			s.charge = mini(s.charge + 1, int(w.draw))
 		elif not attack and s.charge > 0:
 			s.last_charge = s.charge
 			s.charge = 0
-			s.atk = w.shot
-			s.atk_cd = w.cooldown
+			s.atk = int(w.shot)
+			s.atk_cd = int(w.cooldown)
 			s.swing_n = (s.swing_n + 1) % 256
+			if w.ammo == "arrows":
+				s.arrows -= 1
+			else:
+				s.rocks -= 1
 			ev = Ev.SHOT
 	return ev
 

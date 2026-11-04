@@ -136,7 +136,7 @@ func animate(delta: float, cam: Camera3D) -> void:
 
 	var want := _pick(speed)
 	if state != null and state.swing_n != _swing_n:   # a new swing or shot started: play it from the top
-		if _swing_n != -1 and (want.ends_with("swing") or want.ends_with("back") or want.ends_with("Shot")):
+		if _swing_n != -1:
 			_anim = ""
 		_swing_n = state.swing_n
 	if want != _anim:
@@ -179,24 +179,15 @@ func animate(delta: float, cam: Camera3D) -> void:
 	blob.scale = Vector3(s, 1, s)
 
 
-## The slash trail, on the tick the hit lands: white-blue for the sword, a dusty smear for the club; the smash is an
-## overhead arc with a shockwave along the ground.
+## The slash trail, on the tick the hit lands (shared with the 3D figure).
 func _swing_fx() -> void:
 	if state == null or state.dead > 0 or not Weapons.is_melee(state.weapon) or state.atk == 0:
 		return
-	var w := Weapons.get_data(state.weapon)
-	if state.atk > int(w.swing) - int(w.windup) + 1 or _slashed_n == state.swing_n:
+	var mv := Weapons.move(state.weapon, state.combo)
+	if state.atk > int(mv.swing) - int(mv.windup) + 1 or _slashed_n == state.swing_n:
 		return
 	_slashed_n = state.swing_n
-	var sword := state.weapon == Weapons.SWORD
-	var col := Color(0.75, 0.9, 1.0, 0.95) if sword else Color(1.0, 0.72, 0.4, 0.75)
-	var smash := _anim.ends_with("_smash")
-	var parent := get_parent()
-	Fx.slash(parent, global_position, yaw, float(w.range) * (0.95 if sword else 0.8), float(w.arc), col, smash, state.swing_n % 2 == 1)
-	if smash:
-		var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
-		Fx.shockwave(parent, global_position + fwd * 1.3, Color(1.0, 0.85, 0.6, 0.8))
-		Fx.burst(parent, global_position + fwd * 1.3, Vector3.UP, Color("c9a26b"), 18, 5.0, 0.07)
+	FigureAvatar._trail(get_parent(), global_position, yaw, state.weapon, mv)
 
 
 ## The animation for this moment.
@@ -206,16 +197,19 @@ func _pick(speed: float) -> String:
 		return "lieDown" if st.dead > Sim.RESPAWN_TICKS - 30 else "lieIdle"
 	if st != null:
 		var melee := Weapons.is_melee(st.weapon)
-		var sword := st.weapon == Weapons.SWORD
 		if melee and st.atk > 0:
-			var p := "s" if sword else "c"
-			if not grounded:
-				return "a" + p + "_swing"
-			if speed > Sim.SPRINT_SPEED - 1.5:
-				return "r" + p + "_swing"
-			if speed > 0.6:
-				return "w" + p + ("_swing" if st.swing_n % 2 == 0 else "_back")
-			return p + ("_swing" if st.swing_n % 2 == 0 else "_back") if st.swing_n % 3 != 0 else p + "_smash"
+			var mv := Weapons.move(st.weapon, st.combo)
+			var anim: String = mv.anim
+			if mv.shape == "arc" and st.weapon in [Weapons.CLUB, Weapons.SWORD]:
+				# Pip has moving versions of the club swings (the sword frames are made from them)
+				var p := "s" if st.weapon == Weapons.SWORD else "c"
+				if not grounded:
+					return "a" + p + "_swing"
+				if speed > Sim.SPRINT_SPEED - 1.5:
+					return "r" + p + "_swing"
+				if speed > 0.6:
+					return "w" + anim
+			return anim
 		if not melee:
 			var b := "bow" if st.weapon == Weapons.BOW else "sling"
 			if st.charge > 0:

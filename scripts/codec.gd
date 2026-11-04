@@ -1,5 +1,5 @@
 ## Binary packing for the two hot messages (inputs and snapshots). Small packets, no Variant overhead:
-## an input is 16 bytes, a player in a snapshot 40 bytes.
+## an input is 17 bytes, a player in a snapshot 45 bytes.
 class_name Codec
 
 
@@ -9,7 +9,7 @@ static func encode_inputs(inputs: Array) -> PackedByteArray:
 	b.put_u8(inputs.size())
 	for i: Sim.PlayerInput in inputs:
 		b.put_u32(i.seq)
-		b.put_u8(i.buttons)
+		b.put_u16(i.buttons)
 		b.put_float(i.yaw)
 		b.put_16(int(round(clampf(i.pitch, -1.6, 1.6) * 10000.0)))
 		b.put_u8(i.weapon)
@@ -17,7 +17,7 @@ static func encode_inputs(inputs: Array) -> PackedByteArray:
 	return b.data_array
 
 
-const INPUT_BYTES := 16
+const INPUT_BYTES := 17
 
 
 static func decode_inputs(data: PackedByteArray) -> Array:
@@ -31,7 +31,7 @@ static func decode_inputs(data: PackedByteArray) -> Array:
 		return out
 	for k in n:
 		var seq := b.get_u32()
-		var btn := b.get_u8()
+		var btn := b.get_u16()
 		var yaw := b.get_float()
 		var pitch := b.get_16() / 10000.0
 		var weapon := b.get_u8()
@@ -63,6 +63,11 @@ static func encode_snapshot(tick: int, ack: int, ents: Array) -> PackedByteArray
 		b.put_u8(s.swing_n)
 		b.put_u8(s.hp)
 		b.put_u8(s.dead)
+		b.put_u8(s.owned)
+		b.put_u8(s.arrows)
+		b.put_u8(s.rocks)
+		b.put_u8(s.combo)
+		b.put_u8(s.combo_t)
 	return b.data_array
 
 
@@ -90,5 +95,10 @@ static func decode_snapshot(data: PackedByteArray) -> Dictionary:
 		s.swing_n = b.get_u8()
 		s.hp = b.get_u8()
 		s.dead = b.get_u8()
+		s.owned = b.get_u8()
+		s.arrows = b.get_u8()
+		s.rocks = b.get_u8()
+		s.combo = b.get_u8()
+		s.combo_t = b.get_u8()
 		ents[id] = s
 	return { "tick": tick, "ack": ack, "ents": ents }

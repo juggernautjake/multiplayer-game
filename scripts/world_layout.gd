@@ -15,6 +15,14 @@ static var _boxes: Array = []
 ## Practice dummies near the spawn: hit them to see your damage. Target ids -1, -2, -3.
 const DUMMIES := [Vector3(-4.0, 0.0, -9.0), Vector3(0.0, 0.0, -10.0), Vector3(4.0, 0.0, -9.0)]
 
+## Where the weapons and ammo lie at the start (and come back 20 s after someone takes them): [item kind, position,
+## count]. Kinds are Weapons.Item: CLUB, SWORD, BOW, SLING, ARROWS, ROCKS.
+const ITEM_SPAWNS := [
+	[0, Vector3(-7.0, 0.0, -3.0), 1], [1, Vector3(-5.5, 0.0, -1.5), 1], [2, Vector3(5.5, 0.0, -1.5), 1],
+	[3, Vector3(7.0, 0.0, -3.0), 1], [4, Vector3(6.5, 0.0, 0.5), 12], [5, Vector3(8.5, 0.0, -1.0), 15],
+	[4, Vector3(-2.0, 0.0, -14.0), 8], [5, Vector3(2.0, 0.0, -14.0), 10],
+]
+
 
 static func boxes() -> Array:
 	if _boxes.is_empty():

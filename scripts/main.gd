@@ -4,11 +4,11 @@
 ## Command line (after `--`):  --server [--port 7777]   run a dedicated server with no window and no player
 ##                             --host / --join <address>  [--name <name>]   skip the menu
 ##                             --bot          a scripted player (walks, sprints, jumps, dashes) for testing
-##                             --bot fight    a scripted player that walks to a practice dummy and uses every weapon on it
+##                             --bot fight    a scripted player that picks up every weapon, then uses each on a dummy
+##                             --style pip|figure   (host) how everyone is drawn: Pip the sprite, or the 3D figure
 ##                             --screenshot <file.png> [--shot-frame 240] [--view first]   save one frame and quit
 extends Node3D
 
-const MOUSE_SENS := 0.0025
 const CAM_HEIGHT := 1.7   # third-person focus height
 const EYE_HEIGHT := 1.82  # first-person eye height (the character's eyes)
 
@@ -43,6 +43,16 @@ var hud_weapons: Label
 var hp_fill: ColorRect
 var charge_fill: ColorRect
 var shake := 0.0           # camera shake left (s), when our hit lands
+var items := {}            # item id -> { node, kind, pos }
+var prompt: Label3D        # "E  pick up Sword" over the nearest weapon
+var owned_seen := 1        # weapons we had last frame (a new one gets selected)
+var char_pick: OptionButton
+var mouse_sens := 0.0025     # radians per pixel (Esc menu)
+var aiming := false          # right mouse held: zoomed aim
+var attack_block_until := 0  # msec: the click that grabs the mouse doesn't also swing
+var pause_menu: Control
+var pause_char: OptionButton
+var audit := {}   # --log: counts of every replicated event this client received (network audit)
 
 
 func _ready() -> void:
@@ -56,12 +66,20 @@ func _ready() -> void:
 	net.projectile_ended.connect(_on_proj_end)
 	net.hit.connect(_on_hit)
 	net.local_shot.connect(_on_local_shot)
+	net.item_added.connect(_on_item_added)
+	net.item_removed.connect(_on_item_removed)
+	net.style_changed.connect(_on_style)
+	if args_has_log():
+		for sig in ["hit", "item_added", "item_removed", "projectile_spawned", "projectile_ended", "roster_changed"]:
+			audit[sig] = 0
+			net.connect(sig, func(a = null, b = null, c = null, d = null, e = null, f = null, g = null): audit[sig] += 1)
 
 	var args := _args()
 	if args.has("server"):
 		var port := int(args.get("port", Config.DEFAULT_PORT))
 		var err := net.host(port, "", false)
-		print("Dedicated server on UDP port %d: %s" % [port, "ok" if err == OK else error_string(err)])
+		net.style = "figure" if str(args.get("style", "pip")) == "figure" else "pip"
+		print("Dedicated server on UDP port %d: %s (look: %s)" % [port, "ok" if err == OK else error_string(err), net.style])
 		_print_addresses(port)
 		return
 
@@ -75,6 +93,8 @@ func _ready() -> void:
 	_build_ui()
 	if args.has("name"):
 		name_edit.text = str(args["name"])
+	if args.has("style"):
+		char_pick.select(1 if str(args["style"]) == "figure" else 0)
 	if args.has("netsim"):  # --netsim ping_ms,jitter_ms,loss_percent: test this client over a bad connection
 		var p := str(args["netsim"]).split(",")
 		net.sim_lat_ms = float(p[0])
@@ -96,6 +116,20 @@ func _on_status(text: String) -> void:
 		menu.visible = true
 		host_info = ""
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func args_has_log() -> bool:
+	return OS.get_cmdline_user_args().has("--log")
+
+
+## Network audit line: what this client has received so far, plus what it sees of everyone.
+func _audit_print() -> void:
+	if audit.is_empty():
+		return
+	var looks := ["look=" + net.style]
+	var me := net.predicted
+	print("[audit %s] %s  roster %s  hp %d owned %d arrows %d rocks %d corrections %d" % [name_edit.text, audit, looks,
+		me.hp if me else -1, me.owned if me else -1, me.arrows if me else -1, me.rocks if me else -1, net.corrections])
 
 
 func _args() -> Dictionary:
@@ -203,8 +237,15 @@ func _mat(c: Color, rough := 0.8) -> StandardMaterial3D:
 	return m
 
 
-func _make_avatar(id: int, info: Dictionary) -> Avatar:
-	var av := Avatar.new(str(info.get("name", "?")), info.get("color", Color.WHITE), id != net.my_id)
+## Each player is drawn as the look they chose: Pip (sprite) or the 3D figure. Both take the same inputs.
+func _make_avatar(id: int, info: Dictionary) -> Node3D:
+	var nm := str(info.get("name", "?"))
+	var col: Color = info.get("color", Color.WHITE)
+	var av: Node3D
+	if net.style == "figure":
+		av = FigureAvatar.new(nm, col, id != net.my_id)
+	else:
+		av = Avatar.new(nm, col, id != net.my_id)
 	add_child(av)
 	return av
 
@@ -221,13 +262,25 @@ func _on_roster(r: Dictionary) -> void:
 			avatars[id] = _make_avatar(id, r[id])
 
 
+## The host changed the look: rebuild everyone's avatar.
+func _on_style(s: String) -> void:
+	if cam == null:
+		return
+	for id in avatars.keys():
+		avatars[id].queue_free()
+	avatars.clear()
+	_on_roster(net.roster)
+	if pause_char:
+		pause_char.select(1 if s == "figure" else 0)
+
+
 # ================================================================ every frame: draw
 func _process(_delta: float) -> void:
 	if cam == null:
 		return
 	var frac := Engine.get_physics_interpolation_fraction()
 	for id in avatars.keys():
-		var av: Avatar = avatars[id]
+		var av = avatars[id]
 		if id == net.my_id and net.predicted != null:
 			av.visible = true
 			av.position = net.own_draw_position(frac)
@@ -252,14 +305,16 @@ func _process(_delta: float) -> void:
 	var me := Vector3.ZERO
 	if avatars.has(net.my_id):
 		me = (avatars[net.my_id] as Node3D).position
+	aiming = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	cam.fov = lerpf(cam.fov, 46.0 if aiming else 70.0, clampf(_delta * 12.0, 0.0, 1.0))
 	if view == View.FIRST:
 		cam.position = me + Vector3(0, EYE_HEIGHT, 0)
 		cam.rotation = Vector3(cam_pitch, cam_yaw, 0)
 	else:
 		var focus := me + Vector3(0, CAM_HEIGHT, 0) + Vector3(cos(cam_yaw), 0, -sin(cam_yaw)) * 0.55  # over the right shoulder
 		var back := Vector3(sin(cam_yaw) * cos(cam_pitch), -sin(cam_pitch), cos(cam_yaw) * cos(cam_pitch))
-		var dist := cam_dist
-		var hit := WorldLayout.ray_hit(focus, back, cam_dist)  # pull in so a pillar never hides the player
+		var dist := cam_dist * (0.55 if aiming else 1.0)
+		var hit := WorldLayout.ray_hit(focus, back, dist)  # pull in so a pillar never hides the player
 		if hit < dist:
 			dist = maxf(hit - 0.3, 0.6)
 		var p := focus + back * dist
@@ -268,6 +323,7 @@ func _process(_delta: float) -> void:
 		cam.look_at(focus, Vector3.UP)
 
 	_update_projectiles(frac)
+	_update_items(_delta)
 	if shake > 0.0:
 		shake = maxf(shake - _delta, 0.0)
 		cam.position += Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.07 * (shake / 0.14)
@@ -298,7 +354,7 @@ func _sample_input() -> Array:
 		return _bot_input()
 	_update_aim()
 	var b := 0
-	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or menu == null or not menu.visible:
+	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if Input.is_physical_key_pressed(KEY_W): b |= Sim.Btn.FORWARD
 		if Input.is_physical_key_pressed(KEY_S): b |= Sim.Btn.BACK
 		if Input.is_physical_key_pressed(KEY_A): b |= Sim.Btn.LEFT
@@ -306,8 +362,9 @@ func _sample_input() -> Array:
 		if Input.is_physical_key_pressed(KEY_SPACE): b |= Sim.Btn.JUMP
 		if Input.is_physical_key_pressed(KEY_SHIFT): b |= Sim.Btn.SPRINT
 		if Input.is_physical_key_pressed(KEY_Q): b |= Sim.Btn.DASH
-		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and Time.get_ticks_msec() > attack_block_until:
 			b |= Sim.Btn.ATTACK
+		if Input.is_physical_key_pressed(KEY_E): b |= Sim.Btn.INTERACT
 	return [b, cam_yaw, aim_pitch, weapon_slot]
 
 
@@ -350,9 +407,26 @@ func _bot_input() -> Array:
 ## bow and slingshot from 10 m back, drawn fully), logging every hit it sees.
 func _bot_fight() -> Array:
 	bot_t += 1
-	weapon_slot = (bot_t / 360) % 4
+	if bot_t % 600 == 0:
+		_audit_print()
+	if bot_t == 1500 and multiplayer.is_server():   # host test: switch the look mid-game for everyone
+		_switch_character()
 	if net.predicted == null:
 		return [0, cam_yaw, 0.0, weapon_slot]
+	# first walk to every weapon and ammo spawn and pick it up
+	if net.predicted.owned != 0b11111 or net.predicted.arrows == 0 or net.predicted.rocks == 0:
+		for s in WorldLayout.ITEM_SPAWNS:
+			var k := int(s[0])
+			var need: bool = (k <= 3 and not (net.predicted.owned >> (k + 1)) & 1) or (k == 4 and net.predicted.arrows == 0) or (k == 5 and net.predicted.rocks == 0)
+			if not need:
+				continue
+			var to: Vector3 = s[1] - net.predicted.pos
+			cam_yaw = atan2(-to.x, -to.z)
+			var bb := Sim.Btn.FORWARD if Vector2(to.x, to.z).length() > 0.6 else 0
+			if bot_t % 2 == 0:
+				bb |= Sim.Btn.INTERACT
+			return [bb, cam_yaw, 0.0, weapon_slot]
+	weapon_slot = (bot_t / 360) % 5
 	var target: Vector3 = WorldLayout.DUMMIES[1]
 	var me := net.predicted.pos
 	var to := target - me
@@ -387,21 +461,103 @@ func _unhandled_input(event: InputEvent) -> void:
 	var mb := event as InputEventMouseButton
 	var key := event as InputEventKey
 	if mm and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		cam_yaw = wrapf(cam_yaw - mm.relative.x * MOUSE_SENS, -PI, PI)
+		var sens := mouse_sens * (0.55 if aiming else 1.0)
+		cam_yaw = wrapf(cam_yaw - mm.relative.x * sens, -PI, PI)
 		var lo := -1.45 if view == View.FIRST else -1.2
 		var hi := 1.45 if view == View.FIRST else 0.5
-		cam_pitch = clampf(cam_pitch - mm.relative.y * MOUSE_SENS, lo, hi)
-	elif key and key.pressed and not key.echo and key.physical_keycode >= KEY_1 and key.physical_keycode <= KEY_4:
-		weapon_slot = key.physical_keycode - KEY_1
+		cam_pitch = clampf(cam_pitch - mm.relative.y * sens, lo, hi)
+	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_TAB and net.predicted != null:
+		for k in range(1, Weapons.NAMES.size() + 1):   # next weapon you own
+			var w := (weapon_slot + k) % Weapons.NAMES.size()
+			if (net.predicted.owned >> w) & 1:
+				weapon_slot = w
+				break
+	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_F2:
+		_switch_character()
+	elif key and key.pressed and not key.echo and key.physical_keycode >= KEY_1 and key.physical_keycode <= KEY_5:
+		var want := key.physical_keycode - KEY_1
+		if net.predicted != null and (net.predicted.owned >> want) & 1:
+			weapon_slot = want
 	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_V:
 		view = View.FIRST if view == View.THIRD else View.THIRD
 		cam_pitch = clampf(cam_pitch, -1.2, 0.5)
 	elif mb and mb.pressed and (mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN):
 		cam_dist = clampf(cam_dist + (-0.6 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 0.6), 2.5, 14.0)
-	elif mb and mb.pressed and menu and not menu.visible:
+	elif mb and mb.pressed and menu and not menu.visible and not pause_menu.visible and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	elif event.is_action_pressed("ui_cancel"):
+		attack_block_until = Time.get_ticks_msec() + 250
+	elif event.is_action_pressed("ui_cancel") and menu and not menu.visible:
+		_set_paused(not pause_menu.visible)
+
+
+## Esc menu: resume, mouse sensitivity, which look to play as, leave the game. The game keeps running underneath
+## (it's online); your player just stops taking input while it is open.
+func _set_paused(on: bool) -> void:
+	pause_menu.visible = on
+	if on:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		attack_block_until = Time.get_ticks_msec() + 250
+
+
+## F2 / Esc menu: the host switches the look for everyone; for anyone else it's the host's choice.
+func _switch_character() -> void:
+	if multiplayer.multiplayer_peer != null and multiplayer.is_server():
+		net.host_set_style("figure" if net.style == "pip" else "pip")
+	else:
+		Fx.word(self, (net.predicted.pos if net.predicted else Vector3.ZERO) + Vector3(0, 1.2, 0), "the host picks the look", Color("ffe08a"))
+
+
+func _pause_pick_style(i: int) -> void:
+	if multiplayer.multiplayer_peer != null and multiplayer.is_server():
+		net.host_set_style("figure" if i == 1 else "pip")
+	else:
+		pause_char.select(1 if net.style == "figure" else 0)   # not the host: show the host's choice
+
+
+func _build_pause_menu(layer: CanvasLayer) -> void:
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(340, 0)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.visible = false
+	layer.add_child(panel)
+	pause_menu = panel
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 10)
+	panel.add_child(box)
+	var title := Label.new()
+	title.text = "Paused (the world keeps going)"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+	var resume := Button.new()
+	resume.text = "Resume"
+	resume.pressed.connect(func(): _set_paused(false))
+	box.add_child(resume)
+	var sl := Label.new()
+	box.add_child(sl)
+	var slider := HSlider.new()
+	slider.min_value = 0.0005
+	slider.max_value = 0.008
+	slider.step = 0.0001
+	slider.value = mouse_sens
+	sl.text = "Mouse sensitivity  %.1f" % (mouse_sens * 1000.0)
+	slider.value_changed.connect(func(v): mouse_sens = v; sl.text = "Mouse sensitivity  %.1f" % (v * 1000.0))
+	box.add_child(slider)
+	var cl := Label.new()
+	cl.text = "Look for everyone (host only, F2)"
+	box.add_child(cl)
+	pause_char = OptionButton.new()
+	pause_char.add_item("Pip (pixel sprite)")
+	pause_char.add_item("3D figure (test character)")
+	pause_char.item_selected.connect(func(i): _pause_pick_style(i))
+	box.add_child(pause_char)
+	var leave := Button.new()
+	leave.text = "Leave game"
+	leave.pressed.connect(func(): get_tree().reload_current_scene())
+	box.add_child(leave)
 
 
 # ================================================================ menu and HUD
@@ -414,7 +570,7 @@ func _build_ui() -> void:
 	hud.add_theme_constant_override("outline_size", 6)
 	layer.add_child(hud)
 	var help := Label.new()
-	help.text = "WASD move   Shift sprint   Space jump   Q dash   left click attack (hold to draw a bow)   1-4 weapons   V first/third person   wheel zoom   Esc release mouse"
+	help.text = "WASD move  Shift sprint  Space jump  Q dash  LMB attack (click again for combos, hold to draw)  RMB aim  E pick up  1-5 / Tab weapons  V view  F2 Pip / 3D figure  Esc menu"
 	help.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	help.position = Vector2(12, -34)
 	help.add_theme_color_override("font_outline_color", Color.BLACK)
@@ -455,6 +611,7 @@ func _build_ui() -> void:
 	cross.grow_vertical = Control.GROW_DIRECTION_BOTH
 	layer.add_child(cross)
 
+	_build_pause_menu(layer)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(380, 0)
 	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -473,6 +630,13 @@ func _build_ui() -> void:
 	name_edit = _field(box, "Your name", "Player")
 	addr_edit = _field(box, "Server address (to join)", "127.0.0.1")
 	port_edit = _field(box, "Port (UDP)", str(Config.DEFAULT_PORT))
+	var cl := Label.new()
+	cl.text = "Look for everyone (when you host)"
+	box.add_child(cl)
+	char_pick = OptionButton.new()
+	char_pick.add_item("Pip (pixel sprite)")
+	char_pick.add_item("3D figure (test character)")
+	box.add_child(char_pick)
 	var row := HBoxContainer.new()
 	box.add_child(row)
 	for spec in [["Play solo / Host", _start_host], ["Join", _start_join]]:
@@ -498,6 +662,7 @@ func _field(box: VBoxContainer, label: String, value: String) -> LineEdit:
 
 
 func _start_host() -> void:
+	net.style = "figure" if char_pick.selected == 1 else "pip"
 	var port := int(port_edit.text)
 	var err := net.host(port, name_edit.text)
 	if err != OK:
@@ -641,15 +806,15 @@ func _on_hit(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool,
 	if cam == null:
 		return
 	var weapon := -1
-	if avatars.has(attacker) and (avatars[attacker] as Avatar).state != null:
-		weapon = (avatars[attacker] as Avatar).state.weapon
+	if avatars.has(attacker) and avatars[attacker].state != null:
+		weapon = avatars[attacker].state.weapon
 	if target < 0:
 		var i := -target - 1
 		if i < dummies.size():
 			(dummies[i] as Dummy).hit(amount, dir)
 		Fx.burst(self, pos, dir, Color("e2c27a"), 16, 4.5, 0.06)   # straw
 	elif avatars.has(target):
-		(avatars[target] as Avatar).flash()
+		avatars[target].flash()
 		Fx.burst(self, pos, dir, Color("ffe6a0"), 12, 5.5, 0.05)   # sparks
 	if weapon == Weapons.SWORD:
 		Fx.burst(self, pos, dir, Color("dff2ff"), 8, 7.0, 0.04)
@@ -677,15 +842,97 @@ func _on_hit(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool,
 
 func _update_combat_hud() -> void:
 	var st := net.predicted
-	var names := []
-	for i in Weapons.NAMES.size():
-		names.append(("[%d %s]" if i == weapon_slot else " %d %s ") % [i + 1, Weapons.NAMES[i]])
-	hud_weapons.text = "   ".join(names)
 	if st == null:
 		return
+	var names := []
+	for i in Weapons.NAMES.size():
+		if (st.owned >> i) & 1:
+			var nm: String = Weapons.NAMES[i]
+			if i == Weapons.BOW:
+				nm += " (%d)" % st.arrows
+			elif i == Weapons.SLING:
+				nm += " (%d)" % st.rocks
+			names.append(("[%d %s]" if i == st.weapon else " %d %s ") % [i + 1, nm])
+	hud_weapons.text = "   ".join(names)
+	if st.owned != owned_seen:   # just picked up a weapon: take it in hand
+		var gained := st.owned & ~owned_seen
+		for i in range(Weapons.NAMES.size() - 1, 0, -1):
+			if (gained >> i) & 1:
+				weapon_slot = i
+				break
+		owned_seen = st.owned
 	hp_fill.size.x = 296.0 * float(st.hp) / float(Sim.MAX_HP)
 	hp_fill.color = Color(0.9, 0.25, 0.2).lerp(Color(0.3, 0.85, 0.35), float(st.hp) / float(Sim.MAX_HP))
 	var w := Weapons.get_data(st.weapon)
 	charge_fill.size.x = 60.0 * float(st.charge) / float(w.draw) if w.kind == "ranged" else 0.0
 	if st.dead > 0:
 		hud_weapons.text = "Knocked out: back up in %.1f s" % (st.dead * Config.DT)
+
+
+
+# ================================================================ items in the world
+func _on_item_added(id: int, kind: int, pos: Vector3, count: int) -> void:
+	if cam == null or items.has(id):
+		return
+	var holder := Node3D.new()
+	var m := WeaponModels.make(kind)
+	holder.add_child(m)
+	if Weapons.ITEM_WEAPON[kind] >= 0:
+		m.rotation = Vector3(PI / 2.0, 0, 0.3)   # lying on the ground
+		m.position.y = 0.12
+		var ring := MeshInstance3D.new()        # a soft glow ring, so weapons are easy to spot
+		var tm := TorusMesh.new()
+		tm.inner_radius = 0.45
+		tm.outer_radius = 0.52
+		ring.mesh = tm
+		var rm := StandardMaterial3D.new()
+		rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		rm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		rm.albedo_color = Color(1.0, 0.9, 0.5, 0.55)
+		ring.material_override = rm
+		ring.scale = Vector3(1, 0.3, 1)
+		ring.position.y = 0.03
+		holder.add_child(ring)
+	add_child(holder)
+	holder.global_position = pos
+	items[id] = { "node": holder, "model": m, "kind": kind, "pos": pos, "t": randf() * 6.0 }
+
+
+func _on_item_removed(id: int, taker: int) -> void:
+	if items.has(id):
+		var e: Dictionary = items[id]
+		(e.node as Node3D).queue_free()
+		items.erase(id)
+		if taker == net.my_id and Weapons.ITEM_WEAPON[e.kind] >= 0:
+			Fx.word(self, e.pos, "+ " + Weapons.ITEM_NAMES[e.kind], Color("fff2a8"))
+
+
+## Weapons bob and turn slowly; the nearest one within reach shows "E  pick up ...".
+func _update_items(delta: float) -> void:
+	if prompt == null:
+		prompt = Label3D.new()
+		prompt.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		prompt.no_depth_test = true
+		prompt.font_size = 40
+		prompt.outline_size = 12
+		prompt.modulate = Color("fff2a8")
+		add_child(prompt)
+	var me := net.predicted.pos if net.predicted != null else Vector3(1e9, 0, 0)
+	var best := -1
+	var best_d := 2.2
+	for id in items.keys():
+		var e: Dictionary = items[id]
+		e.t += delta
+		if Weapons.ITEM_WEAPON[e.kind] >= 0:
+			var m: Node3D = e.model
+			m.position.y = 0.16 + sin(e.t * 2.2) * 0.05
+			m.rotation.y = e.t * 0.8
+			var d := Vector2(e.pos.x - me.x, e.pos.z - me.z).length()
+			if d < best_d:
+				best_d = d
+				best = id
+	prompt.visible = best >= 0
+	if best >= 0:
+		var e: Dictionary = items[best]
+		prompt.text = "E  pick up " + Weapons.ITEM_NAMES[e.kind]
+		prompt.global_position = e.pos + Vector3(0, 1.0, 0)

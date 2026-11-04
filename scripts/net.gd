@@ -21,6 +21,9 @@ signal projectile_spawned(id: int, owner: int, kind: int, tick0: int, pos0: Vect
 signal projectile_ended(id: int, tick: int, pos: Vector3, stuck: bool)
 signal hit(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool, attacker: int)
 signal local_shot(kind: int, pos0: Vector3, vel0: Vector3, g: float)
+signal item_added(id: int, kind: int, pos: Vector3, count: int)
+signal style_changed(style: String)
+signal item_removed(id: int, taker: int)
 
 const COLORS := [Color("e6194b"), Color("3cb44b"), Color("ffe119"), Color("4363d8"), Color("f58231"), Color("911eb4"),
 	Color("46f0f0"), Color("f032e6"), Color("bcf60c"), Color("fabebe"), Color("008080"), Color("e6beff")]
@@ -45,6 +48,23 @@ class ServerPlayer:
 	var slot := 0               # spawn slot
 	var hist: Array = []        # [tick, position] for the last 1.5 s: melee hits rewind to what the attacker saw
 	var was_dead := false
+	var character := "pip"
+	var interact_prev := false
+
+
+## Something lying on the ground to pick up (server). `spawn` >= 0: one of the fixed spawns, which comes back 20 s
+## after it is taken; -1: dropped (a spent arrow or stone), gone after 60 s.
+class Item:
+	var id := 0
+	var kind := 0
+	var pos := Vector3.ZERO
+	var count := 1
+	var spawn := -1
+	var born := 0
+
+var items := {}           # id -> Item (server)
+var next_item := 1
+var respawns: Array = []  # [tick, spawn index]
 
 
 ## A projectile in flight (server). Its path is fixed at launch (Weapons.proj_pos), so clients draw it from the
@@ -60,7 +80,10 @@ class Proj:
 	var damage := 0
 	var last := Vector3.ZERO
 
+## How everyone is drawn, chosen by the host for the whole game: "pip" (sprite) or "figure" (3D test character).
+var style := "pip"
 var projectiles := {}  # id -> Proj (server)
+var LOG := OS.get_cmdline_user_args().has("--log")   # print hits and pick-ups (testing)
 var next_proj := 1
 
 var players := {}  # id -> ServerPlayer (server only)
@@ -113,8 +136,10 @@ func host(port: int, player_name: String, with_player := true) -> Error:
 	dedicated = not with_player
 	is_host_player = with_player
 	my_id = 1
+	for i in WorldLayout.ITEM_SPAWNS.size():
+		_spawn_item_at(i)
 	if with_player:
-		_server_add_player(1, player_name)
+		_server_add_player(1, player_name, str(get_meta("character", "pip")))
 		predicted = players[1].state.copy()
 		prev_pos = predicted.pos
 		cur_pos = predicted.pos
@@ -158,7 +183,7 @@ func _on_server_disconnected() -> void:
 
 func _on_connected() -> void:
 	my_id = multiplayer.get_unique_id()
-	hello.rpc_id(1, str(get_meta("join_name", "Player")))
+	hello.rpc_id(1, str(get_meta("join_name", "Player")), str(get_meta("character", "pip")))
 	status.emit("Connected.")
 
 
@@ -175,14 +200,19 @@ func _on_peer_disconnected(id: int) -> void:
 
 # ================================================================ RPCs
 @rpc("any_peer", "call_remote", "reliable")
-func hello(player_name: String) -> void:
+func hello(player_name: String, character := "pip") -> void:
 	if not multiplayer.is_server():
 		return
 	var id := multiplayer.get_remote_sender_id()
 	if players.has(id) or players.size() >= Config.MAX_PLAYERS:
 		return
-	_server_add_player(id, player_name)
+	_server_add_player(id, player_name, character)
 	welcome.rpc_id(id, server_tick)
+	set_style.rpc_id(id, style)
+	var list := []
+	for it: Item in items.values():
+		list.append([it.id, it.kind, it.pos, it.count])
+	items_full.rpc_id(id, list)
 	print("+ %s joined (%d online)" % [players[id].name, players.size()])
 
 
@@ -196,8 +226,42 @@ func welcome(tick: int) -> void:
 func roster_update(list: Array) -> void:
 	roster.clear()
 	for e in list:
-		roster[int(e[0])] = { "name": str(e[1]), "color": e[2] }
+		roster[int(e[0])] = { "name": str(e[1]), "color": e[2], "character": str(e[3]) if e.size() > 3 else "pip" }
 	roster_changed.emit(roster)
+
+
+## The look for everyone (Pip / 3D figure). Only the host sets it; it switches for every player at once, and
+## players who join later get it on arrival.
+@rpc("authority", "call_remote", "reliable")
+func set_style(s: String) -> void:
+	if s in ["pip", "figure"]:
+		style = s
+		style_changed.emit(s)
+
+
+## Host only: change the look for everyone.
+func host_set_style(s: String) -> void:
+	if multiplayer.multiplayer_peer == null or not multiplayer.is_server() or not s in ["pip", "figure"]:
+		return
+	style = s
+	set_style.rpc(s)
+	style_changed.emit(s)
+
+
+@rpc("authority", "call_remote", "reliable")
+func items_full(list: Array) -> void:
+	for e in list:
+		item_added.emit(int(e[0]), int(e[1]), e[2], int(e[3]))
+
+
+@rpc("authority", "call_remote", "reliable")
+func item_add(id: int, kind: int, pos: Vector3, count: int) -> void:
+	item_added.emit(id, kind, pos, count)
+
+
+@rpc("authority", "call_remote", "reliable")
+func item_remove(id: int, taker: int) -> void:
+	item_removed.emit(id, taker)
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -249,9 +313,10 @@ func _physics_process(_delta: float) -> void:
 
 
 # ---------------------------------------------------------------- server
-func _server_add_player(id: int, player_name: String) -> void:
+func _server_add_player(id: int, player_name: String, character := "pip") -> void:
 	var p := ServerPlayer.new()
 	p.id = id
+	p.character = character if character in ["pip", "figure"] else "pip"
 	var clean := player_name.strip_edges().left(Config.MAX_NAME)
 	p.name = clean if clean != "" else "Player %d" % (players.size() + 1)
 	p.color = COLORS[players.size() % COLORS.size()]
@@ -264,7 +329,7 @@ func _server_add_player(id: int, player_name: String) -> void:
 func _server_send_roster() -> void:
 	var list := []
 	for p: ServerPlayer in players.values():
-		list.append([p.id, p.name, p.color])
+		list.append([p.id, p.name, p.color, p.character])
 	roster_update.rpc(list)
 	if is_host_player:
 		roster_update(list)
@@ -289,6 +354,7 @@ func _server_tick() -> void:
 		if p.hist.size() > 90:
 			p.hist.pop_front()
 	_server_projectiles()
+	_server_items()
 	if server_tick % Config.SNAPSHOT_EVERY == 0:
 		var ents := []
 		for p: ServerPlayer in players.values():
@@ -343,11 +409,18 @@ func _server_step_player(p: ServerPlayer) -> void:
 			_melee(p, inp)
 		elif ev == Sim.Ev.SHOT:
 			_shoot(p, inp)
-		if p.was_dead and p.state.dead == 0:  # back on your feet: a fresh spawn, same weapon
-			var w := p.state.weapon
+		if p.was_dead and p.state.dead == 0:  # back on your feet: a fresh spawn, keeping what you carry
+			var old := p.state
 			p.state = Sim.spawn_state(p.slot)
-			p.state.weapon = w
+			p.state.weapon = old.weapon
+			p.state.owned = old.owned
+			p.state.arrows = old.arrows
+			p.state.rocks = old.rocks
 		p.was_dead = p.state.dead > 0
+		var interact := inp.buttons & Sim.Btn.INTERACT != 0
+		if interact and not p.interact_prev and p.state.dead == 0:
+			_pick_up(p, 2.2, true)
+		p.interact_prev = interact
 
 
 # ---------------------------------------------------------------- server: combat
@@ -363,7 +436,7 @@ func _pos_at(p: ServerPlayer, t: int) -> Vector3:
 ## players are rewound to where the attacker saw them (its view_tick, at most 0.5 s back), so what looked like a hit
 ## on your screen is a hit.
 func _melee(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
-	var w := Weapons.get_data(p.state.weapon)
+	var w := Weapons.move(p.state.weapon, p.state.combo)
 	var vt := clampi(inp.view_tick, server_tick - 30, server_tick)
 	var me := p.state.pos
 	var face := Vector2(-sin(p.state.yaw), -cos(p.state.yaw))
@@ -373,14 +446,19 @@ func _melee(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
 			targets.append([q.id, _pos_at(q, vt)])
 	for i in WorldLayout.DUMMIES.size():
 		targets.append([-(i + 1), WorldLayout.DUMMIES[i]])
+	var impact := me + Vector3(face.x, 0, face.y) * 1.3
 	for t in targets:
 		var d: Vector3 = t[1] - me
 		var flat := Vector2(d.x, d.z)
-		if flat.length() > float(w.range) + Sim.RADIUS or absf(d.y) > 1.8:
-			continue
-		if flat.length() > 0.6 and absf(face.angle_to(flat)) > deg_to_rad(float(w.arc) / 2.0):
-			continue
-		_damage(t[0], int(w.damage), p.id, Vector3(flat.x, 0, flat.y), float(w.knock))
+		var in_reach := flat.length() <= float(w.range) + Sim.RADIUS and absf(d.y) <= 1.8 \
+			and (flat.length() <= 0.6 or absf(face.angle_to(flat)) <= deg_to_rad(float(w.arc) / 2.0))
+		if in_reach:
+			_damage(t[0], int(w.damage), p.id, Vector3(flat.x, 0, flat.y), float(w.knock))
+		elif w.shape == "smash":
+			# the smash's shockwave catches anyone standing close to where the club hits the ground
+			var off: Vector3 = t[1] - impact
+			if Vector2(off.x, off.z).length() <= float(w.aoe) and absf(off.y) < 1.2:
+				_damage(t[0], maxi(int(w.damage) / 2, 3), p.id, Vector3(off.x, 0, off.z), float(w.knock) * 0.6)
 
 
 ## A bow or slingshot is released: launch the projectile (speed and damage from how far it was drawn).
@@ -453,13 +531,97 @@ func _in_box(pt: Vector3) -> bool:
 
 func _end_proj(pr: Proj, pos: Vector3, stuck: bool) -> void:
 	projectiles.erase(pr.id)
+	if stuck or pos.y < 0.1:   # it can be picked up again where it landed
+		_add_item(Weapons.Item.ARROWS if pr.kind == 0 else Weapons.Item.ROCKS, Vector3(pos.x, maxf(WorldLayout.ground_height(pos.x, pos.z, pos.y + 0.1), 0.0), pos.z), 1, -1)
 	proj_end.rpc(pr.id, server_tick, pos, stuck)
 	if is_host_player:
 		proj_end(pr.id, server_tick, pos, stuck)
 
 
+# ---------------------------------------------------------------- server: items
+func _spawn_item_at(i: int) -> void:
+	var s: Array = WorldLayout.ITEM_SPAWNS[i]
+	_add_item(int(s[0]), s[1], int(s[2]), i)
+
+
+func _add_item(kind: int, pos: Vector3, count: int, spawn: int) -> void:
+	var it := Item.new()
+	it.id = next_item
+	next_item += 1
+	it.kind = kind
+	it.pos = pos
+	it.count = count
+	it.spawn = spawn
+	it.born = server_tick
+	items[it.id] = it
+	if spawn < 0:   # keep the ground tidy: at most 40 dropped things
+		var dropped := items.values().filter(func(x): return x.spawn < 0)
+		if dropped.size() > 40:
+			_remove_item(dropped[0], 0)
+	item_add.rpc(it.id, it.kind, it.pos, it.count)
+	if is_host_player:
+		item_add(it.id, it.kind, it.pos, it.count)
+
+
+func _remove_item(it: Item, taker: int) -> void:
+	items.erase(it.id)
+	if it.spawn >= 0:
+		respawns.append([server_tick + 20 * Config.TICK_RATE, it.spawn])
+	item_remove.rpc(it.id, taker)
+	if is_host_player:
+		item_remove(it.id, taker)
+
+
+## Ammo is picked up by walking over it; a weapon by pressing the interact key (E) next to it.
+func _server_items() -> void:
+	for r in respawns.duplicate():
+		if server_tick >= r[0]:
+			respawns.erase(r)
+			_spawn_item_at(r[1])
+	for it: Item in items.values():
+		if it.spawn < 0 and server_tick - it.born > 60 * Config.TICK_RATE:
+			_remove_item(it, 0)
+	for p: ServerPlayer in players.values():
+		if p.state.dead == 0:
+			_pick_up(p, 1.3, false)
+
+
+func _pick_up(p: ServerPlayer, reach: float, weapons: bool) -> void:
+	var best: Item = null
+	var best_d := reach
+	for it: Item in items.values():
+		var is_weapon: bool = Weapons.ITEM_WEAPON[it.kind] >= 0
+		if is_weapon != weapons:
+			continue
+		var d := Vector2(it.pos.x - p.state.pos.x, it.pos.z - p.state.pos.z).length()
+		if d <= best_d and absf(it.pos.y - p.state.pos.y) < 1.6:
+			best = it
+			best_d = d
+	if best == null:
+		return
+	var s := p.state
+	match best.kind:
+		Weapons.Item.ARROWS:
+			if s.arrows >= Weapons.MAX_AMMO:
+				return
+			s.arrows = mini(s.arrows + best.count, Weapons.MAX_AMMO)
+		Weapons.Item.ROCKS:
+			if s.rocks >= Weapons.MAX_AMMO:
+				return
+			s.rocks = mini(s.rocks + best.count, Weapons.MAX_AMMO)
+		_:
+			s.owned |= 1 << int(Weapons.ITEM_WEAPON[best.kind])
+	if LOG:
+		print("picked up %s" % Weapons.ITEM_NAMES[best.kind])
+	_remove_item(best, p.id)
+
+
 ## Damage a player (knockback, death) or a dummy (it just shows the number), and tell everyone.
 func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) -> void:
+	if LOG and players.has(from):
+		var ps: Sim.PlayerState = players[from].state
+		var mv := Weapons.move(ps.weapon, ps.combo)
+		print("hit %d for %d with %s %s" % [target, amount, Weapons.NAMES[ps.weapon], mv.get("name", "shot")])
 	var killed := false
 	var pos: Vector3
 	if target < 0:
@@ -571,9 +733,11 @@ func _client_receive_snapshot(s: Dictionary) -> void:
 			correction = Vector3.ZERO
 		else:  # small: keep drawing where we were and blend the error away
 			correction -= diff
-		predicted = replay
-		cur_pos = predicted.pos
+		cur_pos = replay.pos
 		prev_pos += diff
+	# always take the server-based state: things only the server changes (health, pick-ups, ammo, a respawn) come in
+	# this way, even when our position was predicted exactly
+	predicted = replay
 
 
 ## Set the interpolation delay from how unevenly snapshots really arrive: enough to cover 95% of them late plus one
