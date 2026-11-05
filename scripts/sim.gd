@@ -25,6 +25,7 @@ const TURN_RATE := 14.0       # rad/s: how fast you turn to face the way you wal
 const ATTACK_TURN_RATE := 12.0  # rad/s: how fast you turn toward the crosshair while holding attack (mid-swing too)
 const MAX_HP := 100
 const RESPAWN_TICKS := 180    # 3 s on the ground after dying
+const SLOW_FACTOR := 0.5     # how fast you move while slowed (frost nova)
 const MANA_FULL := 500       # Weapons.MAX_MANA in fifths: one fifth comes back each tick (12 mana a second)
 
 
@@ -81,7 +82,10 @@ class PlayerState:
 	var spell := 0          # the spell picked for the staff / wand
 	var shield := 0         # ticks the shield bubble has left
 	var stun := 0           # ticks left held in place by a stun (no moving, attacking or casting)
-	var recharge := [0, 0, 0]   # the wand's spells: ticks until each can be cast again
+	var recharge := [0, 0, 0, 0, 0, 0]   # the wand's spells: ticks until each can be cast again
+	var slow := 0           # ticks left slowed (frost): moving at SLOW_FACTOR
+	var staff_lvl := 1      # the staff's level (kills unlock spells: Weapons.LEVEL_KILLS)
+	var wand_lvl := 1
 
 	func copy() -> PlayerState:
 		var s := PlayerState.new()
@@ -109,6 +113,9 @@ class PlayerState:
 		s.shield = shield
 		s.stun = stun
 		s.recharge = recharge.duplicate()
+		s.slow = slow
+		s.staff_lvl = staff_lvl
+		s.wand_lvl = wand_lvl
 		return s
 
 
@@ -148,8 +155,10 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 	var mv := Weapons.move(s.weapon, s.combo)
 	var busy: bool = s.charge > 0 or (s.atk > 0 and w.kind != "ranged")
 	var speed := SPRINT_SPEED if inp.buttons & Btn.SPRINT and not busy else WALK_SPEED
-	if busy:
-		speed *= w.slow   # drawing a bow or mid-swing: slower
+	if busy or s.shield > 0:
+		speed *= w.slow   # drawing a bow, mid-swing, casting or holding the shield up: slower
+	if s.slow > 0:
+		speed *= SLOW_FACTOR
 	if not alive or s.stun > 0:
 		wish = Vector2.ZERO
 	if wish.length_squared() > 0.0:
@@ -231,11 +240,13 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 		s.dead -= 1
 		s.charge = 0
 		return ev
-	if s.mana < MANA_FULL and not (s.atk > 0 and Weapons.is_magic(s.weapon)):
-		s.mana += 1
-	for i in 3:
+	if s.mana < MANA_FULL and s.shield == 0 and not (s.atk > 0 and Weapons.is_magic(s.weapon)):
+		s.mana += 1   # not while casting, nor while the shield is held up
+	for i in s.recharge.size():
 		if s.recharge[i] > 0:
 			s.recharge[i] -= 1
+	if s.slow > 0:
+		s.slow -= 1
 	var want := inp.weapon
 	if want != s.weapon and want >= 0 and want < Weapons.DATA.size() and (s.owned >> want) & 1 and s.atk == 0 and s.charge == 0:
 		s.weapon = want
@@ -244,9 +255,20 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 	var w := Weapons.get_data(s.weapon)
 	var attack := inp.buttons & Btn.ATTACK != 0
 	if w.kind == "magic":
-		if s.atk == 0 and inp.spell != s.spell and inp.spell >= 0 and inp.spell < (w.spells as Array).size():
+		var lvl := s.staff_lvl if s.weapon == Weapons.STAFF else s.wand_lvl
+		if s.atk == 0 and s.shield == 0 and inp.spell != s.spell and Weapons.unlocked(s.weapon, inp.spell, lvl):
 			s.spell = inp.spell
 		var sp := Weapons.spell(s.weapon, s.spell)
+		if sp.get("hold", false):   # the shield: up while the button is held; raising it costs its mana once
+			if attack and s.shield > 0:
+				s.shield = 2
+			elif attack and s.atk_cd == 0 and s.mana >= int(sp.cost) * 5:
+				s.mana -= int(sp.cost) * 5
+				s.shield = 2
+				s.atk_cd = int(sp.cooldown)
+				s.swing_n = (s.swing_n + 1) % 256
+				ev = Ev.CAST
+			return ev
 		var ready: bool = s.recharge[s.spell] == 0 if w.get("uses", "mana") == "recharge" else s.mana >= int(sp.cost) * 5
 		if attack and s.atk == 0 and s.atk_cd == 0 and ready:
 			s.mana -= int(sp.cost) * 5
@@ -302,9 +324,7 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 ## a blink, so only where you arrive matters: if you wouldn't fit there, you arrive a little short of it.
 static func _cast_self(s: PlayerState, inp: PlayerInput) -> void:
 	var sp := Weapons.spell(s.weapon, s.spell)
-	if s.weapon == Weapons.STAFF and sp.name == "Shield":
-		s.shield = int(sp.duration)
-	elif s.weapon == Weapons.WAND and sp.name == "Teleport":
+	if s.weapon == Weapons.WAND and sp.name == "Teleport":
 		s.pos = teleport_target(s.pos, s.yaw, inp.aim_point, float(sp.range))
 		s.vel = Vector3.ZERO
 		s.grounded = false

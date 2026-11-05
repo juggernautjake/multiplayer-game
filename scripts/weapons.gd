@@ -44,19 +44,57 @@ const DATA := [
 		  "radius": 3.0, "max_damage": 28, "min_damage": 8, "knock": 5.0, "delay": 24 },
 		{ "name": "Fireball", "cost": 22, "windup": 12, "cast": 28, "cooldown": 12, "speed": 26.0, "gravity": 3.0,
 		  "radius": 3.4, "max_damage": 24, "min_damage": 6, "knock": 6.5 },
-		{ "name": "Shield", "cost": 30, "windup": 6, "cast": 18, "cooldown": 40, "duration": 300 },
+		# held: up while the button is held down (Jacob 2026-11-04); raising it costs a little mana, then none, but
+		# mana doesn't come back while it's up
+		{ "name": "Shield", "cost": 10, "windup": 0, "cast": 0, "cooldown": 20, "hold": true },
+		# level 2 (3 kills with the staff): a ring of ice bursts out from you: damage, a shove, and a 2 s slow
+		{ "name": "Frost Nova", "level": 2, "cost": 30, "windup": 14, "cast": 30, "cooldown": 30, "radius": 6.0,
+		  "max_damage": 18, "min_damage": 6, "knock": 3.5, "slow": 120 },
 	] },
 	# the wand from the hidden vault: no mana; each spell has its own recharge (ticks) instead (Jacob 2026-11-04)
 	{ "kind": "magic", "slow": 0.6, "uses": "recharge", "spells": [
 		{ "name": "Golem", "cost": 0, "windup": 24, "cast": 40, "cooldown": 10, "recharge": 600, "range": 9.0 },
 		{ "name": "Teleport", "cost": 0, "windup": 8, "cast": 16, "cooldown": 6, "recharge": 240, "range": 18.0 },
-		{ "name": "Stun", "cost": 0, "windup": 10, "cast": 26, "cooldown": 10, "recharge": 480, "range": 24.0, "duration": 180 },
+		# the stun bolt bursts where it lands (the first person or golem in its way, a wall, or the crosshair point):
+		# every enemy within `radius` of the burst is held for `duration` (Jacob 2026-11-04: an area, to catch them)
+		{ "name": "Stun", "cost": 0, "windup": 10, "cast": 26, "cooldown": 10, "recharge": 480, "range": 24.0, "duration": 180, "radius": 2.5 },
+		# level 2 (3 kills with the wand): stone spikes burst up one after another in a line toward the crosshair
+		{ "name": "Earth Spikes", "level": 2, "cost": 0, "windup": 12, "cast": 30, "cooldown": 10, "recharge": 360,
+		  "range": 16.0, "spikes": 9, "spacing": 1.7, "radius": 1.5, "max_damage": 16, "min_damage": 8, "knock": 7.0 },
 	] },
 ]
 
 const MAX_MANA := 100
+## Kills with the staff or wand level it up: level 2 after 3, level 3 after 5 more, the ultimate (level 4) after 10 more.
+## Each level adds that weapon's next spell.
+const LEVEL_KILLS := [0, 3, 8, 18]
+const MAX_LEVEL := 4
 const MANA_EVERY := 5      # ticks per point of mana back (12 a second), not while casting
 const SHIELD_RADIUS := 1.25
+## Holding the shield up against hits costs mana (Jacob 2026-11-04): per point of damage it soaks, 1.5 mana for
+## weapons (melee, arrows, stones, golems) and 2 for spells; a stun costs a flat 25. When the mana can't pay for a hit,
+## the shield shatters: the rest of the hit goes through and it can't be raised again for SHIELD_BROKEN ticks.
+const SHIELD_MANA_WEAPON := 1.5
+const SHIELD_MANA_SPELL := 2.0
+const SHIELD_MANA_STUN := 25
+const SHIELD_BROKEN := 120
+
+
+## The level the staff or wand reaches with this many kills.
+static func level_for(kills: int) -> int:
+	var lv := 1
+	for i in range(1, LEVEL_KILLS.size()):
+		if kills >= int(LEVEL_KILLS[i]):
+			lv = i + 1
+	return lv
+
+
+## Can a staff / wand at this level cast its spell i?
+static func unlocked(w: int, i: int, level: int) -> bool:
+	var d := get_data(w)
+	if d.kind != "magic" or i < 0 or i >= (d.spells as Array).size():
+		return false
+	return int((d.spells[i] as Dictionary).get("level", 1)) <= level
 
 
 static func is_magic(w: int) -> bool:

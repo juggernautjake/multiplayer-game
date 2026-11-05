@@ -1,5 +1,5 @@
 ## Binary packing for the two hot messages (inputs and snapshots). Small packets, no Variant overhead:
-## an input is 38 bytes, a player in a snapshot 59 bytes.
+## an input is 38 bytes, a player in a snapshot 74 bytes.
 class_name Codec
 
 
@@ -82,8 +82,11 @@ static func encode_snapshot(tick: int, ack: int, ents: Array) -> PackedByteArray
 		b.put_u8(s.spell)
 		b.put_u16(s.shield)
 		b.put_u8(s.stun)
-		for i in 3:
+		for i in 6:
 			b.put_u16(s.recharge[i])
+		b.put_u8(s.slow)
+		b.put_u8(s.staff_lvl)
+		b.put_u8(s.wand_lvl)
 	return b.data_array
 
 
@@ -120,7 +123,10 @@ static func decode_snapshot(data: PackedByteArray) -> Dictionary:
 		s.spell = b.get_u8()
 		s.shield = b.get_u16()
 		s.stun = b.get_u8()
-		for i in 3:
+		for i in 6:
 			s.recharge[i] = b.get_u16()
+		s.slow = b.get_u8()
+		s.staff_lvl = b.get_u8()
+		s.wand_lvl = b.get_u8()
 		ents[id] = s
 	return { "tick": tick, "ack": ack, "ents": ents }

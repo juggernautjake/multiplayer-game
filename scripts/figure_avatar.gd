@@ -537,6 +537,12 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 		return p
 
 	if Weapons.is_magic(w):   # staff upright / wand pointing; casting thrusts it forward and up
+		if st.shield > 0:   # holding the shield up: the staff raised high overhead, the free hand up too
+			p.hand_r = Vector3(0.12, 1.95, -0.32)
+			p.wdir = Vector3(0, 1.0, -0.15)
+			p.hand_l = Vector3(-0.22, 1.7, -0.36)
+			p.lean = -0.05
+			return p
 		if st.atk > 0:
 			var sp := Weapons.spell(w, st.spell)
 			var k := clampf(1.0 - float(st.atk - (int(sp.cast) - int(sp.windup))) / float(maxi(int(sp.windup), 1)), 0.0, 1.0)

@@ -557,22 +557,23 @@ func _bot_magic() -> Array:
 	_update_aim()
 	var spell := 0
 	var aim := dummy + Vector3(0, 1.0, 0)
-	weapon_slot = Weapons.STAFF if bot_t < 400 else Weapons.WAND
-	var plan := [[90, 0], [170, 1], [230, 1], [300, 2], [420, 0], [540, 1], [700, 2]]
+	# [start tick, spell, ticks to hold the button]; level-2 spells only with --max-level
+	var plan := [[90, 0, 3], [170, 1, 3], [230, 1, 3], [300, 2, 80], [400, 3, 3], [480, 0, 3], [560, 3, 3], [640, 1, 3], [720, 2, 3]]
+	weapon_slot = Weapons.STAFF if bot_t < 435 else Weapons.WAND
 	for p in plan:
-		if bot_t >= p[0] and bot_t < p[0] + 3:
+		if bot_t >= p[0] and bot_t < p[0] + p[2]:
 			b |= Sim.Btn.ATTACK
 		if bot_t >= p[0] - 10:
 			spell = p[1]
-	if bot_t >= 420 and bot_t < 540:
+	if bot_t >= 470 and bot_t < 560:
 		aim = dummy + Vector3(0, 0, 2.5)
-	elif bot_t >= 540 and bot_t < 700:
+	elif bot_t >= 640 and bot_t < 720:
 		aim = me + Vector3(7.0, 0, 0)
 	if bot_t % 30 == 0:
 		print("[magic] t%d %s spell %d mana %d shield %d recharge %s golems %d" % [bot_t, Weapons.NAMES[weapon_slot], net.predicted.spell,
 			net.predicted.mana / 5, net.predicted.shield, str(net.predicted.recharge), golem_view.golems.size() if golem_view else -1])
 	var shots := str(_args().get("shots", ""))
-	if shots != "" and bot_t in [104, 116, 186, 196, 320, 470, 520, 600, 640, 712, 760, 860]:
+	if shots != "" and bot_t in [104, 116, 186, 196, 340, 372, 418, 470, 580, 600, 660, 734, 760, 860]:
 		get_viewport().get_texture().get_image().save_png(shots.path_join("magic_%d.png" % bot_t))
 	if bot_t > 900:
 		_audit_print()
@@ -757,7 +758,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		net.request_pvp(not bool(net.roster.get(net.my_id, {}).get("pvp", false)))
 	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_R and net.predicted != null and Weapons.is_magic(weapon_slot):
 		var n: int = (Weapons.get_data(weapon_slot).spells as Array).size()
-		spell_sel[weapon_slot] = (int(spell_sel.get(weapon_slot, 0)) + 1) % n
+		var lv := net.predicted.staff_lvl if weapon_slot == Weapons.STAFF else net.predicted.wand_lvl
+		var nxt := int(spell_sel.get(weapon_slot, 0))
+		for k in n:   # the next spell this weapon's level has unlocked
+			nxt = (nxt + 1) % n
+			if Weapons.unlocked(weapon_slot, nxt, lv):
+				break
+		spell_sel[weapon_slot] = nxt
 	elif key and key.pressed and not key.echo and key.physical_keycode >= KEY_1 and key.physical_keycode <= KEY_7:
 		var want := key.physical_keycode - KEY_1
 		if net.predicted != null and (net.predicted.owned >> want) & 1:
@@ -893,7 +900,11 @@ func _build_ui() -> void:
 	hud_spells = Label.new()
 	hud_spells.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	hud_spells.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	hud_spells.position.y -= 122
+	hud_spells.grow_vertical = Control.GROW_DIRECTION_BEGIN   # grows upward, above the weapons line
+	hud_spells.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	hud_spells.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hud_spells.offset_top = -180
+	hud_spells.offset_bottom = -110
 	hud_spells.add_theme_font_size_override("font_size", 18)
 	hud_spells.add_theme_color_override("font_color", Color("bcd6ff"))
 	hud_spells.add_theme_color_override("font_outline_color", Color.BLACK)
@@ -1310,8 +1321,11 @@ func _update_combat_hud() -> void:
 	if w.kind == "magic":
 		var parts := []
 		var sel := int(spell_sel.get(st.weapon, 0))
+		var lv := st.staff_lvl if st.weapon == Weapons.STAFF else st.wand_lvl
 		for i in (w.spells as Array).size():
 			var sp: Dictionary = w.spells[i]
+			if not Weapons.unlocked(st.weapon, i, lv):
+				continue
 			var t: String
 			if w.get("uses", "mana") == "recharge":
 				var left: int = st.recharge[i]
@@ -1319,7 +1333,14 @@ func _update_combat_hud() -> void:
 			else:
 				t = "%s %d" % [sp.name, int(sp.cost)] + ("" if st.mana >= int(sp.cost) * 5 else " (mana)")
 			parts.append(("[ %s ]" if i == sel else "  %s  ") % t)
-		hud_spells.text = "R spell:  " + "   ".join(parts) + ("\nSTUNNED" if st.stun > 0 else "")
+		var kills: Array = net.roster.get(net.my_id, {}).get("kills", [0, 0])
+		var kn := int(kills[0 if st.weapon == Weapons.STAFF else 1])
+		var lvl_line := "%s level %d" % [Weapons.NAMES[st.weapon], lv]
+		if lv < Weapons.MAX_LEVEL:
+			lvl_line += "   kills %d / %d to the next level" % [kn, int(Weapons.LEVEL_KILLS[lv])]
+		else:
+			lvl_line += "   (ultimate unlocked)"
+		hud_spells.text = lvl_line + "\nR spell:  " + "   ".join(parts) + ("\nSTUNNED" if st.stun > 0 else "")
 	else:
 		hud_spells.text = "STUNNED" if st.stun > 0 else ""
 	if st.dead > 0:
@@ -1475,4 +1496,22 @@ func _build_beacon() -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mi.position = Vector3(WorldLayout.TOWER_C.x, WorldLayout.TOWER_TOP + 20.0, WorldLayout.TOWER_C.y)
 	add_child(mi)
+
+
+## A big message in the middle of the screen for a few seconds (level ups).
+func toast(text: String) -> void:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", 34)
+	l.add_theme_color_override("font_color", Color("ffd86a"))
+	l.add_theme_color_override("font_outline_color", Color.BLACK)
+	l.add_theme_constant_override("outline_size", 10)
+	l.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	l.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	l.position.y += 140
+	hud_spells.get_parent().add_child(l)
+	var tw := l.create_tween()
+	tw.tween_interval(3.0)
+	tw.tween_property(l, "modulate:a", 0.0, 0.8)
+	tw.tween_callback(l.queue_free)
 

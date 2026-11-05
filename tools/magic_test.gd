@@ -141,16 +141,42 @@ func _init() -> void:
 	for i in 20:
 		Sim.step(v, Sim.PlayerInput.new(200 + i, Sim.Btn.FORWARD, 0.0))
 	check(v.pos.distance_to(p0) > 0.3, "after 3 s you can move again")
+	# the shield is held: up while the button is down, its mana paid once, no mana back until it's let down
 	var sh := Sim.PlayerState.new()
 	sh.owned = 0b1111111
 	sh.weapon = Weapons.STAFF
-	var up := -1
-	for i in 400:
-		Sim.step(sh, Sim.PlayerInput.new(i, Sim.Btn.ATTACK if i < 3 else 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 2, Vector3.ZERO))
-		if sh.shield > 0 and up < 0:
-			up = i
-		if up >= 0 and sh.shield == 0:
-			check(i - up >= 295 and i - up <= 301, "the shield lasts 5 s (%d ticks)" % (i - up))
-			break
+	sh.mana = 300
+	for i in 120:
+		Sim.step(sh, Sim.PlayerInput.new(i, Sim.Btn.ATTACK, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 2, Vector3.ZERO))
+	var cost := int(Weapons.spell(Weapons.STAFF, 2).cost) * 5
+	check(sh.shield > 0, "holding the button keeps the shield up (2 s)")
+	check(absi(sh.mana - (300 - cost)) <= 1, "raising it cost %d mana once, and no mana came back while it was up (%d -> %d)" % [cost / 5, 300 / 5, sh.mana / 5])
+	for i in 3:
+		Sim.step(sh, Sim.PlayerInput.new(200 + i, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 2, Vector3.ZERO))
+	check(sh.shield == 0, "letting go drops it")
+	var m0 := sh.mana
+	for i in 60:
+		Sim.step(sh, Sim.PlayerInput.new(300 + i, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 2, Vector3.ZERO))
+	check(sh.mana > m0, "with it down, mana comes back")
+
+	# levels: 3 kills, 5 more, 10 more
+	check(Weapons.level_for(2) == 1 and Weapons.level_for(3) == 2 and Weapons.level_for(8) == 3 and Weapons.level_for(18) == 4,
+		"levels at 3, 8 and 18 kills (3, then 5 more, then 10 more)")
+	check(not Weapons.unlocked(Weapons.STAFF, 3, 1) and Weapons.unlocked(Weapons.STAFF, 3, 2), "Frost Nova unlocks at staff level 2")
+	check(not Weapons.unlocked(Weapons.WAND, 3, 1) and Weapons.unlocked(Weapons.WAND, 3, 2), "Earth Spikes unlocks at wand level 2")
+	var lk := Sim.PlayerState.new()
+	lk.owned = 0b1111111
+	lk.weapon = Weapons.STAFF
+	Sim.step(lk, Sim.PlayerInput.new(1, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 3, Vector3.ZERO))
+	check(lk.spell != 3, "a locked spell can't be picked")
+	lk.staff_lvl = 2
+	Sim.step(lk, Sim.PlayerInput.new(2, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 3, Vector3.ZERO))
+	check(lk.spell == 3, "once unlocked it can")
+	var sl := Sim.PlayerState.new()
+	sl.slow = 120
+	for i in 60:
+		Sim.step(sl, Sim.PlayerInput.new(i, Sim.Btn.FORWARD, 0.0))
+	var slow_v := Vector2(sl.vel.x, sl.vel.z).length()
+	check(absf(slow_v - Sim.WALK_SPEED * Sim.SLOW_FACTOR) < 0.05, "frost slows you to half speed (%.1f m/s)" % slow_v)
 	print("%d failed" % bad)
 	quit(bad)

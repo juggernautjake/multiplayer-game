@@ -55,6 +55,7 @@ class ServerPlayer:
 	var interact_prev := false
 	var outfit := 0             # Pip's outfit: the host 0, then 1, 2, 3 by who joined
 	var pvp := false            # player-versus-player on: can hurt and be hurt by other players with it on
+	var kills := [0, 0]         # kills with the staff, with the wand (they level the weapon up)
 
 
 ## Something lying on the ground to pick up (server). `spawn` >= 0: one of the fixed spawns, which comes back 20 s
@@ -155,6 +156,10 @@ func host(port: int, player_name: String, with_player := true) -> Error:
 			players[1].state.owned = 0b1111111
 			players[1].state.arrows = 30
 			players[1].state.rocks = 30
+		if OS.get_cmdline_user_args().has("--max-level"):   # testing: every spell unlocked
+			players[1].kills = [Weapons.LEVEL_KILLS[-1], Weapons.LEVEL_KILLS[-1]]
+			players[1].state.staff_lvl = Weapons.MAX_LEVEL
+			players[1].state.wand_lvl = Weapons.MAX_LEVEL
 		predicted = players[1].state.copy()
 		prev_pos = predicted.pos
 		cur_pos = predicted.pos
@@ -263,7 +268,8 @@ func roster_update(list: Array) -> void:
 	roster.clear()
 	for e in list:
 		roster[int(e[0])] = { "name": str(e[1]), "color": e[2], "character": str(e[3]) if e.size() > 3 else "pip",
-			"outfit": int(e[4]) if e.size() > 4 else 0, "pvp": bool(e[5]) if e.size() > 5 else false }
+			"outfit": int(e[4]) if e.size() > 4 else 0, "pvp": bool(e[5]) if e.size() > 5 else false,
+			"kills": e[6] if e.size() > 6 else [0, 0] }
 	roster_changed.emit(roster)
 
 
@@ -411,7 +417,7 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 func _server_send_roster() -> void:
 	var list := []
 	for p: ServerPlayer in players.values():
-		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp])
+		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp, p.kills])
 	roster_update.rpc(list)
 	if is_host_player:
 		roster_update(list)
@@ -508,6 +514,8 @@ func _server_step_player(p: ServerPlayer) -> void:
 			p.state.owned = old.owned
 			p.state.arrows = old.arrows
 			p.state.rocks = old.rocks
+			p.state.staff_lvl = old.staff_lvl
+			p.state.wand_lvl = old.wand_lvl
 		p.was_dead = p.state.dead > 0
 		var interact := inp.buttons & Sim.Btn.INTERACT != 0
 		if interact and not p.interact_prev and p.state.dead == 0:
@@ -601,10 +609,10 @@ func _server_projectiles() -> void:
 			var pt := prev.lerp(cur, k / 4.0)
 			var shielded := _shield_at(pt, pr.owner)
 			if shielded > 0:   # a shield bubble stops it at its surface
-				_fx("shield_hit", [shielded, pt])
 				if pr.kind == 2:
 					_burst(pr, pt)
-				else:
+				else:   # the bubble takes the hit (for mana) and the arrow / stone drops
+					_damage(shielded, pr.damage, pr.owner, cur - prev, 1.5)
 					_end_proj(pr, pt, false)
 				done = true
 				break
@@ -681,13 +689,13 @@ func _burst(pr: Proj, pos: Vector3) -> void:
 		proj_end(pr.id, server_tick, pos, false)
 	var sp := Weapons.spell(Weapons.STAFF, 1)
 	_fx("explode", [pos, float(sp.radius)])
-	_blast(pos, sp, pr.owner)
+	_blast(pos, sp, pr.owner, Weapons.STAFF)
 
 
 ## The player whose shield bubble the point is inside (not the shot's own), or 0.
 func _shield_at(pt: Vector3, owner: int) -> int:
 	for q: ServerPlayer in players.values():
-		if q.id != owner and q.state.shield > 0 and q.state.dead == 0 and pt.distance_to(q.state.pos + Vector3(0, 0.95, 0)) < Weapons.SHIELD_RADIUS:
+		if q.id != owner and q.state.shield > 0 and q.state.dead == 0 and can_hurt(owner, q.id) and pt.distance_to(q.state.pos + Vector3(0, 0.95, 0)) < Weapons.SHIELD_RADIUS:
 			return q.id
 	return 0
 
@@ -812,13 +820,17 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		if is_host_player:
 			hit_fx(target, amount, pos, dir, killed, from)
 		return
-	if target > 0 and players.has(target) and players[target].state.shield > 0:   # the bubble takes it
+	if target > 0 and players.has(target) and players[target].state.shield > 0:   # the bubble takes it, for mana
 		var c: Vector3 = players[target].state.pos + Vector3(0, 0.95, 0)
 		var back := -Vector3(dir.x, 0, dir.z)
 		if back.length() < 1e-4:
 			back = Vector3(0, 1, 0)
-		_fx("shield_hit", [target, c + back.normalized() * Weapons.SHIELD_RADIUS])
-		return
+		var at := c + back.normalized() * Weapons.SHIELD_RADIUS
+		var rate := Weapons.SHIELD_MANA_SPELL if dmg_src >= 0 else Weapons.SHIELD_MANA_WEAPON
+		var left := _shield_soak(players[target], int(ceil(amount * rate * 5.0)), at)
+		if left <= 0:
+			return
+		amount = maxi(int(ceil(float(left) / (rate * 5.0))), 1)   # it shattered: the rest gets through
 	if target < 0:
 		pos = WorldLayout.DUMMIES[-target - 1] + Vector3(0, 1.3, 0)
 	else:
@@ -833,7 +845,10 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		if q.state.hp == 0:
 			q.state.dead = Sim.RESPAWN_TICKS
 			q.state.charge = 0
+			q.state.shield = 0
 			killed = true
+			if dmg_src >= 0 and players.has(from) and from != target:
+				_magic_kill(players[from], dmg_src)
 		Sim.quantize(q.state)
 		pos = q.state.pos + Vector3(0, 1.3, 0)
 	hit_fx.rpc(target, amount, pos, dir, killed, from)
@@ -1042,21 +1057,46 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 			_fx("golem_rise", [g.id, at])
 		"Teleport":
 			_fx("teleport", [p.id, before, s.pos])
+		"Frost Nova":
+			_fx("frost_nova", [p.id, s.pos, float(sp.radius)])
+			_blast(s.pos + Vector3(0, 0.5, 0), sp, p.id, Weapons.STAFF)
+			for q: ServerPlayer in players.values():   # everyone caught in it is slowed (not through a shield)
+				if q.id != p.id and q.state.dead == 0 and q.state.shield == 0 and can_hurt(p.id, q.id) \
+						and _dist_to_body(s.pos + Vector3(0, 0.5, 0), q.state.pos) <= float(sp.radius):
+					q.state.slow = int(sp.slow)
+		"Earth Spikes":
+			var d := Vector2(inp.aim_point.x - s.pos.x, inp.aim_point.z - s.pos.z)
+			if d.length() < 0.5:
+				d = Vector2(-sin(s.yaw), -cos(s.yaw))
+			d = d.normalized()
+			for k in int(sp.spikes):
+				var at := s.pos + Vector3(d.x, 0, d.y) * (1.6 + k * float(sp.spacing))
+				at.y = WorldLayout.ground_height(at.x, at.z, s.pos.y + 0.5)
+				if _in_box(at + Vector3(0, 0.3, 0)) or Vector2(at.x - s.pos.x, at.z - s.pos.z).length() > float(sp.range):
+					break   # the line stops at a pillar
+				pending_spells.append([server_tick + 3 + k * 3, "spike", at, p.id])
+			_fx("cast", [p.id, "earth"])
 		"Stun":
 			var tgt := _stun_target(p, hand, inp.aim_point, float(sp.range))
 			var end: Vector3 = tgt[1]
-			if tgt[0] > 0 and players[tgt[0]].state.shield > 0:
-				_fx("shield_hit", [tgt[0], end])
-				_fx("stun_beam", [p.id, hand, end, 0])
-			elif tgt[0] > 0:
-				players[tgt[0]].state.stun = int(sp.duration)
-				players[tgt[0]].state.charge = 0
-				_fx("stun_beam", [p.id, hand, end, tgt[0]])
-			elif tgt[0] <= -1000:
-				golems.stun(-1000 - tgt[0], int(sp.duration))
-				_fx("stun_beam", [p.id, hand, end, tgt[0]])
-			else:
-				_fx("stun_beam", [p.id, hand, end, 0])
+			if tgt[0] == 0 and hand.distance_to(inp.aim_point) < hand.distance_to(end) and inp.aim_point.length() > 0.0:
+				end = inp.aim_point   # nobody in the way: it bursts at the crosshair point
+			var r := float(sp.radius)
+			var caught := 0
+			for q: ServerPlayer in players.values():   # every enemy in the burst is held (a shield soaks it for mana)
+				if q.id == p.id or q.state.dead > 0 or not can_hurt(p.id, q.id) or _dist_to_body(end, q.state.pos) > r:
+					continue
+				if q.state.shield > 0 and _shield_soak(q, Weapons.SHIELD_MANA_STUN * 5, end) <= 0:
+					continue
+				q.state.stun = int(sp.duration)
+				q.state.charge = 0
+				caught += 1
+			for g: Golems.G in golems.list.values():
+				if g.owner != p.id and _dist_to_body(end, g.pos) <= r:
+					golems.stun(g.id, int(sp.duration))
+					caught += 1
+			_fx("stun_beam", [p.id, hand, end, caught])
+			_fx("stun_burst", [end, r])
 
 
 ## A point on the ground (or a pillar top) under where the crosshair is, no further than `reach` from `from`.
@@ -1121,7 +1161,8 @@ func _ray_cyl(o: Vector3, d: Vector3, c: Vector3, r: float, h: float) -> float:
 
 ## Area damage round a point (lightning, a fireball's blast): the closer to the centre, the harder it hits (full
 ## damage at the centre down to the spell's minimum at its edge), and the further it throws. Shields soak it.
-func _blast(center: Vector3, sp: Dictionary, owner: int) -> void:
+func _blast(center: Vector3, sp: Dictionary, owner: int, src := Weapons.STAFF) -> void:
+	dmg_src = src
 	var r := float(sp.radius)
 	for q: ServerPlayer in players.values():
 		if q.state.dead > 0 or q.id == owner:
@@ -1148,6 +1189,7 @@ func _blast(center: Vector3, sp: Dictionary, owner: int) -> void:
 			if Vector2(tp.x - center.x, tp.z - center.z).length() < r + 0.4:
 				ecology.hit_tree(i, Weapons.area_damage(sp, 0.0), server_tick, tp - center)
 		ecology.blast_fruit(center, r, server_tick)
+	dmg_src = -1
 
 
 ## Distance from a point to a standing body (an upright segment from its feet to 1.8 m up).
@@ -1160,10 +1202,14 @@ func _server_spells() -> void:
 	for e in pending_spells.duplicate():
 		if server_tick >= e[0]:
 			pending_spells.erase(e)
-			var caster: ServerPlayer = players.get(e[3], null)
-			var sp := Weapons.spell(Weapons.STAFF, 0)
-			_fx("lightning", [e[2]])
-			_blast(e[2], sp, e[3] if caster != null else 0)
+			var owner: int = e[3] if players.has(e[3]) else 0
+			match str(e[1]):
+				"lightning":
+					_fx("lightning", [e[2]])
+					_blast(e[2], Weapons.spell(Weapons.STAFF, 0), owner, Weapons.STAFF)
+				"spike":
+					_fx("spike", [e[2]])
+					_blast(e[2], Weapons.spell(Weapons.WAND, 3), owner, Weapons.WAND)
 	# golems
 	var people := []
 	for p: ServerPlayer in players.values():
@@ -1171,10 +1217,12 @@ func _server_spells() -> void:
 	for h in golems.tick(server_tick, people):
 		var g: Golems.G = h[0]
 		var tid: int = h[1]
+		dmg_src = Weapons.WAND
 		if tid <= -1000:
 			_damage(tid, int(h[2]), g.owner, h[3], 0.0)
 		else:
 			_damage(tid, int(h[2]), g.owner, h[3], Golems.KNOCK)
+		dmg_src = -1
 		_fx("golem_slam", [g.id, g.pos + Vector3(-sin(g.yaw), 0, -cos(g.yaw)) * 0.7])
 	if server_tick % 3 == 0 and (not golems.list.is_empty() or _golems_were):
 		_golems_were = not golems.list.is_empty()
@@ -1218,3 +1266,45 @@ func spell_fx(kind: String, args: Array) -> void:
 @rpc("authority", "call_remote", "unreliable_ordered", 5)
 func golem_states(tick: int, data: Array) -> void:
 	golems_changed.emit(tick, data)
+
+
+var dmg_src := -1   # while a spell's damage is being dealt: the weapon it counts for (Weapons.STAFF / WAND), else -1
+
+
+## A player was knocked out with the staff or wand: count it; at 3, 8 and 18 kills the weapon levels up and gains its
+## next spell (Weapons.LEVEL_KILLS), with a burst of light for everyone and the news on the killer's screen.
+func _magic_kill(p: ServerPlayer, w: int) -> void:
+	var i := 0 if w == Weapons.STAFF else 1
+	p.kills[i] += 1
+	var lv := Weapons.level_for(int(p.kills[i]))
+	var cur := p.state.staff_lvl if w == Weapons.STAFF else p.state.wand_lvl
+	if lv > cur:
+		if w == Weapons.STAFF:
+			p.state.staff_lvl = lv
+		else:
+			p.state.wand_lvl = lv
+		var spells: Array = Weapons.get_data(w).spells
+		var name := ""
+		for sp in spells:
+			if int(sp.get("level", 1)) == lv:
+				name = str(sp.name)
+		_fx("level_up", [p.id, w, lv, name])
+		print("%s's %s reached level %d: %s" % [p.name, Weapons.NAMES[w], lv, name])
+	_server_send_roster()
+
+
+## A hit on a held shield, costing `cost` (fifths of a mana point). Paid in full: a ripple, returns 0. Not enough
+## mana: the shield shatters, the mana is gone, it can't be raised for a moment; returns what the mana couldn't pay.
+func _shield_soak(q: ServerPlayer, cost: int, at: Vector3) -> int:
+	var s := q.state
+	if s.mana >= cost:
+		s.mana -= cost
+		_fx("shield_hit", [q.id, at])
+		return 0
+	var left := cost - s.mana
+	s.mana = 0
+	s.shield = 0
+	s.atk_cd = maxi(s.atk_cd, Weapons.SHIELD_BROKEN)
+	_fx("shield_shatter", [q.id, s.pos + Vector3(0, 0.95, 0), at])
+	return left
+

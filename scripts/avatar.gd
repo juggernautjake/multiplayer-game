@@ -354,8 +354,12 @@ func _update_prop(delta: float) -> void:
 		var into := int(sp.cast) - state.atk
 		k = clampf(float(into) / float(maxi(int(sp.windup), 1)), 0.0, 1.0) * clampf(float(state.atk) / 10.0, 0.0, 1.0)
 	var staff := w == Weapons.STAFF
-	_prop.position = right * 0.34 + fwd * lerpf(0.05, 0.35, k) + Vector3(0, (0.95 if staff else 0.85) + 0.3 * k, 0)
-	var tilt := lerpf(0.08 if staff else 1.1, 0.7 if staff else 1.45, k)
+	var up := 0.0
+	if state.shield > 0:   # holding the shield up: the staff raised high over his head
+		k = 0.0
+		up = 0.75
+	_prop.position = right * (0.34 - 0.18 * up) + fwd * lerpf(0.05, 0.35, k) + Vector3(0, (0.95 if staff else 0.85) + 0.3 * k + up, 0)
+	var tilt := lerpf(0.08 if staff else 1.1, 0.7 if staff else 1.45, k) - 0.08 * up
 	_prop.basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -tilt)
 	var orb := _prop.get_node_or_null("Orb") as MeshInstance3D
 	if orb:

@@ -6,9 +6,17 @@
 ##              growing ball of fire, smoke, sparks and a scorch mark;
 ##   shield:    a see-through bubble with a bright rim and drifting bands; wherever something strikes it, a bright spot
 ##              flares and a ring of light runs out across the bubble from that point;
-##   stun:      a violet bolt from the wand, then a ring of spinning stars over the stunned player's head;
+##   stun:      a violet bolt from the wand that bursts in a crackling violet ring where it lands; everyone caught
+##              gets a ring of spinning stars over their head;
 ##   teleport:  a violet puff where you left and where you arrive, joined by a fading streak;
-##   golems:    dust and a cracked ring as one rises; a dust ring and a thud when one slams.
+##   golems:    dust and a cracked ring as one rises; a dust ring and a thud when one slams;
+##   frost nova: a ring of ice racing out from the caster, ice shards bursting up along it, a cold flash, frost on the
+##              ground, and a frosty ring at the feet of everyone it slowed;
+##   earth spikes: stone spikes stabbing up out of the ground one after another, in dust;
+##   level up:  a column of golden light round the player and the new spell's name;
+##   shatter:   a shield that runs out of mana bursts into glowing shards.
+## Every caster glows while casting (and while holding the shield up): a light in the spell's colour at the staff or
+## wand, growing as the spell builds, with sparks drawn in toward it.
 class_name MagicFx
 extends Node3D
 
@@ -48,6 +56,11 @@ var bubbles := {}            # player id -> { node, mat, hits: [[dir, t]] }
 var stuns := {}              # player id -> Node3D (the star ring)
 var _shader: Shader
 var _vault_door: Node3D      # set by Main: the door's hinge
+var cast_lights := {}        # player id -> OmniLight3D at their staff / wand while casting
+var frosts := {}             # player id -> the frosty ring at the feet of a slowed player
+const SPELL_COLOR := { "Lightning": Color("cfe6ff"), "Fireball": Color("ff8a2a"), "Shield": Color("7fd0ff"),
+	"Frost Nova": Color("9fe8ff"), "Golem": Color("ffb02e"), "Teleport": Color("c070ff"), "Stun": Color("c070ff"),
+	"Earth Spikes": Color("d8a060") }
 var _door_target := 0.0
 
 
@@ -91,6 +104,16 @@ func _on_fx(kind: String, a: Array) -> void:
 			_shake_near(a[1], 0.12)
 		"vault_door":
 			_door_target = -1.7 if a[0] else 0.0
+		"frost_nova":
+			_frost_nova(a[1], float(a[2]))
+		"stun_burst":
+			_stun_burst(a[0], float(a[1]))
+		"spike":
+			_spike(a[0])
+		"level_up":
+			_level_up(int(a[0]), int(a[1]), int(a[2]), str(a[3]))
+		"shield_shatter":
+			_shatter(int(a[0]), a[1])
 
 
 # ================================================================ every frame
@@ -104,12 +127,14 @@ func update(delta: float, states: Dictionary) -> void:
 		if bubbles.has(id):
 			var b: Dictionary = bubbles[id]
 			if not on:
-				Fx.burst(main, (b.node as Node3D).global_position, Vector3.UP, Color("8fd8ff"), 18, 3.5, 0.05)
+				if not b.get("shattered", false):
+					Fx.burst(main, (b.node as Node3D).global_position, Vector3.UP, Color("8fd8ff"), 18, 3.5, 0.05)
 				(b.node as Node3D).queue_free()
 				bubbles.erase(id)
 			else:
 				(b.node as Node3D).global_position = (avatars[id] as Node3D).position + Vector3(0, 0.95, 0)
-				var flicker := 1.0 if st.shield > 60 else (0.45 + 0.55 * absf(sin(st.shield * 0.35)))
+				var low := float(st.mana) / float(Sim.MANA_FULL)
+				var flicker := 1.0 if low > 0.25 else (0.5 + 0.5 * absf(sin(Time.get_ticks_msec() * 0.02)))
 				var mat: ShaderMaterial = b.mat
 				mat.set_shader_parameter("fade", flicker)
 				var dirs := PackedVector3Array()
@@ -138,6 +163,7 @@ func update(delta: float, states: Dictionary) -> void:
 			else:
 				ring.global_position = (avatars[id] as Node3D).position + Vector3(0, 2.15, 0)
 				ring.rotation.y += delta * 5.0
+	_cast_glow(delta, states)
 	for id in bubbles.keys():
 		if not states.has(id):
 			(bubbles[id].node as Node3D).queue_free()
@@ -164,6 +190,7 @@ func _flash_light(at: Vector3, c: Color, energy: float, reach: float, life: floa
 	l.light_color = c
 	l.light_energy = energy
 	l.omni_range = reach
+	l.shadow_enabled = energy >= 5.0   # the big flashes throw shadows
 	main.add_child(l)
 	l.global_position = at
 	var tw := l.create_tween()
@@ -444,3 +471,203 @@ func _golem_dust(at: Vector3, r: float) -> void:
 func _shake_near(at: Vector3, amount: float) -> void:
 	if avatars.has(net.my_id) and (avatars[net.my_id] as Node3D).position.distance_to(at) < 12.0:
 		main.set("shake", maxf(float(main.get("shake")), amount))
+
+
+# ================================================================ casting glow, frost, spikes, level-ups, shatters
+## While a player casts (or holds the shield), a light in the spell's colour burns at their staff / wand, swelling as
+## the spell builds and flaring as it goes off; sparks are drawn in toward it. Slowed players get frost at their feet.
+func _cast_glow(delta: float, states: Dictionary) -> void:
+	for id in states.keys():
+		var st: Sim.PlayerState = states[id]
+		var av: Node3D = avatars.get(id, null)
+		var on := st != null and av != null and st.dead == 0 and Weapons.is_magic(st.weapon) and (st.atk > 0 or st.shield > 0)
+		if on and not cast_lights.has(id):
+			var l := OmniLight3D.new()
+			l.omni_range = 5.0
+			l.shadow_enabled = true
+			main.add_child(l)
+			cast_lights[id] = l
+		if cast_lights.has(id):
+			var l: OmniLight3D = cast_lights[id]
+			if not on:
+				l.queue_free()
+				cast_lights.erase(id)
+			else:
+				var sp := Weapons.spell(st.weapon, st.spell)
+				var c: Color = SPELL_COLOR.get(str(sp.name), Color.WHITE)
+				var fwd := Vector3(-sin(av.yaw), 0, -cos(av.yaw))
+				var hand := av.position + Vector3(0, 1.6 if st.shield > 0 else 1.45, 0) + fwd * 0.4
+				var k := 1.0
+				if st.atk > 0 and int(sp.cast) > 0:
+					var into := int(sp.cast) - st.atk
+					k = clampf(float(into) / float(maxi(int(sp.windup), 1)), 0.0, 1.0)
+					if into >= int(sp.windup):
+						k = clampf(1.6 - float(into - int(sp.windup)) * 0.08, 0.0, 1.6)   # the flare, then fading
+				l.global_position = hand
+				l.light_color = c
+				l.light_energy = 0.6 + 3.2 * k + (0.4 * sin(Time.get_ticks_msec() * 0.03) if st.shield > 0 else 0.0)
+				if randf() < delta * 30.0 * k:   # sparks drawn in toward the staff
+					var off := Vector3(randf_range(-1, 1), randf_range(-0.6, 1), randf_range(-1, 1)).normalized() * 0.7
+					Fx.burst(main, hand + off, -off, c, 1, 2.0, 0.035)
+		var slowed := st != null and av != null and st.slow > 0 and st.dead == 0
+		if slowed and not frosts.has(id):
+			var d := _disc(av.position, 0.7, Color("bfefff"), 0.45)
+			frosts[id] = d
+		if frosts.has(id):
+			var d: MeshInstance3D = frosts[id]
+			if not slowed:
+				d.queue_free()
+				frosts.erase(id)
+			else:
+				d.global_position = Vector3(av.position.x, WorldLayout.ground_height(av.position.x, av.position.z, av.position.y) + 0.03, av.position.z)
+				if randf() < delta * 10.0:
+					Fx.burst(main, av.position + Vector3(randf_range(-0.4, 0.4), randf_range(0.2, 1.6), randf_range(-0.4, 0.4)), Vector3.DOWN, Color("dff6ff"), 1, 0.6, 0.03)
+
+
+func _frost_nova(at: Vector3, r: float) -> void:
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.85
+	tm.outer_radius = 1.0
+	ring.mesh = tm
+	var m := _glow_mat(Color("aeeeff"), 3.5, 0.9)
+	ring.material_override = m
+	main.add_child(ring)
+	ring.global_position = at + Vector3(0, 0.15, 0)
+	ring.scale = Vector3(0.3, 0.4, 0.3)
+	var tw := ring.create_tween().set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3(r, 0.4, r), 0.35).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.5).set_delay(0.15)
+	tw.chain().tween_callback(ring.queue_free)
+	for i in 22:   # ice shards bursting up round the ring, each a moment after the wave reaches it
+		var a := randf() * TAU
+		var d := randf_range(1.2, r)
+		var shard := MeshInstance3D.new()
+		var pm := PrismMesh.new()
+		pm.size = Vector3(randf_range(0.2, 0.4), randf_range(0.5, 1.2), randf_range(0.2, 0.35))
+		shard.mesh = pm
+		var sm := _glow_mat(Color("cdf6ff"), 1.2, 0.85)
+		shard.material_override = sm
+		main.add_child(shard)
+		shard.global_position = at + Vector3(cos(a) * d, -0.6, sin(a) * d)
+		shard.rotation = Vector3(randf_range(-0.4, 0.4), randf() * TAU, randf_range(-0.4, 0.4))
+		var st := shard.create_tween()
+		st.tween_interval(0.35 * d / r)
+		st.tween_property(shard, "global_position:y", at.y + pm.size.y * 0.4, 0.08)
+		st.tween_interval(0.9)
+		st.tween_property(sm, "albedo_color:a", 0.0, 0.6)
+		st.tween_callback(shard.queue_free)
+	_flash_light(at + Vector3(0, 1.5, 0), Color("9fe8ff"), 6.0, r * 2.5, 0.5)
+	Fx.burst(main, at + Vector3(0, 0.6, 0), Vector3.UP, Color("e6faff"), 40, 7.0, 0.04)
+	var frost := _disc(at, r * 0.85, Color("d8f6ff"), 0.16)
+	_fade_out(frost, frost.material_override, 2.5, 2.0)
+	_shake_near(at, 0.1)
+
+
+func _spike(at: Vector3) -> void:
+	var spike := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.0
+	cm.bottom_radius = 0.42
+	cm.height = 1.7
+	cm.radial_segments = 6
+	spike.mesh = cm
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color("7a6a58")
+	m.roughness = 0.95
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	spike.material_override = m
+	main.add_child(spike)
+	spike.global_position = at + Vector3(0, -0.9, 0)
+	spike.rotation = Vector3(randf_range(-0.2, 0.2), randf() * TAU, randf_range(-0.2, 0.2))
+	var tw := spike.create_tween()
+	tw.tween_property(spike, "global_position:y", at.y + 0.75, 0.07).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(0.7)
+	tw.tween_property(spike, "global_position:y", at.y - 1.0, 0.5)
+	tw.tween_callback(spike.queue_free)
+	Fx.burst(main, at + Vector3(0, 0.2, 0), Vector3.UP, Color("9a8f80"), 14, 4.0, 0.07)
+	_flash_light(at + Vector3(0, 0.6, 0), Color("ffb060"), 1.5, 3.0, 0.2)
+	_shake_near(at, 0.06)
+
+
+func _level_up(id: int, w: int, lv: int, spell: String) -> void:
+	if not avatars.has(id):
+		return
+	var at: Vector3 = (avatars[id] as Node3D).position
+	var col := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.7
+	cm.bottom_radius = 0.9
+	cm.height = 9.0
+	col.mesh = cm
+	var m := _glow_mat(Color("ffd86a"), 3.0, 0.45)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	col.material_override = m
+	main.add_child(col)
+	col.global_position = at + Vector3(0, 4.5, 0)
+	var tw := col.create_tween()
+	tw.tween_property(m, "albedo_color:a", 0.0, 1.6)
+	tw.tween_callback(col.queue_free)
+	_flash_light(at + Vector3(0, 2, 0), Color("ffd86a"), 6.0, 10.0, 1.2)
+	Fx.burst(main, at + Vector3(0, 1.0, 0), Vector3.UP, Color("ffe9a0"), 50, 6.0, 0.05)
+	var what := ("%s LEVEL %d!" % [Weapons.NAMES[w].to_upper(), lv]) + ("  New spell: " + spell if spell != "" else "")
+	Fx.word(main, at + Vector3(0, 2.6, 0), what, Color("ffd86a"))
+	if id == net.my_id and main.has_method("toast"):
+		main.toast(what + ("  (R to pick it)" if spell != "" else ""))
+
+
+func _shatter(id: int, at: Vector3) -> void:
+	if bubbles.has(id):
+		bubbles[id].shattered = true
+		(bubbles[id].node as Node3D).visible = false
+	for i in 40:   # glowing glass shards flying out and falling
+		var shard := MeshInstance3D.new()
+		var pm := PrismMesh.new()
+		pm.size = Vector3(randf_range(0.08, 0.22), randf_range(0.1, 0.28), 0.02)
+		shard.mesh = pm
+		var sm := _glow_mat(Color("aee6ff"), 2.5, 0.9)
+		shard.material_override = sm
+		main.add_child(shard)
+		var dir := Vector3(randf_range(-1, 1), randf_range(-0.3, 1), randf_range(-1, 1)).normalized()
+		shard.global_position = at + dir * Weapons.SHIELD_RADIUS
+		shard.rotation = Vector3(randf() * TAU, randf() * TAU, randf() * TAU)
+		var to := shard.global_position + dir * randf_range(1.5, 3.5) + Vector3(0, -1.2, 0)
+		var tw := shard.create_tween().set_parallel(true)
+		tw.tween_property(shard, "global_position", to, 0.7).set_ease(Tween.EASE_OUT)
+		tw.tween_property(shard, "rotation", shard.rotation + Vector3(randf_range(-8, 8), randf_range(-8, 8), 0), 0.7)
+		tw.tween_property(sm, "albedo_color:a", 0.0, 0.8).set_delay(0.2)
+		tw.chain().tween_callback(shard.queue_free)
+	_flash_light(at, Color("aee6ff"), 5.0, 7.0, 0.4)
+	Fx.burst(main, at, Vector3.UP, Color("e6faff"), 30, 6.0, 0.04)
+	Fx.word(main, at + Vector3(0, 1.4, 0), "SHATTERED!", Color("aee6ff"))
+	_shake_near(at, 0.16)
+
+
+func _stun_burst(at: Vector3, r: float) -> void:
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.9
+	tm.outer_radius = 1.0
+	ring.mesh = tm
+	var m := _glow_mat(Color("c070ff"), 4.0, 0.9)
+	ring.material_override = m
+	main.add_child(ring)
+	ring.global_position = Vector3(at.x, WorldLayout.ground_height(at.x, at.z, at.y + 0.3) + 0.08, at.z)
+	ring.scale = Vector3(0.2, 0.3, 0.2)
+	var tw := ring.create_tween().set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3(r, 0.3, r), 0.22).set_ease(Tween.EASE_OUT)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.5).set_delay(0.2)
+	tw.chain().tween_callback(ring.queue_free)
+	var dome := _disc(ring.global_position, r, Color("b066ff"), 0.14)
+	_fade_out(dome, dome.material_override, 0.6)
+	for k in 6:   # little arcs crackling round the edge
+		var a := randf() * TAU
+		var p0 := ring.global_position + Vector3(cos(a) * r, 0.1, sin(a) * r)
+		var p1 := ring.global_position + Vector3(cos(a + 0.5) * r, randf_range(0.3, 0.9), sin(a + 0.5) * r)
+		var arc := _jag(p0, p1, 3, 0.15, 0.04, Color("e0b0ff"))
+		var am: StandardMaterial3D = arc.get_meta("mat")
+		var at2 := arc.create_tween()
+		at2.tween_property(am, "albedo_color:a", 0.0, 0.3)
+		at2.tween_callback(arc.queue_free)
+	_flash_light(at + Vector3(0, 1, 0), Color("b066ff"), 5.0, r * 3.0, 0.4)
+

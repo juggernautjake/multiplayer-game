@@ -1,0 +1,88 @@
+extends SceneTree
+## The server's side of magic, run offline: a held shield soaks hits for mana (1.5 mana a point for weapons, 2 for
+## spells, 25 for a stun), shatters when the mana runs out and lets the rest through; kills with the staff or wand
+## level it up at 3, 8 and 18; players only hurt each other with PvP on.
+##   Godot --headless --path . --script tools/net_magic_test.gd
+
+var bad := 0
+
+func check(ok: bool, what: String) -> void:
+	print(("ok    " if ok else "FAIL  ") + what)
+	if not ok:
+		bad += 1
+
+
+func _initialize() -> void:
+	var net := Net.new()
+	root.add_child(net)
+	get_multiplayer().multiplayer_peer = OfflineMultiplayerPeer.new()
+	for id in [1, 2]:
+		net._server_add_player(id, "P%d" % id)
+	var a: Net.ServerPlayer = net.players[1]
+	var b: Net.ServerPlayer = net.players[2]
+
+	# PvP
+	net._damage(2, 10, 1, Vector3(1, 0, 0), 0.0)
+	check(b.state.hp == Sim.MAX_HP, "PvP off: no damage")
+	a.pvp = true
+	b.pvp = true
+	net._damage(2, 10, 1, Vector3(1, 0, 0), 0.0)
+	check(b.state.hp == Sim.MAX_HP - 10, "PvP on for both: 10 damage")
+	b.state.hp = Sim.MAX_HP
+
+	# shield soaks for mana
+	b.state.shield = 2
+	b.state.mana = 500
+	net._damage(2, 8, 1, Vector3(1, 0, 0), 2.0)   # a sword slash
+	check(b.state.hp == Sim.MAX_HP and b.state.mana == 500 - 60, "a slash of 8 on the shield: no damage, 12 mana (%d left)" % (b.state.mana / 5))
+	net.dmg_src = Weapons.STAFF
+	net._damage(2, 22, 1, Vector3(1, 0, 0), 2.0)   # a fireball's centre
+	net.dmg_src = -1
+	check(b.state.hp == Sim.MAX_HP and b.state.mana == 440 - 220, "a fireball of 22: 44 mana (%d left)" % (b.state.mana / 5))
+	check(b.state.shield > 0, "the shield is still up")
+	# not enough mana for the next big hit: it shatters, the rest goes through
+	b.state.mana = 50   # 10 mana
+	net.dmg_src = Weapons.STAFF
+	net._damage(2, 28, 1, Vector3(1, 0, 0), 2.0)   # lightning: 56 mana, only 10 there
+	net.dmg_src = -1
+	check(b.state.shield == 0 and b.state.mana == 0, "out of mana: the shield shatters")
+	check(b.state.hp == Sim.MAX_HP - 23, "the part the mana couldn't pay gets through (%d damage of 28)" % (Sim.MAX_HP - b.state.hp))
+	check(b.state.atk_cd >= Weapons.SHIELD_BROKEN, "it can't be raised again for 2 s")
+	b.state.hp = Sim.MAX_HP
+
+	# kills level the weapons up
+	for i in 3:
+		b.state.hp = 5
+		b.state.dead = 0
+		net.dmg_src = Weapons.STAFF
+		net._damage(2, 10, 1, Vector3(1, 0, 0), 0.0)
+		net.dmg_src = -1
+	check(a.kills[0] == 3 and a.state.staff_lvl == 2, "3 staff kills: staff level 2 (Frost Nova)")
+	for i in 5:
+		b.state.hp = 5
+		b.state.dead = 0
+		net.dmg_src = Weapons.WAND
+		net._damage(2, 10, 1, Vector3(1, 0, 0), 0.0)
+		net.dmg_src = -1
+	check(a.kills[1] == 5 and a.state.wand_lvl == 2, "5 wand kills: wand level 2, not 3 yet (%d)" % a.state.wand_lvl)
+	b.state.hp = 5
+	b.state.dead = 0
+	net._damage(2, 10, 1, Vector3(1, 0, 0), 0.0)   # a sword kill: doesn't count for magic
+	check(a.kills == [3, 5], "a kill with a sword doesn't count toward magic levels")
+	# the stun bursts in an area: someone 2 m from where it lands is caught
+	a.state.pos = Vector3(60, 0, 60)
+	b.state.pos = Vector3(60, 0, 48)
+	b.state.dead = 0
+	b.state.hp = Sim.MAX_HP
+	b.state.shield = 0
+	a.state.weapon = Weapons.WAND
+	a.state.spell = 2
+	a.state.yaw = 0.0
+	net._cast(a, Sim.PlayerInput.new(1, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 2, Vector3(62, 0, 47.5)), a.state.pos)
+	check(b.state.stun == int(Weapons.spell(Weapons.WAND, 2).duration), "a stun landing 2 m away catches them (held for 3 s)")
+	b.state.stun = 0
+	b.state.pos = Vector3(60, 0, 40)
+	net._cast(a, Sim.PlayerInput.new(2, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 2, Vector3(64, 0, 47.5)), a.state.pos)
+	check(b.state.stun == 0, "8 m away they're not caught")
+	print("%d failed" % bad)
+	quit(bad)
