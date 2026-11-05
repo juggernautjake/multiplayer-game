@@ -13,6 +13,13 @@
 ##     the hand follows through past the ear, then reaches back to the quiver for the next arrow;
 ##   slingshot: the fork held out at eye level, the pouch pinched and pulled back to the cheek, the bands stretching;
 ##     release snaps them forward with a wobble, then the hand reloads from the pouch on the belt.
+## v0.8.0: strafing leans into the side it's going and backpedalling leans back; the head leads into turns; a crouch
+## soaks up every landing (deeper the harder the fall) with a ring of dust, and it stretches up on take-off; in the air
+## the free arms go out for balance; a dash drops the body low, sweeps the arms back and streaks speed lines; running
+## feet kick up dust where they plant; no two swings are quite the same (each blow's height and body turn vary a
+## little); the staff and wand move through each spell's own gesture (CastPose); and the wizard garb (WizardGarb):
+## the robe recolours the tunic, sleeves and trousers, bell sleeves hang and swing from the forearms, and the cloth
+## robe, hat and hood are simulated around the body.
 ## Same interface as Avatar (Pip): yaw, grounded, dashing, state, model, label, flash(), animate().
 class_name FigureAvatar
 extends Node3D
@@ -97,6 +104,17 @@ var _bank := 0.0
 var _last_vel := Vector3.ZERO
 var _last_yaw := 0.0
 var _prev_hand_r := Vector3.ZERO
+var _was_grounded := true
+var _fall_v := 0.0
+var _plant_sign := 1.0
+var _speed_line_t := 0.0
+var _turn_look := 0.0
+var _yaw_rate := 0.0
+var _joints := {}              # knee_r, ankle_r, elbow_r, ... (body frame) this frame: the robe's colliders
+var _garb: WizardGarb
+var _garb_kind := 0
+var _base_col := {}            # part -> its own colour (the robe recolours some)
+var _sleeves := {}             # "r" / "l" -> [MeshInstance3D, hang direction]
 
 
 var _name := ""
@@ -156,6 +174,7 @@ func _init(player_name: String, color: Color, show_name: bool, _outfit := 0) -> 
 		mat.metallic = 0.6 if nm == "buckle" else 0.0
 		mi.material_override = mat
 		_mats.append([mat, spec[1]])
+		_base_col[nm] = _mats.size() - 1
 		model.add_child(mi)
 		parts[nm] = mi
 	_string_a = _line_mesh(WeaponModels.STRING)
@@ -212,6 +231,20 @@ func _init(player_name: String, color: Color, show_name: bool, _outfit := 0) -> 
 	hp_bar.position.y = 2.05
 	hp_bar.visible = show_name
 	add_child(hp_bar)
+	_garb = WizardGarb.new()
+	add_child(_garb)
+	for sd in ["r", "l"]:   # bell sleeves, shown with a robe
+		var sl := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.065
+		cm.bottom_radius = 0.13
+		cm.height = 1.0
+		cm.radial_segments = 10
+		sl.mesh = cm
+		sl.material_override = WizardGarb._cloth_mat(WizardGarb.GREY)
+		sl.visible = false
+		model.add_child(sl)
+		_sleeves[sd] = [sl, Vector3.DOWN]
 
 
 func flash() -> void:
@@ -282,7 +315,9 @@ func animate(delta: float, _cam: Camera3D) -> void:
 		_v_hand_l = sl[1]
 	_pole_r = _pole_r.lerp(pose.get("pole_r", Vector3(0.45, -0.45, 1.0)), a)
 	var wd: Vector3 = (pose.wdir as Vector3).normalized()
-	_wdir = _wdir.slerp(wd, a) if _wdir.normalized().dot(wd) > -0.99 else wd
+	var wdot := _wdir.normalized().dot(wd)
+	# (nearly the same way already: no slerp; its rotation axis would be a cross product too tiny to normalize)
+	_wdir = _wdir.normalized().slerp(wd, a).normalized() if wdot > -0.99 and wdot < 0.99999 else wd
 	_wroll = _wroll.lerp(pose.wroll, a).normalized()
 	if instant:
 		_twist = pose.twist
@@ -317,6 +352,7 @@ func animate(delta: float, _cam: Camera3D) -> void:
 		_accel_lean = al[0]
 		_v_accel_lean = al[1]
 		var yaw_rate := wrapf(yaw - _last_yaw, -PI, PI) / delta
+		_yaw_rate = yaw_rate
 		_bank = lerpf(_bank, clampf(atan(speed * yaw_rate / 9.8), -0.35, 0.35), clampf(delta * 8.0, 0.0, 1.0))
 	_last_vel = _vel
 	_last_yaw = yaw
@@ -336,6 +372,29 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	var fa := 1.0 if instant else clampf(delta * 20.0, 0.0, 1.0)
 	_foot_r = _foot_r.lerp(fr, fa)
 	_foot_l = _foot_l.lerp(fl, fa)
+	# take-off stretches up; landing sinks into a crouch by how hard it came down, with dust
+	if not instant:
+		if not grounded:
+			if _was_grounded:
+				_v_crouch -= 1.4
+			_fall_v = maxf(_fall_v, -_vel.y)
+		elif not _was_grounded:
+			_v_crouch += clampf(_fall_v * 0.09, 0.4, 2.2)
+			if _fall_v > 4.0 and model.visible and get_parent() != null:
+				MotionFx.land(get_parent(), position, clampf(_fall_v / 14.0, 0.3, 1.4))
+			_fall_v = 0.0
+		_was_grounded = grounded
+		# running feet kick up dust where they plant
+		var plant := signf(sin(_phase))
+		if grounded and speed > Sim.WALK_SPEED * 0.9 and plant != _plant_sign and model.visible and get_parent() != null:
+			var foot := _foot_l if plant > 0.0 else _foot_r
+			MotionFx.puff(get_parent(), global_transform * foot, 2, 0.5)
+		_plant_sign = plant
+		if dashing and model.visible and get_parent() != null:
+			_speed_line_t -= delta
+			if _speed_line_t <= 0.0:
+				_speed_line_t = 0.04
+				MotionFx.speed_lines(get_parent(), position, _vel, label.modulate)
 
 	# ---- the skeleton: pelvis, waist, chest (the twist and lean spread over both), neck, head
 	var dead := st != null and st.dead > 0
@@ -350,11 +409,16 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	var sway := -sin(_phase) * lerpf(0.025, 0.008, run) * moving + idle_shift
 	var hip_yaw := sin(_phase) * lerpf(0.1, 0.14, run) * moving
 	var chest_yaw := -sin(_phase) * lerpf(0.12, 0.22, run) * moving   # the chest counter-rotates
-	var speed_lean := lerpf(0.05, 0.2, clampf(speed / Sim.SPRINT_SPEED, 0.0, 1.0)) * moving + (0.4 if dashing else 0.0)
+	var fwd_frac := clampf(-local_vel.z / maxf(speed, 0.1), -1.0, 1.0)   # 1 straight ahead, -1 backpedalling
+	var side_frac := clampf(local_vel.x / maxf(speed, 0.1), -1.0, 1.0)   # strafing right +, left -
+	var speed_lean := lerpf(0.05, 0.2, clampf(speed / Sim.SPRINT_SPEED, 0.0, 1.0)) * moving * clampf(fwd_frac, -0.6, 1.0) + (0.4 if dashing else 0.0)
 	var run_lean := speed_lean + _accel_lean
+	var strafe_tilt := -side_frac * 0.13 * moving   # leaning into the side it's stepping toward
+	if not instant and delta > 0.0:
+		_turn_look = lerpf(_turn_look, clampf(_yaw_rate * 0.09, -0.45, 0.45), clampf(delta * 10.0, 0.0, 1.0))
 	var pelvis := Vector3(sway, 0.95 - _crouch + bob, 0)
-	var low := Basis(Vector3.UP, _twist * 0.3 + hip_yaw) * Basis(Vector3.BACK, _bank * 0.5) * Basis(Vector3.RIGHT, (_lean - run_lean) * 0.5)
-	var spine := Basis(Vector3.UP, _twist + chest_yaw) * Basis(Vector3.BACK, _bank) * Basis(Vector3.RIGHT, _lean - run_lean)
+	var low := Basis(Vector3.UP, _twist * 0.3 + hip_yaw) * Basis(Vector3.BACK, (_bank + strafe_tilt) * 0.5) * Basis(Vector3.RIGHT, (_lean - run_lean) * 0.5)
+	var spine := Basis(Vector3.UP, _twist + chest_yaw) * Basis(Vector3.BACK, _bank + strafe_tilt) * Basis(Vector3.RIGHT, _lean - run_lean)
 	var waist := pelvis + low * Vector3(0, 0.2, 0)
 	var chest := waist + spine * Vector3(0, 0.24 + breathe, 0)
 	var sh_r := chest + spine * Vector3(0.235, 0.1, 0)
@@ -372,7 +436,7 @@ func animate(delta: float, _cam: Camera3D) -> void:
 			sh_l = shp
 	var neck := chest + spine * Vector3(0, 0.17, 0)
 	# the head stays steady: it undoes most of the gait's twist and keeps looking ahead
-	var head_basis := Basis(Vector3.UP, _twist + _look - chest_yaw * 0.8) * Basis(Vector3.RIGHT, (_lean - run_lean) * 0.3)
+	var head_basis := Basis(Vector3.UP, _twist + _look + _turn_look - chest_yaw * 0.8) * Basis(Vector3.RIGHT, (_lean - run_lean) * 0.3)
 	var head := neck + head_basis * Vector3(0, 0.15, 0)
 	var hip_r := pelvis + low * Vector3(0.1, -0.04, 0)
 	var hip_l := pelvis + low * Vector3(-0.1, -0.04, 0)
@@ -417,6 +481,7 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	last_hand_r = palm_r
 	last_hand_l = palm_l
 	_draw_weapon(st, w, palm_r, palm_l, dead, pose)
+	_dress(delta, st, pelvis, low, neck, head, head_basis, hip_r, hip_l, dead)
 
 	_swing_fx(st)
 	_flash = maxf(_flash - delta, 0.0)
@@ -473,6 +538,17 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 	if st == null or st.dead > 0:
 		return p
 	var w := st.weapon
+	var free_l := w in [Weapons.FISTS, Weapons.SWORD, Weapons.STAFF, Weapons.WAND]
+	if not grounded and st.atk == 0 and st.charge == 0:   # in the air: free arms out for balance
+		p.hand_l = Vector3(-0.42, 1.42, -0.02) if free_l else p.hand_l
+		if w == Weapons.FISTS:
+			p.hand_r = Vector3(0.42, 1.42, -0.02)
+	if dashing and st.atk == 0 and st.charge == 0:          # a dash: low, the arms swept back
+		p.crouch = 0.12
+		if free_l:
+			p.hand_l = Vector3(-0.3, 1.0, 0.38)
+		if w == Weapons.FISTS:
+			p.hand_r = Vector3(0.3, 1.0, 0.38)
 	match w:
 		Weapons.FISTS:   # after a punch, the guard stays up a while: fists by the chin, elbows in, knees soft
 			if _fight_t < 3.0 and speed < Sim.SPRINT_SPEED:
@@ -509,6 +585,13 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 		var keys := _move_keys(mv.name, h, p)
 		var frame := 1.0 / float(mv.swing)
 		var k := _sample(keys, t, h)
+		# no two blows quite alike: each swing (by its number) lands a little higher or lower and turns a little more
+		var n := float(st.swing_n)
+		var bell := sin(clampf(t, 0.0, 1.0) * PI)
+		if k.has("hand_r"):
+			k.hand_r = (k.hand_r as Vector3) + Vector3(0, sin(n * 12.9898) * 0.07, sin(n * 4.1414) * 0.04) * bell
+		if k.has("twist"):
+			k.twist = float(k.twist) + sin(n * 7.233) * 0.09 * bell
 		# the kinetic chain: the body leads the arms by ~2 frames, the weapon trails the hand by ~1
 		var kb := _sample(keys, minf(t + 2.0 * frame, 1.0), h)
 		for key in ["twist", "lean", "crouch", "foot_r", "foot_l"]:
@@ -543,13 +626,20 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 			p.hand_l = Vector3(-0.22, 1.7, -0.36)
 			p.lean = -0.05
 			return p
-		if st.atk > 0:
+		if st.atk > 0:   # each spell's own gesture (CastPose): wind up, release with overshoot, follow through
 			var sp := Weapons.spell(w, st.spell)
-			var k := clampf(1.0 - float(st.atk - (int(sp.cast) - int(sp.windup))) / float(maxi(int(sp.windup), 1)), 0.0, 1.0)
-			p.hand_r = Vector3(0.22, lerpf(1.2, 1.5, k), lerpf(-0.3, -0.62, k))
-			p.wdir = Vector3(0, 0.8, -0.6) if w == Weapons.STAFF else Vector3(0, 0.25, -1.0)
-			p.lean = -0.12 * k
+			var c := CastPose.at(w, str(sp.name), float(int(sp.cast) - st.atk), float(sp.windup), float(sp.cast))
+			var aim := float(c.aim)
+			p.wdir = Vector3(0, cos(aim), -sin(aim))
+			p.hand_r = Vector3(0.24 + float(c.side), 1.12 + float(c.lift), -0.24 - 0.42 * float(c.reach))
+			p.lean = -float(c.lean)
+			p.crouch = float(c.crouch)
 			p.twist = -0.2
+			if c.two_hand:   # the free hand joins lower on the staff
+				p.hand_l = (p.hand_r as Vector3) - (p.wdir as Vector3).normalized() * 0.28 + Vector3(-0.06, 0, 0)
+			else:            # the free hand opens out with the gesture
+				p.hand_l = Vector3(-0.3, 1.15 + float(c.lift) * 0.7, -0.25 - 0.25 * float(c.reach))
+			p.snap = float(c.flare) > 1.0
 		return p
 	if not Weapons.is_melee(w):
 		var d := Weapons.get_data(w)
@@ -746,6 +836,8 @@ func _arm(side: String, shoulder: Vector3, target: Vector3, pole: Vector3) -> Ve
 	var r := ik(shoulder, target, UPPER_ARM, FOREARM, pole)
 	var elbow: Vector3 = r[0]
 	var hand: Vector3 = r[1]
+	_joints["elbow_" + side] = elbow
+	_joints["hand_" + side] = hand
 	_place_seg("upper_" + side, shoulder, elbow, 0.068)
 	_place_seg("fore_" + side, elbow, hand, 0.05)
 	_place_ball("elbow_" + side, elbow, Vector3.ONE * 0.105)
@@ -766,6 +858,8 @@ func _leg(side: String, hip: Vector3, foot: Vector3) -> void:
 	var r := ik(hip, foot, THIGH, SHIN, Vector3(0, 0.2, -1))
 	var knee: Vector3 = r[0]
 	var ankle: Vector3 = r[1]
+	_joints["knee_" + side] = knee
+	_joints["ankle_" + side] = ankle
 	_place_seg("thigh_" + side, hip, knee, 0.085)
 	_place_seg("shin_" + side, knee, ankle, 0.068)
 	_place_ball("knee_" + side, knee, Vector3.ONE * 0.15)
@@ -950,3 +1044,55 @@ static func _trail(parent: Node, pos: Vector3, yaw: float, weapon: int, mv: Dict
 	else:
 		Fx.slash(parent, pos, yaw, float(mv.range) * (0.95 if sword else 0.8), float(mv.arc), col, false,
 			mv.name in ["backhand", "backslash"])
+
+
+# ================================================================ the wizard garb
+const ROBE_PARTS := ["chest", "waist", "hem", "upper_r", "upper_l", "shoulder_r", "shoulder_l", "pelvis",
+	"thigh_r", "thigh_l", "shin_r", "shin_l", "knee_r", "knee_l"]
+
+
+func _dress(delta: float, st: Sim.PlayerState, pelvis: Vector3, low: Basis, neck: Vector3, head: Vector3, head_basis: Basis,
+		hip_r: Vector3, hip_l: Vector3, dead: bool) -> void:
+	var k := WizardGarb.kind_for(st)
+	if k != _garb_kind:
+		_garb_kind = k
+		_garb.set_kind(k)
+		var robe := WizardGarb.robe_color(k)
+		for nm in ROBE_PARTS:   # the robe's cloth over the tunic, sleeves and trousers (or the clothes back)
+			var mc: Array = _mats[_base_col[nm]]
+			var orig: Color = (mc[0] as StandardMaterial3D).get_meta("orig", mc[1])
+			(mc[0] as StandardMaterial3D).set_meta("orig", orig)
+			mc[1] = orig if k == WizardGarb.Kind.NONE else (robe.darkened(0.08) if nm.begins_with("upper") or nm.begins_with("shoulder") else robe)
+		for sd in _sleeves:
+			var sl: MeshInstance3D = _sleeves[sd][0]
+			sl.visible = k != WizardGarb.Kind.NONE
+			(sl.material_override as StandardMaterial3D).albedo_color = robe.darkened(0.05)
+	if k == WizardGarb.Kind.NONE:
+		return
+	# bell sleeves from the elbows, hanging and swinging behind the forearm
+	for sd in _sleeves:
+		var sl: MeshInstance3D = _sleeves[sd][0]
+		var el: Vector3 = _joints.get("elbow_" + sd, Vector3.ZERO)
+		var hd: Vector3 = _joints.get("hand_" + sd, Vector3.ZERO)
+		var along := (hd - el).normalized() if hd.distance_to(el) > 0.01 else Vector3.DOWN
+		var want := (along * 0.75 + Vector3.DOWN * 0.45).normalized()
+		var hang: Vector3 = (_sleeves[sd][1] as Vector3).lerp(want, clampf(delta * 9.0, 0.0, 1.0)).normalized()
+		_sleeves[sd][1] = hang
+		sl.transform = WizardGarb._xf(el + along * 0.02, el + along * 0.06 + hang * 0.2)
+	var mt := model.global_transform
+	var mb := mt.basis.orthonormalized()
+	var up := (mb * head_basis * Vector3.UP).normalized()
+	var face := (mb * head_basis * Vector3.FORWARD).normalized()
+	var ground := WorldLayout.ground_height(position.x, position.z, position.y)
+	var cols := []
+	for sd in ["r", "l"]:
+		var hip := hip_r if sd == "r" else hip_l
+		cols.append([mt * hip, mt * (_joints.get("knee_" + sd, hip) as Vector3), 0.15])
+		cols.append([mt * (_joints.get("knee_" + sd, hip) as Vector3), mt * (_joints.get("ankle_" + sd, hip) as Vector3), 0.13])
+	_garb.update(delta, {
+		"hip": mt * (pelvis + low * Vector3(0, 0.1, 0)), "basis": mb * low,
+		"top_r": 0.2, "hem_r": 0.36, "len": 0.96, "colliders": cols, "ground": ground, "vel": _vel,
+		"head_top": mt * (head + head_basis * Vector3(0, 0.15, 0.01)), "head_c": mt * head, "head_r": 0.17,
+		"up": up, "face": face, "neck": mt * neck, "hat_h": 0.62, "hat_r": 0.2, "brim_r": 0.37,
+		"visible": model.visible })
+

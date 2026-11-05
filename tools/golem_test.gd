@@ -82,5 +82,43 @@ func _init() -> void:
 				hit_ids[h[1]] = h[2]
 	check(hit_ids.has(2) and hit_ids.has(3), "its slam crushes both players standing together (%s)" % str(hit_ids))
 	check(int(hit_ids.get(2, 0)) == Golems.TITAN_DAMAGE, "for %d each" % Golems.TITAN_DAMAGE)
+	# v0.8.0: a leap from a few metres out
+	var gl := Golems.new()
+	var lg := gl.spawn(1, Vector3(60, 0, 60), 0.0, 0)
+	var leapt := false
+	var leap_hit := false
+	for t in range(1, 200):
+		for h in gl.tick(t, [[1, Vector3(60, 0, 66), true, true], [2, Vector3(60, 0, 55.5), true, true]]):
+			if int(h[2]) == Golems.LEAP_DAMAGE:
+				leap_hit = true
+		if lg.state == Golems.State.LEAP:
+			leapt = true
+	check(leapt and leap_hit, "it leaps at someone 4.5 m off and comes down on them")
+	# several after one target spread round it instead of queueing behind each other
+	var gm := Golems.new()
+	var tgt := Vector3(60, 0, 50)
+	var three := []
+	for i in 3:
+		three.append(gm.spawn(1, Vector3(58.5 + i * 1.5, 0, 66), 0.0, 0))
+	for t in range(1, 400):
+		gm.tick(t, [[1, Vector3(60, 0, 70), true, true], [2, tgt, true, true]])
+	var angles := []
+	for g3 in three:
+		angles.append(rad_to_deg(Vector2(g3.pos.x - tgt.x, g3.pos.z - tgt.z).angle()))
+	angles.sort()
+	check(angles[2] - angles[0] > 40.0, "three golems after one target spread round it (%s degrees)" % str(angles.map(func(a): return snappedf(a, 1))))
+	# with nothing to fight: a guard ring round the summoner
+	var gg := Golems.new()
+	var guards := []
+	for i in 4:
+		guards.append(gg.spawn(1, Vector3(70 + i, 0, 70), 0.0, 0))
+	var owner_at := Vector3(80, 0, 80)
+	for t in range(1, 500):
+		gg.tick(t, [[1, owner_at, false, true]])
+	var ring_ok := true
+	for g4 in guards:
+		var dd := Vector2(g4.pos.x - owner_at.x, g4.pos.z - owner_at.z).length()
+		ring_ok = ring_ok and dd > 1.2 and dd < 3.2
+	check(ring_ok, "with nothing to fight they stand guard round their summoner")
 	print("%d failed" % bad)
 	quit(bad)

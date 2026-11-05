@@ -44,7 +44,7 @@ class ServerPlayer:
 	var queue := {}             # seq -> PlayerInput, not yet applied (packets may arrive out of order)
 	var last_applied := 0       # acked to the client
 	var waited := 0             # ticks spent waiting for a missing input
-	var target_buf := 2         # jitter buffer: inputs to hold before applying (grows when it runs dry)
+	var target_buf := 3         # jitter buffer: inputs to hold before applying (grows when it runs dry; v0.8.0: starts at 3, fewer early stalls over the internet)
 	var primed := false
 	var calm := 0               # ticks since the buffer last ran dry
 	var starves := 0            # times it ran dry (for the stats)
@@ -127,6 +127,11 @@ var sim_jit_ms := 0.0
 var sim_loss := 0.0
 var _sim_out: Array = []    # [deliver_ms, data]
 var _sim_in: Array = []
+var _offs: Array = []       # recent arrival offsets (ms): the window's minimum is the "on time" base
+var _last_frame_us := 0
+var _frame_us := 0          # how long the last frame took: samples taken right after a local hitch are skipped
+var jitter_ms := 0.0        # how unevenly snapshots arrive (95th percentile lateness), for the readout
+var tailscale_path := {}    # address -> "direct" / "relayed (DERP ...)" / "checking" / "": see check_tailscale_path()
 
 
 func _ready() -> void:
@@ -158,6 +163,11 @@ func host(port: int, player_name: String, with_player := true) -> Error:
 			players[1].state.owned = 0b1111111
 			players[1].state.arrows = 30
 			players[1].state.rocks = 30
+		for gv in [["--give-staff", Weapons.STAFF], ["--give-wand", Weapons.WAND]]:   # testing: one of the two
+			if OS.get_cmdline_user_args().has(gv[0]):
+				players[1].state.owned = 0b11111 | (1 << int(gv[1]))
+				players[1].state.arrows = 30
+				players[1].state.rocks = 30
 		if OS.get_cmdline_user_args().has("--max-level"):   # testing: every spell unlocked
 			players[1].kills = [Weapons.LEVEL_KILLS[-1], Weapons.LEVEL_KILLS[-1]]
 			players[1].state.staff_lvl = Weapons.MAX_LEVEL
@@ -362,17 +372,17 @@ func item_remove(id: int, taker: int) -> void:
 	item_removed.emit(id, taker)
 
 
-@rpc("authority", "call_remote", "reliable")
+@rpc("authority", "call_remote", "reliable", 6)
 func proj_spawn(id: int, owner: int, kind: int, tick0: int, pos0: Vector3, vel0: Vector3, g: float) -> void:
 	projectile_spawned.emit(id, owner, kind, tick0, pos0, vel0, g)
 
 
-@rpc("authority", "call_remote", "reliable")
+@rpc("authority", "call_remote", "reliable", 6)
 func proj_end(id: int, tick: int, pos: Vector3, stuck: bool) -> void:
 	projectile_ended.emit(id, tick, pos, stuck)
 
 
-@rpc("authority", "call_remote", "reliable")
+@rpc("authority", "call_remote", "reliable", 7)
 func hit_fx(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool, attacker: int) -> void:
 	hit.emit(target, amount, pos, dir, killed, attacker)
 
@@ -423,6 +433,10 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 	p.state = Sim.spawn_state(p.slot)
 	players[id] = p
 	_server_send_roster()
+	if id != 1 and OS.get_cmdline_user_args().has("--give-guests"):   # testing: guests start with every weapon too
+		p.state.owned = 0b1111111
+		p.state.arrows = 30
+		p.state.rocks = 30
 
 
 func _server_send_roster() -> void:
@@ -873,6 +887,9 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 
 # ---------------------------------------------------------------- client
 func _process(_delta: float) -> void:
+	var now_us := Time.get_ticks_usec()
+	_frame_us = now_us - _last_frame_us if _last_frame_us > 0 else 0
+	_last_frame_us = now_us
 	if _sim_out.is_empty() and _sim_in.is_empty():
 		return
 	var now := Time.get_ticks_msec()
@@ -915,6 +932,14 @@ func _client_tick() -> void:
 		var sd := Weapons.shot(predicted.weapon, predicted.last_charge)
 		local_shot.emit(0 if w.projectile == "arrow" else 1, Weapons.muzzle(predicted.pos, inp.yaw),
 			Weapons.aim_dir(inp.aim_yaw, inp.pitch) * float(sd[0]), float(w.gravity))
+	elif ev == Sim.Ev.CAST and predicted.weapon == Weapons.STAFF and str(Weapons.spell(Weapons.STAFF, predicted.spell).name) == "Fireball":
+		# our own fireball leaves the staff at once too (the same launch the server makes in _cast)
+		var sp := Weapons.spell(Weapons.STAFF, predicted.spell)
+		var hand := predicted.pos + Vector3(0, 1.45, 0) + Vector3(-sin(predicted.yaw), 0, -cos(predicted.yaw)) * 0.45
+		var to := inp.aim_point - hand
+		if to.length() < 1.0:
+			to = Vector3(-sin(predicted.yaw), 0.05, -cos(predicted.yaw))
+		local_shot.emit(2, hand, to.normalized() * float(sp.speed), float(sp.gravity))
 	pending.append(inp)
 	if pending.size() > 240:
 		pending = pending.slice(pending.size() - 240)
@@ -972,19 +997,31 @@ func _client_receive_snapshot(s: Dictionary) -> void:
 
 ## Set the interpolation delay from how unevenly snapshots really arrive: enough to cover 95% of them late plus one
 ## snapshot interval, no more. Grows at once when the connection gets worse, shrinks slowly when it settles.
+##
+## v0.8.0: two fixes for others looking laggy. (1) The "on time" base is the fastest arrival in the last 4 s, not since
+## the game began, so a slow drift between the two machines' clocks no longer looks like ever-growing lateness (it
+## used to push the delay to its 333 ms cap and keep it there). (2) A snapshot handled right after a local hitch (a
+## frame over 50 ms: loading, a first-time shader) arrived "late" only because this machine was busy; it says nothing
+## about the network, so it's left out.
 func _measure_jitter(tick: int) -> void:
 	var now := Time.get_ticks_usec() / 1000.0
 	var off := now - tick * Config.DT * 1000.0     # arrival time minus send time, plus an unknown constant
-	_off_base = minf(_off_base + 0.01, off)         # the fastest arrival seen (drifting up slowly, in case clocks move)
-	_late_ms.append(off - _off_base)
+	if _frame_us > 50000:
+		return
+	_offs.append(off)
+	if _offs.size() > 120:
+		_offs.pop_front()
+	var base: float = _offs.min()
+	_late_ms.append(off - base)
 	if _late_ms.size() > 90:
 		_late_ms.pop_front()
 	var sorted := _late_ms.duplicate()
 	sorted.sort()
 	var p95: float = sorted[int((sorted.size() - 1) * 0.95)]
+	jitter_ms = p95
 	var want := (p95 + 6.0) / (Config.DT * 1000.0) + Config.SNAPSHOT_EVERY
 	want = clampf(want, Config.SNAPSHOT_EVERY + 1.0, 20.0)
-	interp_delay = want if want > interp_delay else lerpf(interp_delay, want, 0.02)
+	interp_delay = want if want > interp_delay else lerpf(interp_delay, want, 0.04)
 
 
 ## Where to draw our own player this frame (between the last two ticks, plus any correction being blended out).
@@ -1029,7 +1066,77 @@ func ping_ms() -> int:
 	if peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
 		return 0
 	var p := peer.get_peer(1)
-	return int(p.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)) if p else 0
+	return (int(p.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)) if p else 0) + int(sim_lat_ms)
+
+
+## Packets lost on the way to the host (%), as ENet sees it (plus the simulator's).
+func loss_pct() -> float:
+	if peer == null or multiplayer.multiplayer_peer == null or multiplayer.is_server():
+		return 0.0
+	var p := peer.get_peer(1)
+	if p == null:
+		return 0.0
+	return float(p.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS)) / float(ENetPacketPeer.PACKET_LOSS_SCALE) * 100.0 + sim_loss * 100.0
+
+
+## One line on how the connection is doing, for the HUD. A client: round trip, jitter, loss, and whether Tailscale
+## goes straight to the host or through a relay. The host: each guest's round trip and input buffer (how many ticks
+## of their inputs it holds to ride out jitter; times it ran dry).
+func quality_line() -> String:
+	if multiplayer.multiplayer_peer == null:
+		return ""
+	if multiplayer.is_server():
+		var parts := []
+		for p: ServerPlayer in players.values():
+			if p.id == 1 and is_host_player:
+				continue
+			var pp := peer.get_peer(p.id) if peer else null
+			var rtt := int(pp.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)) if pp else 0
+			var addr := pp.get_remote_address() if pp else ""
+			parts.append("%s %d ms, buffer %d, dry %d%s" % [roster.get(p.id, {}).get("name", "?"), rtt, p.target_buf, p.starves, _path_note(addr)])
+		return "guests: " + ("  |  ".join(parts) if not parts.is_empty() else "none")
+	var addr := peer.get_peer(1).get_remote_address() if peer and peer.get_peer(1) else ""
+	return "link: %d ms round trip   jitter %d ms   loss %.1f%%%s" % [ping_ms(), int(jitter_ms), loss_pct(), _path_note(addr)]
+
+
+func _path_note(addr: String) -> String:
+	if not _is_tailscale(addr):
+		return ""
+	var st: String = tailscale_path.get(addr, "")
+	if st == "":
+		check_tailscale_path(addr)
+		return "   Tailscale: checking"
+	return "   Tailscale: " + st
+
+
+static func _is_tailscale(addr: String) -> bool:
+	var p := addr.split(".")
+	return p.size() == 4 and int(p[0]) == 100 and int(p[1]) >= 64 and int(p[1]) <= 127
+
+
+## Ask Tailscale how packets reach this address: "tailscale ping" says "via <ip:port>" for a direct path or
+## "via DERP(<city>)" when a relay server carries them (slower and jitterier). Runs in a thread; checked again every
+## 30 s, since Tailscale often upgrades a relayed path to a direct one after a while.
+func check_tailscale_path(addr: String) -> void:
+	tailscale_path[addr] = "checking"
+	var th := Thread.new()
+	th.start(func():
+		var out := []
+		var exe := "tailscale"
+		if OS.get_name() == "Windows" and FileAccess.file_exists("C:/Program Files/Tailscale/tailscale.exe"):
+			exe = "C:/Program Files/Tailscale/tailscale.exe"
+		var code := OS.execute(exe, ["ping", "-c", "3", "--timeout", "3s", addr], out, true)
+		var text := "\n".join(out)
+		var res := "unknown (tailscale CLI not found)" if code == -1 else "unknown"
+		var m := RegEx.create_from_string("via DERP\\(([^)]*)\\)").search(text)
+		if m:
+			res = "RELAYED via DERP %s (slower: see docs/networking.md)" % m.get_string(1)
+		elif text.contains("via "):
+			res = "direct"
+		(func():
+			tailscale_path[addr] = res
+			th.wait_to_finish()
+			get_tree().create_timer(30.0).timeout.connect(func(): tailscale_path.erase(addr))).call_deferred())
 
 
 # ================================================================ magic (server)

@@ -3,7 +3,7 @@
     python tools/make_outfits.py
 
 Reads assets/pip/pip-spritesheet.png and pip-weapons.png and writes assets/pip/outfits/<sheet>-<n>.png for outfits 1-3
-(outfit 0 is the original sheet: the host). Every distinct colour on the sheets is sorted into a group by its colour:
+(outfit 0 is the original sheet: the host; 4 and 5 are the grey and dark robes of the wizard garb). Every distinct colour on the sheets is sorted into a group by its colour:
 skin and the dark outline stay as drawn; the tunic (tan), the trousers (olive), the scarf (lavender) and the hair
 (orange-brown) are moved to each outfit's colours, keeping their light and shade (each colour's lightness relative to
 its group is kept). Weapon metal and wood use the same browns and greys as the clothes in places, so the weapon sheet
@@ -22,6 +22,9 @@ OUTFITS = {
     1: {"tunic": (0.60, 1.25, 0.92), "trousers": (0.62, 0.55, 0.62), "scarf": (0.12, 1.1, 1.0), "hair": (0.07, 0.75, 0.55)},   # blue tunic, gold scarf, dark hair
     2: {"tunic": (0.33, 0.85, 0.82), "trousers": (0.08, 0.5, 0.7), "scarf": (0.99, 1.2, 0.95), "hair": (0.0, 0.0, 0.32)},      # green ranger, red scarf, black hair
     3: {"tunic": (0.98, 1.1, 0.8), "trousers": (0.0, 0.0, 0.45), "scarf": (0.47, 1.0, 0.9), "hair": (0.13, 0.8, 1.25)},       # crimson tunic, teal scarf, blond
+    # the wizard garb (scripts/wizard_garb.gd): the staff's grey robe and the wand's dark robe; hair kept as drawn
+    4: {"tunic": (0.62, 0.08, 0.92), "trousers": (0.62, 0.1, 0.72), "scarf": (0.6, 0.45, 0.95)},     # grey robe, steel-blue scarf
+    5: {"tunic": (0.76, 0.45, 0.34), "trousers": (0.76, 0.3, 0.3), "scarf": (0.78, 0.9, 0.6)},       # dark violet-black robe
 }
 
 
@@ -61,7 +64,7 @@ def make(sheet, clothing_only):
     for n, spec in OUTFITS.items():
         new_cols = cols.copy()
         for i, gname in enumerate(groups):
-            if gname is None or (clothing_only and gname == "hair"):
+            if gname is None or (clothing_only and gname == "hair") or gname not in spec:
                 continue
             new_cols[i] = remap(tuple(int(x) for x in cols[i]), spec[gname])
         out = flat.copy()

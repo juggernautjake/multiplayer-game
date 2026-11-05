@@ -111,6 +111,19 @@ Kills with the staff or wand (with **PvP** on: P) level that weapon up: after 3,
 is always strongest at the centre and falls off toward the edge; you never hurt yourself. Players only hurt each other
 when both have PvP on; dummies and golems can always be hit.
 
+**Wizard garb (0.8.0).** Whoever carries the staff wears a long grey robe and a tall pointed hat; whoever carries the
+wand wears a dark hooded robe; with both, the grey robe and hat with the dark hood dropped round the neck. The robe
+is real cloth (it trails, flares when you run, whips on a dash and swings when you stop), the hat's tip bobs and lags,
+the hood's tail swings. It's worked out on every PC from what you carry, so it costs no network traffic, and it goes
+when the item goes.
+
+**How it looks (0.8.0).** Every spell has its own casting gesture (a pull-back and thrust for the fireball, the staff
+raised to the sky for lightning, driven into the ground for the frost nova, the wand circling over the ground to
+summon) with a rune circle turning under you as it builds. Fireballs churn and flicker in flight and no two
+explosions or lightning bolts look alike (bolts branch, strike several times, crawl over the ground and boom with a
+shake that fades with distance). Golems spread out round a target, leap at it from a few metres, alternate overhead
+slams and haymakers, and stand guard round you when there's nothing to fight.
+
 ## Download and play (Windows)
 
 Step-by-step for hosts and guests, with Tailscale and port forwarding: [docs/how-to-host-and-join.pdf](docs/how-to-host-and-join.pdf).
@@ -164,6 +177,10 @@ private networks, or friends can't connect. (The PDF guide recommends ticking bo
 
 Host and guests must run the **same version** of the game. When a guest joins with a different version, the host
 turns them away with a message that says who needs to restart to update.
+
+**Lag or rubber-banding?** Look at the line under the HUD: a guest sees the round trip, jitter, packet loss and
+whether Tailscale goes **direct** or is **relayed** (slower). [docs/networking.md](docs/networking.md) explains how to
+get a direct Tailscale connection, what 0.8.0 changed and the ideas for later (including a dedicated server).
 
 Later, a Steam build can use Steam's relay network ([GodotSteam](https://godotsteam.com)). Friends then join through
 the Steam friends list, with no addresses and no port forwarding.
@@ -255,6 +272,11 @@ and the update pack, and publishes both as a GitHub release. See [Making a relea
 | Lag-compensated melee | The server keeps 1.5 s of position history per player and tests melee hits against where the attacker saw the others | What looked like a hit is a hit |
 | Projectiles on a fixed path | A shot's whole flight follows from its launch (closed-form gravity), so only the launch and the landing are sent | No per-tick projectile traffic |
 
+0.8.0 fixed the interpolation delay getting stuck at its 333 ms maximum (a slow clock drift or local hitches made
+every snapshot look late), drew golems on the players' clock, made your own fireball appear at once, gave projectile
+and hit messages their own channels, and added the connection readout. Measurements and Tailscale advice:
+[docs/networking.md](docs/networking.md).
+
 Files:
 
 - `scripts/config.gd`: shared numbers (tick rate, snapshot rate, interpolation delay, port).
@@ -342,6 +364,9 @@ The bot modes (all in `scripts/main.gd`, functions `_bot_input`, `_bot_fight` an
 | `--bot` | The default test player: walks forward while slowly turning in a circle, sprints every other 2 s, jumps every 1.5 s, dashes every 2.5 s, and prints a status line every 2 s (tick, position, players seen, ping, corrections, how far behind others are drawn, how often they had to be guessed). |
 | `--bot fight` | Walks to every weapon and ammo spawn and picks everything up, then walks to the middle practice dummy and uses each weapon on it for 6 s in turn (melee from 1.6 m, bow and slingshot from 10 m, aimed with the low-arc launch angle). Every 10 s it prints an audit line if `--log` is on. If it is the host, at 25 s it switches the look for everyone, to test F2. |
 | `--bot aim` | Like fight, but only with the bow and slingshot, aiming like a person: it steers the camera so the crosshair sits on the dummy's chest, then draws and lets go. Alternates 10 m and 22 m every 12 s. Tests that shots land where the crosshair is. |
+| `--bot show` | Showcase (host with `--give-staff`, `--give-wand` or `--give-all`; add `--style figure` for the 3D figure): runs toward the camera, strafes, backpedals, dashes, jumps, swings the sword and casts with the staff or wand while the camera circles, saving a picture every 6 ticks with `--shots <folder>`. For checking animation, the wizard garb and effects by eye. |
+| `--bot golems` | Golem showcase (`--host --give-all --max-level`): summons a golem at the dummies, then the stone titan, and watches from the side; `--shots <folder>`. |
+| `--bot magic` | Casts every staff and wand spell at the middle dummy (`--plan2`, `--plan3` for the level 3 and 4 spells, `--every` to save a picture every 6 ticks with `--shots`). |
 | `--bot close` | Close-quarters test. After picking everything up, for each weapon it walks right into the middle dummy and then into the nearest tall pillar (7 s each), keeps the crosshair on the target, and attacks (clicks, then holds; bows draw and release). Every 6 ticks it logs how far the body is turned from the target and from the camera; at the end it prints the worst angle per weapon and quits. Add `--shots <folder>` to save screenshots at three moments of each phase. |
 
 Other command-line options (after `--`):
@@ -355,6 +380,8 @@ Other command-line options (after `--`):
 | `--style pip` or `--style figure` | (host or server) the look for everyone. |
 | `--screenshot <file.png> [--shot-frame 240] [--view first]` | Save one frame (frame 240 by default) and quit. `--view first` starts in first person. |
 | `--log` | Print every hit and pick-up on the server, and (with `--bot fight`) an audit line counting every replicated event this client received. |
+| `--give-all`, `--give-staff`, `--give-wand`, `--max-level` | (host) start with every weapon, or the basic weapons plus the staff or the wand; every spell unlocked. |
+| `--give-guests` | (host) guests start with every weapon too, so a guest can be tested casting over `--netsim`. |
 | `--netsim ping_ms,jitter_ms,loss_percent` | Test this client over a simulated bad connection: delays, jitters and drops its own inputs and incoming snapshots. Example: `--netsim 150,40,3`. |
 
 ### Checking the netcode

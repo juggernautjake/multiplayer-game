@@ -79,3 +79,9 @@ clock.
 `pip-spritesheet.png.import` and `pip-weapons.png.import` are Godot metadata, written by the editor: they tell Godot
 to import each PNG as a lossless texture without mipmaps and record the texture's unique ID. Commit them; don't edit
 them by hand.
+
+## outfits/
+
+Recoloured copies of both sheets made by `tools/make_outfits.py`: `-1` blue, `-2` green, `-3` crimson (guests, in the
+order they join), and `-4` grey and `-5` dark violet-black: the robes of the wizard garb, used while Pip carries the
+staff (grey) or the wand (dark).

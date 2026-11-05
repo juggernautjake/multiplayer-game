@@ -1,15 +1,23 @@
 ## What spells look like (Jacob 2026-11-04), drawn on every client from the server's spell events (Net.magic_fx) and
 ## from each player's state (shield bubbles, stuns):
-##   lightning: a glowing warning ring where it will land, then a jagged bolt from the sky with side forks, a white
-##              flash, sparks and a scorch mark;
-##   fireball:  a burning orb trailing embers (MagicFx.fireball_node, flown by Main like any projectile), bursting in a
-##              growing ball of fire, smoke, sparks and a scorch mark;
+##   lightning: a glowing warning ring where it will land, then a bolt from the sky that is never the same twice (a
+##              fractal channel with branches that fork again), striking two to four times in quick flickers, arcs
+##              crawling out over the ground, a lingering afterglow in the air, a flash that lights the sky, a scorch
+##              with burnt cracks, and a thunderclap whose shake falls off with distance;
+##   fireball:  a churning orb of flame (FireballView: each one a little different, wobbling, flickering, trailing embers,
+##              smoke and sparks), bursting in an explosion that is never the same twice: a random cluster of fireballs
+##              rolling up, a white-hot flash, a shock ring, burning debris thrown in arcs, sparks, a smoke column
+##              (sometimes a mushroom), drifting embers, a flickering light and a ragged scorch with burn streaks;
+##   casting:   a rune circle in the spell's colour turns under the caster as the spell builds, and flares as it goes off;
 ##   shield:    a see-through bubble with a bright rim and drifting bands; wherever something strikes it, a bright spot
 ##              flares and a ring of light runs out across the bubble from that point;
 ##   stun:      a violet bolt from the wand that bursts in a crackling violet ring where it lands; everyone caught
 ##              gets a ring of spinning stars over their head;
-##   teleport:  a violet puff where you left and where you arrive, joined by a fading streak;
-##   golems:    dust and a cracked ring as one rises; a dust ring and a thud when one slams;
+##   teleport:  where you left, a column of violet light collapses inward with motes sucked into it; where you arrive,
+##              a column bursts out with a shock ring; a fading streak joins them;
+##   golems:    an amber rune circle and cracks splitting the ground as one rises in dust; a dust ring, cracks and a
+##              thud when one slams;
+##   stun:      (also) little violet arcs keep crackling round anyone stunned;
 ##   frost nova: a ring of ice racing out from the caster, ice shards bursting up along it, a cold flash, frost on the
 ##              ground, and a frosty ring at the feet of everyone it slowed;
 ##   earth spikes: stone spikes stabbing up out of the ground one after another, in dust;
@@ -65,6 +73,7 @@ var _shader: Shader
 var _vault_door: Node3D      # set by Main: the door's hinge
 var cast_lights := {}        # player id -> OmniLight3D at their staff / wand while casting
 var frosts := {}             # player id -> the frosty ring at the feet of a slowed player
+var runes := {}              # player id -> the rune circle turning under them while they cast
 const SPELL_COLOR := { "Lightning": Color("cfe6ff"), "Fireball": Color("ff8a2a"), "Shield": Color("7fd0ff"),
 	"Frost Nova": Color("9fe8ff"), "Golem": Color("ffb02e"), "Teleport": Color("c070ff"), "Stun": Color("c070ff"),
 	"Earth Spikes": Color("d8a060"), "Meteor": Color("ff5a1a"), "Gravity Well": Color("8a3cff"),
@@ -102,15 +111,18 @@ func _on_fx(kind: String, a: Array) -> void:
 		"stun_beam":
 			_stun_beam(a[1], a[2], int(a[3]) != 0)
 		"teleport":
-			_puff(a[1])
-			_puff(a[2])
+			_blink(a[1], false)
+			_blink(a[2], true)
 			_streak(a[1] + Vector3(0, 1.0, 0), a[2] + Vector3(0, 1.0, 0), Color("c58cff"), 0.35)
 		"golem_rise":
 			_golem_dust(a[1], 0.9)
+			_summon_circle(a[1], 1.3, Color("ffb02e"), Golems.RISE * Config.DT)
+			_cracks(a[1], 1.6, 6)
 		"golem_slam":
 			var big: bool = a.size() > 2 and a[2]
 			_golem_dust(a[1], 2.8 if big else 0.9)
-			_shake_near(a[1], 0.35 if big else 0.12)
+			_shake_near_scaled(a[1], 0.4 if big else 0.14)
+			_cracks(a[1], 3.0 if big else 1.0, 7 if big else 4)
 			if big:
 				_flash_light(a[1] + Vector3(0, 0.5, 0), Color("ffb060"), 3.0, 6.0, 0.3)
 		"vault_door":
@@ -131,6 +143,8 @@ func _on_fx(kind: String, a: Array) -> void:
 			_storm(a[0], float(a[1]) * Config.DT, float(a[2]))
 		"titan_rise":
 			_golem_dust(a[1], 2.6)
+			_summon_circle(a[1], 3.2, Color("ff5a1a"), Golems.RISE * Config.DT)
+			_cracks(a[1], 4.0, 10)
 			_flash_light(a[1] + Vector3(0, 1, 0), Color("ff5a1a"), 6.0, 10.0, 0.8)
 			_shake_near(a[1], 0.3)
 		"spike":
@@ -188,6 +202,12 @@ func update(delta: float, states: Dictionary) -> void:
 			else:
 				ring.global_position = (avatars[id] as Node3D).position + Vector3(0, 2.15, 0)
 				ring.rotation.y += delta * 5.0
+				if randf() < delta * 7.0:   # little violet arcs crackling round the body
+					var c0 := (avatars[id] as Node3D).position + Vector3(randf_range(-0.4, 0.4), randf_range(0.3, 1.9), randf_range(-0.4, 0.4))
+					var arc := _ribbons([[_fractal(c0, c0 + Vector3(randf_range(-0.4, 0.4), randf_range(-0.4, 0.4), randf_range(-0.4, 0.4)), 2, 0.35), 0.03]], Color("d8a8ff"), 6.0)
+					var atw := arc.create_tween()
+					atw.tween_property(arc.material_override, "albedo_color:a", 0.0, 0.12)
+					atw.tween_callback(arc.queue_free)
 	_cast_glow(delta, states)
 	for id in bubbles.keys():
 		if not states.has(id):
@@ -302,116 +322,384 @@ func _jag(a: Vector3, b: Vector3, kinks: int, wild: float, width: float, c: Colo
 	return root
 
 
+## A crooked path from a to b by midpoint displacement: each level halves every segment and pushes its middle sideways
+## by up to `rough` of the segment's length. Different every call.
+static func _fractal(a: Vector3, b: Vector3, levels: int, rough: float) -> Array:
+	var pts := [a, b]
+	for lv in levels:
+		var out := [pts[0]]
+		for i in pts.size() - 1:
+			var p: Vector3 = pts[i]
+			var q: Vector3 = pts[i + 1]
+			var d := q - p
+			var side := d.cross(Vector3.UP)
+			if side.length() < 1e-4:
+				side = d.cross(Vector3.RIGHT)
+			side = side.normalized()
+			var side2 := d.cross(side).normalized()
+			var len := d.length()
+			out.append((p + q) * 0.5 + side * randf_range(-rough, rough) * len + side2 * randf_range(-rough, rough) * len)
+			out.append(q)
+		pts = out
+	return pts
+
+
+## Glowing ribbons along paths, as one mesh: two crossed quads per segment, so they read from any side. paths: [[points,
+## width], ...]. Additive and unshaded.
+func _ribbons(paths: Array, c: Color, energy := 6.0) -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for pw in paths:
+		var pts: Array = pw[0]
+		var w := float(pw[1])
+		for i in pts.size() - 1:
+			var p: Vector3 = pts[i]
+			var q: Vector3 = pts[i + 1]
+			var d := (q - p)
+			if d.length() < 1e-4:
+				continue
+			var s1 := d.cross(Vector3.UP if absf(d.normalized().y) < 0.95 else Vector3.RIGHT).normalized() * w * 0.5
+			var s2 := d.cross(s1).normalized() * w * 0.5
+			var taper := 1.0 - 0.5 * float(i) / float(pts.size())   # thinner toward the end
+			for sv in [s1 * taper, s2 * taper]:
+				st.add_vertex(p - sv)
+				st.add_vertex(p + sv)
+				st.add_vertex(q + sv)
+				st.add_vertex(p - sv)
+				st.add_vertex(q + sv)
+				st.add_vertex(q - sv)
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	var m := _glow_mat(c, energy, 1.0)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.add_child(mi)
+	return mi
+
+
+## One lightning channel with its branches (and branches off those): [[points, width], ...].
+func _bolt_paths(top: Vector3, at: Vector3) -> Array:
+	var trunk := _fractal(top, at, 5, 0.18)
+	var paths := [[trunk, 0.13]]
+	for k in randi_range(3, 6):
+		var from: Vector3 = trunk[randi_range(3, trunk.size() - 6)]
+		var drop := randf_range(3.0, 9.0)
+		var to := from + Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)).normalized() * randf_range(2.0, 6.0) + Vector3(0, -drop, 0)
+		to.y = maxf(to.y, at.y + 0.5)
+		var br := _fractal(from, to, 3, 0.25)
+		paths.append([br, 0.06])
+		if randf() < 0.4:   # a fork off the fork
+			var f2: Vector3 = br[randi_range(2, br.size() - 2)]
+			paths.append([_fractal(f2, f2 + Vector3(randf_range(-2, 2), randf_range(-3, -1), randf_range(-2, 2)), 2, 0.3), 0.035])
+	return paths
+
+
 func _bolt(at: Vector3) -> void:
-	var top := at + Vector3(randf_range(-3, 3), 34.0, randf_range(-3, 3))
-	var main_bolt := _jag(top, at, 14, 1.6, 0.16, Color("e8f4ff"))
-	var parts := [main_bolt]
-	var pts: Array = main_bolt.get_meta("pts")
-	for k in 3:   # forks off the main bolt
-		var from: Vector3 = pts[randi_range(4, pts.size() - 4)]
-		var to := from + Vector3(randf_range(-5, 5), randf_range(-7, -3), randf_range(-5, 5))
-		parts.append(_jag(from, to, 5, 0.9, 0.07, Color("b8dcff")))
-	for p: Node3D in parts:   # flicker, then fade
-		var mat: StandardMaterial3D = p.get_meta("mat")
-		var tw := p.create_tween()
-		tw.tween_property(mat, "albedo_color:a", 0.2, 0.05)
-		tw.tween_property(mat, "albedo_color:a", 1.0, 0.04)
-		tw.tween_property(mat, "albedo_color:a", 0.0, 0.3)
-		tw.tween_callback(p.queue_free)
-	_flash_light(at + Vector3(0, 3, 0), Color("dceeff"), 9.0, 18.0, 0.35)
-	Fx.burst(main, at + Vector3(0, 0.2, 0), Vector3.UP, Color("e8f6ff"), 30, 7.0, 0.05)
+	var top := at + Vector3(randf_range(-6, 6), randf_range(30, 38), randf_range(-6, 6))
+	var strokes := randi_range(2, 4)          # it strikes, goes dark, and strikes again down nearly the same channel
+	var t := 0.0
+	var base_paths := _bolt_paths(top, at)
+	for k in strokes:
+		var paths := base_paths if k == 0 else _jitter_paths(base_paths, 0.12)
+		var glow := _ribbons(paths.map(func(pw): return [pw[0], float(pw[1]) * 4.0]), Color("6f9cff"), 2.5)
+		var core := _ribbons(paths, Color("f4f8ff"), 9.0)
+		(glow.material_override as StandardMaterial3D).albedo_color.a = 0.0
+		(core.material_override as StandardMaterial3D).albedo_color.a = 0.0
+		var on := randf_range(0.05, 0.08)
+		for mi: MeshInstance3D in [glow, core]:
+			var m: StandardMaterial3D = mi.material_override
+			var tw := mi.create_tween()
+			tw.tween_interval(t)
+			tw.tween_property(m, "albedo_color:a", 1.0 if mi == core else 0.55, 0.01)
+			tw.tween_interval(on)
+			tw.tween_property(m, "albedo_color:a", 0.0, 0.05 if k < strokes - 1 else 0.25)
+			tw.tween_callback(mi.queue_free)
+		get_tree().create_timer(t).timeout.connect(func():
+			_flash_light(at + Vector3(0, 3, 0), Color("dceeff"), 9.0 if k == 0 else 6.0, 18.0, 0.18)
+			_flash_light(at + Vector3(0, 22, 0), Color("b8ccff"), 2.0, 70.0, 0.15)   # the sky lights up
+			if k == 0:
+				_ground_arcs(at)
+				_shake_near_scaled(at, 0.32))
+		t += on + randf_range(0.04, 0.09)
+	# the afterglow: the channel hangs in the air a moment, fading through violet
+	var after := _ribbons(base_paths.slice(0, 1).map(func(pw): return [pw[0], 0.35]), Color("9a7cff"), 1.5)
+	(after.material_override as StandardMaterial3D).albedo_color.a = 0.0
+	var atw := after.create_tween()
+	atw.tween_interval(t)
+	atw.tween_property(after.material_override, "albedo_color:a", 0.35, 0.02)
+	atw.tween_property(after.material_override, "albedo_color:a", 0.0, 0.7)
+	atw.tween_callback(after.queue_free)
+	Fx.burst(main, at + Vector3(0, 0.2, 0), Vector3.UP, Color("e8f6ff"), randi_range(24, 40), randf_range(6.0, 9.0), 0.05)
 	Fx.burst(main, at + Vector3(0, 0.1, 0), Vector3.UP, Color("6b6b70"), 14, 2.0, 0.09)
-	_scorch(at, 1.8)
-	_shake_near(at, 0.2)
+	_smoke(at, randi_range(2, 4), 0.6, 2.5, 0.35)
+	_scorch_ragged(at, randf_range(1.4, 2.2), randi_range(5, 9))
+
+
+func _jitter_paths(paths: Array, amt: float) -> Array:
+	var out := []
+	for pw in paths:
+		var pts: Array = (pw[0] as Array).duplicate()
+		for i in range(1, pts.size() - 1):
+			pts[i] = (pts[i] as Vector3) + Vector3(randf_range(-amt, amt), randf_range(-amt, amt), randf_range(-amt, amt)) * 3.0
+		out.append([pts, pw[1]])
+	return out
+
+
+## Electric arcs crawling out over the ground from where lightning struck.
+func _ground_arcs(at: Vector3) -> void:
+	var paths := []
+	for i in randi_range(4, 7):
+		var a := randf() * TAU
+		var l := randf_range(1.2, 3.2)
+		var to := at + Vector3(cos(a) * l, 0.05, sin(a) * l)
+		paths.append([_fractal(at + Vector3(0, 0.08, 0), to, 3, 0.3).map(func(p): return Vector3(p.x, at.y + 0.06 + randf() * 0.12, p.z)), 0.045])
+	var arcs := _ribbons(paths, Color("cfe4ff"), 7.0)
+	var tw := arcs.create_tween()
+	for k in 3:   # crackle on and off
+		tw.tween_property(arcs.material_override, "albedo_color:a", 0.2, 0.04)
+		tw.tween_property(arcs.material_override, "albedo_color:a", 1.0, 0.03)
+	tw.tween_property(arcs.material_override, "albedo_color:a", 0.0, 0.2)
+	tw.tween_callback(arcs.queue_free)
+
+
+## A shake for our camera that falls off with distance (a thunderclap: hard close by, a rumble far off, up to 45 m),
+## arriving a moment later the farther it is.
+func _shake_near_scaled(at: Vector3, amount: float) -> void:
+	if not avatars.has(net.my_id):
+		return
+	var d := (avatars[net.my_id] as Node3D).position.distance_to(at)
+	if d > 45.0:
+		return
+	var k := amount * clampf(1.0 - d / 45.0, 0.0, 1.0) * (1.0 if d < 8.0 else 0.7)
+	get_tree().create_timer(d / 160.0).timeout.connect(func():
+		main.set("shake", maxf(float(main.get("shake")), k)))
+
+
+## Smoke puffs rising: n of them, spread `spread` m, rising `rise` m, `alpha` thick.
+func _smoke(at: Vector3, n: int, spread: float, rise: float, alpha: float, delay := 0.0) -> void:
+	for i in n:
+		var puff := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = randf_range(0.35, 0.7)
+		sm.height = sm.radius * 2.0
+		sm.radial_segments = 10
+		sm.rings = 5
+		puff.mesh = sm
+		var m := StandardMaterial3D.new()
+		var g := randf_range(0.16, 0.32)
+		m.albedo_color = Color(g, g * 0.95, g * 0.92, 0.0)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		puff.material_override = m
+		puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		main.add_child(puff)
+		puff.global_position = at + Vector3(randf_range(-spread, spread), randf_range(0.2, 0.9), randf_range(-spread, spread))
+		var wind := Vector3(randf_range(-0.8, 0.8), 0, randf_range(-0.8, 0.8))
+		var life := randf_range(1.2, 2.2)
+		var tw := puff.create_tween().set_parallel(true)
+		var d := delay + randf_range(0.0, 0.25)
+		tw.tween_property(m, "albedo_color:a", alpha * randf_range(0.7, 1.0), 0.15).set_delay(d)
+		tw.tween_property(puff, "global_position", puff.global_position + wind + Vector3(0, rise * randf_range(0.7, 1.3), 0), life).set_delay(d).set_ease(Tween.EASE_OUT)
+		tw.tween_property(puff, "scale", Vector3.ONE * randf_range(1.8, 2.8), life).set_delay(d)
+		tw.tween_property(m, "albedo_color:a", 0.0, life * 0.7).set_delay(d + life * 0.3)
+		tw.chain().tween_callback(puff.queue_free)
+
+
+## A burn mark that isn't a perfect circle: a few overlapping dark patches and streaks splashed outward.
+func _scorch_ragged(at: Vector3, r: float, streaks: int) -> void:
+	var g := Vector3(at.x, WorldLayout.ground_height(at.x, at.z, at.y + 0.3), at.z)
+	var parts := []
+	for i in randi_range(2, 4):
+		var off := Vector3(randf_range(-0.3, 0.3), 0, randf_range(-0.3, 0.3)) * r
+		var d := _disc(g + off + Vector3(0, 0.002 * i, 0), r * randf_range(0.45, 0.75), Color(0.07, 0.05, 0.04), 0.4)
+		d.scale = Vector3(randf_range(0.8, 1.25), 1, randf_range(0.8, 1.25))
+		d.rotation.y = randf() * TAU
+		parts.append(d)
+	for i in streaks:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		var l := randf_range(0.5, 1.2) * r
+		bm.size = Vector3(randf_range(0.06, 0.16), 0.01, l)
+		mi.mesh = bm
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color = Color(0.06, 0.04, 0.03, 0.45)
+		mi.material_override = m
+		main.add_child(mi)
+		var a := randf() * TAU
+		mi.global_position = g + Vector3(cos(a), 0, sin(a)) * (r * 0.4 + l * 0.5) + Vector3(0, 0.025, 0)
+		mi.rotation.y = -a + PI * 0.5
+		parts.append(mi)
+	for n in parts:
+		_fade_out(n, (n as MeshInstance3D).material_override, 5.0, 5.0)
 
 
 func _explosion(at: Vector3, r: float) -> void:
-	for spec in [[Color("ff8a2a"), 0.95, 0.35], [Color("ffe066"), 0.55, 0.22]]:
+	# a cluster of fireballs rolling up and out, each its own size, colour and timing
+	var palette := [Color("ff8a2a"), Color("ffb347"), Color("ff5a1a"), Color("ffe066"), Color("ff7a30")]
+	for i in randi_range(4, 7):
 		var ball := MeshInstance3D.new()
 		var sm := SphereMesh.new()
 		sm.radius = 1.0
 		sm.height = 2.0
+		sm.radial_segments = 14
+		sm.rings = 7
 		ball.mesh = sm
-		var m := _glow_mat(spec[0], 4.0, 0.9)
+		var m := _glow_mat(palette[randi() % palette.size()], randf_range(3.0, 5.0), 0.85)
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		ball.material_override = m
+		ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		main.add_child(ball)
-		ball.global_position = at
-		ball.scale = Vector3.ONE * 0.2
+		var off := Vector3(randf_range(-1, 1), randf_range(-0.2, 0.8), randf_range(-1, 1)) * r * 0.32
+		ball.global_position = at + off
+		ball.scale = Vector3.ONE * 0.15
+		var size := r * randf_range(0.35, 0.7)
+		var life := randf_range(0.28, 0.5)
+		var d := randf_range(0.0, 0.09)
 		var tw := ball.create_tween().set_parallel(true)
-		tw.tween_property(ball, "scale", Vector3.ONE * r * float(spec[1]), float(spec[2])).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
-		tw.tween_property(m, "albedo_color:a", 0.0, float(spec[2]) + 0.15).set_delay(0.06)
+		tw.tween_property(ball, "scale", Vector3(size, size * randf_range(0.8, 1.2), size), life).set_delay(d).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		tw.tween_property(ball, "global_position", ball.global_position + off * 0.6 + Vector3(0, randf_range(0.3, 1.2), 0), life + 0.2).set_delay(d)
+		tw.tween_property(m, "albedo_color:a", 0.0, life + 0.15).set_delay(d + 0.08)
 		tw.chain().tween_callback(ball.queue_free)
-	for i in 6:   # smoke puffs drifting up
-		var puff := MeshInstance3D.new()
-		var sm := SphereMesh.new()
-		sm.radius = randf_range(0.35, 0.6)
-		sm.height = sm.radius * 2.0
-		puff.mesh = sm
-		var m := StandardMaterial3D.new()
-		m.albedo_color = Color(0.25, 0.23, 0.22, 0.6)
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		puff.material_override = m
-		main.add_child(puff)
-		puff.global_position = at + Vector3(randf_range(-1, 1), randf_range(0.2, 1.0), randf_range(-1, 1))
-		var tw := puff.create_tween().set_parallel(true)
-		tw.tween_property(puff, "global_position", puff.global_position + Vector3(randf_range(-0.6, 0.6), 2.2, randf_range(-0.6, 0.6)), 1.4)
-		tw.tween_property(puff, "scale", Vector3.ONE * 1.8, 1.4)
-		tw.tween_property(m, "albedo_color:a", 0.0, 1.4)
-		tw.chain().tween_callback(puff.queue_free)
-	_flash_light(at + Vector3(0, 1, 0), Color("ffa040"), 7.0, r * 4.0, 0.45)
-	Fx.burst(main, at, Vector3.UP, Color("ffcf5a"), 36, 8.0, 0.05)
-	_scorch(Vector3(at.x, WorldLayout.ground_height(at.x, at.z, at.y + 0.2), at.z), r * 0.6)
-	_shake_near(at, 0.18)
-
-
-## The fireball in flight: a burning orb with a light, trailing embers. Main moves it along its path.
-static func fireball_node() -> Node3D:
-	var n := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = 0.22
-	sm.height = 0.44
-	n.mesh = sm
-	n.material_override = _glow_mat(Color("ff7a1a"), 5.0)
+	# the white-hot heart
 	var core := MeshInstance3D.new()
 	var cs := SphereMesh.new()
-	cs.radius = 0.13
-	cs.height = 0.26
+	cs.radius = 1.0
+	cs.height = 2.0
 	core.mesh = cs
-	core.material_override = _glow_mat(Color("fff0a0"), 8.0)
-	n.add_child(core)
+	var cm := _glow_mat(Color("fff6d8"), 10.0, 1.0)
+	cm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	core.material_override = cm
+	main.add_child(core)
+	core.global_position = at
+	core.scale = Vector3.ONE * r * 0.15
+	var ctw := core.create_tween().set_parallel(true)
+	ctw.tween_property(core, "scale", Vector3.ONE * r * 0.35, 0.1)
+	ctw.tween_property(cm, "albedo_color:a", 0.0, 0.14)
+	ctw.chain().tween_callback(core.queue_free)
+	# the shock ring
+	var wave := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.92
+	tm.outer_radius = 1.0
+	tm.rings = 28
+	wave.mesh = tm
+	var wm := _glow_mat(Color("ffe3b0"), 2.5, 0.75)
+	wave.material_override = wm
+	main.add_child(wave)
+	wave.global_position = at + Vector3(0, 0.15, 0)
+	wave.rotation = Vector3(randf_range(-0.12, 0.12), 0, randf_range(-0.12, 0.12))
+	wave.scale = Vector3(0.3, 0.4, 0.3)
+	var wtw := wave.create_tween().set_parallel(true)
+	wtw.tween_property(wave, "scale", Vector3(r * 1.35, 0.4, r * 1.35), 0.3).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+	wtw.tween_property(wm, "albedo_color:a", 0.0, 0.32)
+	wtw.chain().tween_callback(wave.queue_free)
+	# burning debris thrown out in arcs
+	for i in randi_range(5, 11):
+		var chunk := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(randf_range(0.06, 0.2), randf_range(0.06, 0.18), randf_range(0.06, 0.2))
+		chunk.mesh = bm
+		var km := StandardMaterial3D.new()
+		km.albedo_color = Color("3a2a22")
+		km.emission_enabled = true
+		km.emission = Color("ff6a2a")
+		km.emission_energy_multiplier = randf_range(0.8, 2.5)
+		chunk.material_override = km
+		main.add_child(chunk)
+		chunk.global_position = at + Vector3(0, 0.3, 0)
+		var dir := Vector3(randf_range(-1, 1), randf_range(0.5, 1.5), randf_range(-1, 1)).normalized()
+		var peak := chunk.global_position + dir * randf_range(1.5, 1.0 + r)
+		var gy := WorldLayout.ground_height(peak.x, peak.z, peak.y)
+		var land := Vector3(peak.x + dir.x * randf_range(0.8, 2.0), gy + 0.05, peak.z + dir.z * randf_range(0.8, 2.0))
+		var up_t := randf_range(0.22, 0.38)
+		var dtw := chunk.create_tween()
+		dtw.tween_property(chunk, "global_position", peak, up_t).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_QUAD)
+		dtw.parallel().tween_property(chunk, "rotation", Vector3(randf() * 9, randf() * 9, randf() * 9), up_t * 2.5)
+		dtw.tween_property(chunk, "global_position", land, up_t * 1.2).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+		dtw.tween_property(km, "emission_energy_multiplier", 0.0, 1.2)
+		dtw.tween_property(chunk, "scale", Vector3.ZERO, 0.5)
+		dtw.tween_callback(chunk.queue_free)
+		if randf() < 0.5:   # some trail a thread of smoke
+			var trail := CPUParticles3D.new()
+			trail.amount = 12
+			trail.lifetime = 0.5
+			trail.local_coords = false
+			trail.gravity = Vector3(0, 1.0, 0)
+			trail.initial_velocity_max = 0.2
+			var pm := SphereMesh.new()
+			pm.radius = 0.05
+			pm.height = 0.1
+			trail.mesh = pm
+			var grad := Gradient.new()
+			grad.set_color(0, Color(1.0, 0.6, 0.2, 0.9))
+			grad.set_color(1, Color(0.25, 0.22, 0.2, 0.0))
+			trail.color_ramp = grad
+			var tmat := StandardMaterial3D.new()
+			tmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			tmat.vertex_color_use_as_albedo = true
+			tmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			trail.material_override = tmat
+			chunk.add_child(trail)
+	Fx.burst(main, at, Vector3.UP, Color("ffcf5a"), randi_range(24, 44), randf_range(7.0, 10.0), 0.05)
+	Fx.burst(main, at, Vector3.UP, Color("fff2b0"), randi_range(8, 16), randf_range(10.0, 14.0), 0.03)
+	# smoke: a column rising (sometimes a mushroom cap on top), and drifting embers
+	_smoke(at, randi_range(5, 9), r * 0.3, randf_range(2.0, 4.0), 0.6, 0.12)
+	if randf() < 0.35:
+		_smoke(at + Vector3(0, 2.2, 0), randi_range(3, 5), r * 0.35, 1.2, 0.5, 0.35)
+	var embers := CPUParticles3D.new()
+	embers.one_shot = true
+	embers.explosiveness = 0.8
+	embers.amount = randi_range(18, 34)
+	embers.lifetime = randf_range(1.4, 2.2)
+	embers.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	embers.emission_sphere_radius = r * 0.4
+	embers.direction = Vector3.UP
+	embers.spread = 60.0
+	embers.initial_velocity_min = 0.8
+	embers.initial_velocity_max = 3.0
+	embers.gravity = Vector3(randf_range(-0.4, 0.4), 0.7, randf_range(-0.4, 0.4))
+	var em := SphereMesh.new()
+	em.radius = 0.03
+	em.height = 0.06
+	embers.mesh = em
+	var eg := Gradient.new()
+	eg.set_color(0, Color(1.0, 0.8, 0.3, 1.0))
+	eg.set_color(1, Color(1.0, 0.3, 0.05, 0.0))
+	embers.color_ramp = eg
+	var emat := StandardMaterial3D.new()
+	emat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	emat.vertex_color_use_as_albedo = true
+	emat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	emat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	embers.material_override = emat
+	main.add_child(embers)
+	embers.global_position = at + Vector3(0, 0.5, 0)
+	embers.emitting = true
+	embers.finished.connect(embers.queue_free)
+	# the light: a big flash, then flickering down
 	var l := OmniLight3D.new()
-	l.light_color = Color("ff9a3a")
-	l.light_energy = 2.5
-	l.omni_range = 5.0
-	n.add_child(l)
-	var trail := CPUParticles3D.new()
-	trail.amount = 60
-	trail.lifetime = 0.45
-	trail.local_coords = false
-	trail.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	trail.emission_sphere_radius = 0.15
-	trail.direction = Vector3.UP
-	trail.spread = 180.0
-	trail.initial_velocity_min = 0.3
-	trail.initial_velocity_max = 1.2
-	trail.gravity = Vector3(0, 1.5, 0)
-	trail.scale_amount_min = 0.5
-	trail.scale_amount_max = 1.0
-	var pm := SphereMesh.new()
-	pm.radius = 0.09
-	pm.height = 0.18
-	trail.mesh = pm
-	var grad := Gradient.new()
-	grad.set_color(0, Color(1.0, 0.85, 0.3, 1.0))
-	grad.set_color(1, Color(0.6, 0.1, 0.05, 0.0))
-	trail.color_ramp = grad
-	var tm := StandardMaterial3D.new()
-	tm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	tm.vertex_color_use_as_albedo = true
-	tm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	trail.material_override = tm
-	n.add_child(trail)
-	return n
+	l.light_color = Color("ffa040")
+	l.light_energy = randf_range(7.0, 9.0)
+	l.omni_range = r * 4.0
+	l.shadow_enabled = l.light_energy >= 8.0
+	main.add_child(l)
+	l.global_position = at + Vector3(0, 1, 0)
+	var ltw := l.create_tween()
+	for k in randi_range(3, 5):
+		ltw.tween_property(l, "light_energy", randf_range(2.0, 5.0) * (1.0 - k * 0.15), randf_range(0.04, 0.09))
+	ltw.tween_property(l, "light_energy", 0.0, 0.3)
+	ltw.tween_callback(l.queue_free)
+	_scorch_ragged(at, r * 0.6, randi_range(5, 9))
+	_shake_near_scaled(at, 0.22)
+
+
+## The fireball in flight (FireballView). Main moves it along its path.
+static func fireball_node() -> Node3D:
+	return FireballView.new()
 
 
 func _make_bubble() -> Dictionary:
@@ -533,6 +821,7 @@ func _cast_glow(delta: float, states: Dictionary) -> void:
 				if randf() < delta * 30.0 * k:   # sparks drawn in toward the staff
 					var off := Vector3(randf_range(-1, 1), randf_range(-0.6, 1), randf_range(-1, 1)).normalized() * 0.7
 					Fx.burst(main, hand + off, -off, c, 1, 2.0, 0.035)
+		_rune(id, st, av, delta)
 		var slowed := st != null and av != null and st.slow > 0 and st.dead == 0
 		if slowed and not frosts.has(id):
 			var d := _disc(av.position, 0.7, Color("bfefff"), 0.45)
@@ -963,4 +1252,191 @@ func _storm(at: Vector3, life: float, area: float) -> void:
 		get_tree().create_timer(1.3).timeout.connect(func():
 			root.queue_free()
 			shade.queue_free()))
+
+
+# ================================================================ v0.8.0: runes, blinks, summoning circles, cracks
+## A rune circle under someone casting: two rings and a band of glyphs turning opposite ways, in the spell's colour;
+## it grows as the spell builds, flares as it goes off and shrinks away after.
+func _rune(id: int, st: Sim.PlayerState, av: Node3D, delta: float) -> void:
+	var casting := st != null and av != null and st.dead == 0 and Weapons.is_magic(st.weapon) and st.atk > 0 and st.shield == 0
+	if casting and not runes.has(id):
+		runes[id] = _make_rune()
+	if not runes.has(id):
+		return
+	var r: Dictionary = runes[id]
+	var root: Node3D = r.root
+	if not casting:
+		root.queue_free()
+		runes.erase(id)
+		return
+	var sp := Weapons.spell(st.weapon, st.spell)
+	var c: Color = SPELL_COLOR.get(str(sp.name), Color.WHITE)
+	var into := float(int(sp.cast) - st.atk)
+	var k := clampf(into / maxf(float(sp.windup), 1.0), 0.0, 1.0)
+	var after := clampf((into - float(sp.windup)) / maxf(float(int(sp.cast) - int(sp.windup)), 1.0), 0.0, 1.0)
+	var size := (0.35 + 0.85 * sqrt(k)) * (1.0 + 0.25 * sin(minf(after * 6.0, PI))) * (1.0 - after * 0.6)
+	root.global_position = Vector3(av.position.x, WorldLayout.ground_height(av.position.x, av.position.z, av.position.y + 0.3) + 0.04, av.position.z)
+	root.scale = Vector3(size, 1, size)
+	(r.outer as Node3D).rotation.y += delta * 1.2
+	(r.glyphs as Node3D).rotation.y -= delta * 2.2
+	for m: StandardMaterial3D in r.mats:
+		m.albedo_color = Color(c.r, c.g, c.b, (0.35 + 0.5 * k) * (1.0 - after * 0.8))
+		m.emission = c
+		m.emission_energy_multiplier = 2.0 + 4.0 * k + (6.0 * (1.0 - after) if into >= float(sp.windup) else 0.0)
+
+
+func _make_rune() -> Dictionary:
+	var root := Node3D.new()
+	main.add_child(root)
+	var mats := []
+	var outer := Node3D.new()
+	root.add_child(outer)
+	for spec in [[1.0, 0.94], [0.72, 0.68]]:
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.outer_radius = spec[0]
+		tm.inner_radius = spec[1]
+		tm.rings = 40
+		tm.ring_segments = 4
+		ring.mesh = tm
+		ring.scale = Vector3(1, 0.15, 1)
+		var m := _glow_mat(Color.WHITE, 3.0, 0.6)
+		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		ring.material_override = m
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		outer.add_child(ring)
+		mats.append(m)
+	var gm := _glow_mat(Color.WHITE, 3.0, 0.6)
+	gm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mats.append(gm)
+	var glyphs := Node3D.new()
+	root.add_child(glyphs)
+	for i in 10:   # glyphs: little strokes and diamonds between the rings
+		var g := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.05, 0.01, 0.16) if i % 2 == 0 else Vector3(0.09, 0.01, 0.09)
+		g.mesh = bm
+		g.material_override = gm
+		var a := TAU * i / 10.0
+		g.position = Vector3(cos(a) * 0.83, 0.0, sin(a) * 0.83)
+		g.rotation.y = -a + (PI * 0.25 if i % 2 == 1 else 0.0)
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		glyphs.add_child(g)
+	for i in 3:   # a triangle inside
+		var a0 := TAU * i / 3.0
+		var a1 := TAU * (i + 1) / 3.0
+		var p0 := Vector3(cos(a0), 0, sin(a0)) * 0.66
+		var p1 := Vector3(cos(a1), 0, sin(a1)) * 0.66
+		var e := MeshInstance3D.new()
+		var em := BoxMesh.new()
+		em.size = Vector3(0.025, 0.01, p0.distance_to(p1))
+		e.mesh = em
+		e.material_override = gm
+		e.position = (p0 + p1) * 0.5
+		e.rotation.y = atan2(p1.x - p0.x, p1.z - p0.z)
+		glyphs.add_child(e)
+	return { "root": root, "outer": outer, "glyphs": glyphs, "mats": mats }
+
+
+## The teleport's two ends: leaving, a column of violet light collapses inward with motes sucked into it; arriving, a
+## column bursts out with a shock ring and sparks.
+func _blink(at: Vector3, arrive: bool) -> void:
+	var col := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.55
+	cm.bottom_radius = 0.65
+	cm.height = 2.6
+	cm.radial_segments = 16
+	col.mesh = cm
+	var m := _glow_mat(Color("c58cff"), 4.0, 0.55)
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	col.material_override = m
+	col.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.add_child(col)
+	col.global_position = at + Vector3(0, 1.3, 0)
+	var tw := col.create_tween().set_parallel(true)
+	if arrive:
+		col.scale = Vector3(0.1, 1.4, 0.1)
+		tw.tween_property(col, "scale", Vector3(1.3, 0.6, 1.3), 0.3).set_ease(Tween.EASE_OUT)
+		tw.tween_property(m, "albedo_color:a", 0.0, 0.35)
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = 0.9
+		tm.outer_radius = 1.0
+		ring.mesh = tm
+		var rm := _glow_mat(Color("d8b0ff"), 3.0, 0.8)
+		ring.material_override = rm
+		main.add_child(ring)
+		ring.global_position = at + Vector3(0, 0.1, 0)
+		ring.scale = Vector3(0.3, 0.3, 0.3)
+		var rtw := ring.create_tween().set_parallel(true)
+		rtw.tween_property(ring, "scale", Vector3(2.4, 0.3, 2.4), 0.35).set_ease(Tween.EASE_OUT)
+		rtw.tween_property(rm, "albedo_color:a", 0.0, 0.38)
+		rtw.chain().tween_callback(ring.queue_free)
+		Fx.burst(main, at + Vector3(0, 1.0, 0), Vector3.UP, Color("e2c4ff"), 26, 5.0, 0.04)
+	else:
+		col.scale = Vector3(1.2, 1.0, 1.2)
+		tw.tween_property(col, "scale", Vector3(0.02, 1.6, 0.02), 0.28).set_ease(Tween.EASE_IN)
+		tw.tween_property(m, "albedo_color:a", 0.0, 0.3).set_delay(0.05)
+		var motes := CPUParticles3D.new()   # sucked in toward the middle
+		motes.one_shot = true
+		motes.explosiveness = 0.7
+		motes.amount = 30
+		motes.lifetime = 0.35
+		motes.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+		motes.emission_sphere_radius = 1.4
+		motes.radial_accel_min = -40.0
+		motes.radial_accel_max = -30.0
+		motes.gravity = Vector3.ZERO
+		var mm := SphereMesh.new()
+		mm.radius = 0.035
+		mm.height = 0.07
+		motes.mesh = mm
+		motes.material_override = _glow_mat(Color("e2c4ff"), 4.0)
+		main.add_child(motes)
+		motes.global_position = at + Vector3(0, 1.0, 0)
+		motes.emitting = true
+		motes.finished.connect(motes.queue_free)
+	tw.chain().tween_callback(col.queue_free)
+	_flash_light(at + Vector3(0, 1, 0), Color("b066ff"), 3.5, 6.0, 0.35)
+
+
+## A summoning circle on the ground where a golem or the titan rises: it glows in, turns, and fades as it stands.
+func _summon_circle(at: Vector3, r: float, c: Color, life: float) -> void:
+	var rd := _make_rune()
+	var root: Node3D = rd.root
+	root.global_position = Vector3(at.x, WorldLayout.ground_height(at.x, at.z, at.y + 0.3) + 0.04, at.z)
+	root.scale = Vector3(r * 0.3, 1, r * 0.3)
+	for m: StandardMaterial3D in rd.mats:
+		m.albedo_color = Color(c.r, c.g, c.b, 0.8)
+		m.emission = c
+		m.emission_energy_multiplier = 4.0
+	var tw := root.create_tween().set_parallel(true)
+	tw.tween_property(root, "scale", Vector3(r, 1, r), 0.3).set_ease(Tween.EASE_OUT)
+	tw.tween_property(root, "rotation:y", TAU * 0.6, life + 0.6)
+	for m: StandardMaterial3D in rd.mats:
+		tw.tween_property(m, "albedo_color:a", 0.0, 0.6).set_delay(life)
+	tw.chain().tween_callback(root.queue_free)
+	_flash_light(at + Vector3(0, 0.5, 0), c, 3.0, r * 3.0, life)
+
+
+## Dark cracks splitting the ground outward from a point.
+func _cracks(at: Vector3, r: float, n: int) -> void:
+	var g := Vector3(at.x, WorldLayout.ground_height(at.x, at.z, at.y + 0.3) + 0.03, at.z)
+	var paths := []
+	for i in n:
+		var a := TAU * float(i) / n + randf_range(-0.3, 0.3)
+		var to := g + Vector3(cos(a), 0, sin(a)) * r * randf_range(0.6, 1.0)
+		paths.append([_fractal(g, to, 3, 0.18).map(func(p): return Vector3(p.x, g.y, p.z)), 0.07])
+	var mi := _ribbons(paths, Color(0.05, 0.04, 0.03), 0.0)
+	var m: StandardMaterial3D = mi.material_override
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+	m.emission_enabled = false
+	m.albedo_color = Color(0.06, 0.05, 0.04, 0.0)
+	var tw := mi.create_tween()
+	tw.tween_property(m, "albedo_color:a", 0.7, 0.08)
+	tw.tween_interval(3.0)
+	tw.tween_property(m, "albedo_color:a", 0.0, 1.5)
+	tw.tween_callback(mi.queue_free)
 

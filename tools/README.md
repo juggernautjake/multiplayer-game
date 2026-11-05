@@ -233,7 +233,9 @@ mana once and stops mana coming back; levels at 3, 8 and 18 kills unlock spells;
 
 `Godot --headless --path . --script tools/golem_test.gd`: golems catch a walking player and hit them on the move, a
 sprinting player gets away, they notice enemies 24 m off but not 27 m, they leave players alone without PvP, they
-crumble at 0 health and their summoner can't hurt them; one titan at a time, whose slam crushes everyone round it.
+crumble at 0 health and their summoner can't hurt them; one titan at a time, whose slam crushes everyone round it;
+(0.8.0) one leaps at someone 4.5 m off and comes down on them, three after one target spread round it, and with
+nothing to fight they stand guard round their summoner.
 
 ## net_magic_test.gd
 
@@ -243,8 +245,16 @@ then shattering and letting the rest through; kills levelling the staff and wand
 area; a meteor and its burning ground; a gravity well dragging someone in and bursting; an arcane storm's bolts; your
 own blasts never hurting you; the staff being one of a kind.
 
+## garb_check.gd
+
+`Godot --headless --path . --script tools/garb_check.gd`: hangs a wizard robe (WizardGarb) from a still body for 2 s,
+then runs with it at 10 m/s, printing the height of each row. A quick check that the cloth hangs to the ground and
+trails without flying up.
+
 ## make_outfits.py
 
 `python tools/make_outfits.py`: recolours Pip's two sprite sheets into outfits 1-3 (`assets/pip/outfits/`): the tunic,
 trousers, scarf and hair moved to new colours (blue and gold, green and red, crimson and teal), skin and outline kept.
-The host plays outfit 0 (the original); guests get 1, 2, 3 in the order they join.
+The host plays outfit 0 (the original); guests get 1, 2, 3 in the order they join. Outfits 4 (grey) and 5 (dark
+violet-black) are the wizard garb's robes (scripts/wizard_garb.gd): Pip's sheets switch to them while he carries the
+staff or the wand.

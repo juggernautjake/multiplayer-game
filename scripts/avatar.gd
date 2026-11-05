@@ -3,6 +3,10 @@
 ## the player faces, and plays the animation that matches the player's state: idle, walk, run, dash, jump, air, land,
 ## club and sword swings (standing, walking, running, in the air), bow and slingshot draw and release, knocked down.
 ## Every client animates every player from the state it already has, so animation adds no network traffic.
+## On top of the drawn frames (v0.8.0): squash and stretch (a crouch before a jump, stretching up into it, squashing
+## on landing by how hard he came down, a jolt on every blow), dust kicked up by running feet and landings,
+## afterimages streaking behind a dash, a kick back on every bow and slingshot release, the staff and wand moving
+## through each spell's own gesture (CastPose), and the wizard garb (WizardGarb) while he carries the staff or wand.
 class_name Avatar
 extends Node3D
 
@@ -42,6 +46,19 @@ var _dir_i := -1
 var _swing_n := -1
 var _flash := 0.0
 var _slashed_n := -1
+# the procedural layer over the drawn frames
+var _sq := 1.0                 # vertical squash / stretch (1 = as drawn), a spring
+var _v_sq := 0.0
+var _nudge := 0.0              # forward jolt (m) along the facing, a spring
+var _v_nudge := 0.0
+var _ghost_t := 0.0
+var _step_d := 0.0             # metres since the last footfall puff
+var _fall_v := 0.0             # how fast he was falling just before landing
+var _shot_seen := -1
+var _garb: WizardGarb
+var _garb_kind := 0
+var _outfit := 0
+var _cam: Camera3D
 
 
 static func _load_sheets() -> void:
@@ -77,7 +94,8 @@ static func outfit_textures(outfit: int) -> Array:
 
 func _init(player_name: String, color: Color, show_name: bool, outfit := 0) -> void:
 	_load_sheets()
-	_tex = outfit_textures(outfit % 4)
+	_outfit = outfit % 4
+	_tex = outfit_textures(_outfit)
 	_name = player_name
 	model = Node3D.new()
 	add_child(model)
@@ -131,6 +149,8 @@ func _init(player_name: String, color: Color, show_name: bool, outfit := 0) -> v
 	hp_bar.position.y = 2.12
 	hp_bar.visible = show_name
 	add_child(hp_bar)
+	_garb = WizardGarb.new()
+	add_child(_garb)
 	_show()
 
 
@@ -156,6 +176,7 @@ func hitstop(seconds: float, shake: bool) -> void:
 
 ## Call every frame after setting position, yaw, grounded, dashing and state.
 func animate(delta: float, cam: Camera3D) -> void:
+	_cam = cam
 	if _hitstop > 0.0:
 		_hitstop -= delta
 		sprite.position.x = randf_range(-0.03, 0.03) if _hit_shake else 0.0
@@ -203,6 +224,8 @@ func animate(delta: float, cam: Camera3D) -> void:
 	_show(cam)
 	_swing_fx()
 	_update_prop(delta)
+	_procedural(delta, speed)
+	_dress(delta, cam)
 
 	_flash = maxf(_flash - delta, 0.0)
 	sprite.modulate = Color(1, 0.45, 0.45) if _flash > 0.0 else Color.WHITE
@@ -264,10 +287,15 @@ func _pick(speed: float) -> String:
 		return "dash"
 	if not grounded:
 		var r := "air" if (not _was_grounded and (_anim == "air" or (_anim == "jumpStart" and _done()))) else "jumpStart"
+		if _was_grounded:
+			_v_sq += 3.2   # stretching up into the jump
+		_fall_v = maxf(_fall_v, -_vel.y)
 		_was_grounded = false
 		return r
 	if not _was_grounded:
 		_landing = 0.21
+		_land(_fall_v)
+		_fall_v = 0.0
 	_was_grounded = true
 	_landing = maxf(_landing - get_process_delta_time(), 0.0)
 	if _landing > 0.0 and speed < Sim.WALK_SPEED * 0.5:
@@ -348,20 +376,168 @@ func _update_prop(delta: float) -> void:
 		return
 	var right := Vector3(cos(yaw), 0, -sin(yaw))
 	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
-	var k := 0.0
+	var staff := w == Weapons.STAFF
+	var pose := { "reach": 0.0, "lift": 0.0, "side": 0.0, "aim": 0.15 if staff else 1.35, "crouch": 0.0, "flare": 0.0 }
 	if state.atk > 0:
 		var sp := Weapons.spell(w, state.spell)
-		var into := int(sp.cast) - state.atk
-		k = clampf(float(into) / float(maxi(int(sp.windup), 1)), 0.0, 1.0) * clampf(float(state.atk) / 10.0, 0.0, 1.0)
-	var staff := w == Weapons.STAFF
+		pose = CastPose.at(w, str(sp.name), float(int(sp.cast) - state.atk), float(sp.windup), float(sp.cast))
 	var up := 0.0
-	if state.shield > 0:   # holding the shield up: the staff raised high over his head
-		k = 0.0
-		up = 0.75
-	_prop.position = right * (0.34 - 0.18 * up) + fwd * lerpf(0.05, 0.35, k) + Vector3(0, (0.95 if staff else 0.85) + 0.3 * k + up, 0)
-	var tilt := lerpf(0.08 if staff else 1.1, 0.7 if staff else 1.45, k) - 0.08 * up
-	_prop.basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -tilt)
+	if state.shield > 0:   # holding the shield up: the staff raised high over his head, quivering under the strain
+		up = 0.75 + 0.015 * sin(Time.get_ticks_msec() * 0.03)
+		pose.aim = 0.05
+	# walking: the staff swings and bobs with his steps; the wand sways
+	var speed := Vector2(_vel.x, _vel.z).length()
+	var gait := sin(Time.get_ticks_msec() * 0.001 * clampf(speed, 0.0, 10.0) * 1.4) * clampf(speed / 6.0, 0.0, 1.0)
+	var reach := float(pose.reach)
+	_prop.position = right * (0.34 - 0.18 * up + float(pose.side)) + fwd * (0.08 + 0.36 * reach + 0.05 * gait) \
+		+ Vector3(0, (0.95 if staff else 0.85) + float(pose.lift) - float(pose.crouch) + up + 0.02 * absf(gait), 0)
+	var tilt := float(pose.aim) + 0.08 * gait - (0.08 * up)
+	_prop.basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -tilt) * Basis(Vector3.UP, float(pose.side) * 4.0)
 	var orb := _prop.get_node_or_null("Orb") as MeshInstance3D
 	if orb:
-		orb.scale = Vector3.ONE * (1.0 + 0.8 * k + 0.08 * sin(Time.get_ticks_msec() * 0.006))
+		orb.scale = Vector3.ONE * (1.0 + 0.8 * float(pose.flare) + 0.08 * sin(Time.get_ticks_msec() * 0.006))
+	if float(pose.crouch) > 0.12 and state.atk > 0:
+		_v_sq -= 0.3   # a slam jolts him down
+
+
+## The procedural layer over the drawn frames: squash and stretch, the forward jolt on blows and the kick back on
+## shots, dust under running feet, afterimages behind a dash.
+func _procedural(delta: float, speed: float) -> void:
+	if delta <= 0.0:
+		return
+	var st := state
+	# blows: a jolt forward as the hit lands; shots: a kick back as the string lets go
+	if st != null and st.dead == 0 and Weapons.is_melee(st.weapon) and st.atk > 0:
+		var mv := Weapons.move(st.weapon, st.combo)
+		var into := int(mv.swing) - st.atk
+		if into == int(mv.windup) - 1:
+			_v_nudge += 2.4 if st.weapon != Weapons.FISTS else 1.4
+			_v_sq -= 1.2 if st.weapon == Weapons.CLUB else 0.6
+	if st != null and Weapons.is_ranged(st.weapon) and st.swing_n != _shot_seen:
+		if _shot_seen != -1 and st.charge == 0 and st.atk > 0:
+			_v_nudge -= 1.6
+			_v_sq += 0.8
+		_shot_seen = st.swing_n
+	if st != null and st.charge > 0 and Weapons.is_ranged(st.weapon):   # leaning into the draw
+		_sq = lerpf(_sq, 0.97, clampf(delta * 6.0, 0.0, 1.0))
+	var sq := FigureAvatar.spring_f(_sq, _v_sq, 1.0, 0.09, delta)
+	_sq = clampf(sq[0], 0.7, 1.3)
+	_v_sq = sq[1]
+	var nd := FigureAvatar.spring_f(_nudge, _v_nudge, 0.0, 0.08, delta)
+	_nudge = clampf(nd[0], -0.25, 0.3)
+	_v_nudge = nd[1]
+	# dashes stretch him along the way he's going (wider, shorter)
+	var dash_k := 0.12 if dashing else 0.0
+	sprite.scale = Vector3((1.0 / sqrt(_sq)) + dash_k, _sq - dash_k * 0.6, 1.0)
+	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
+	sprite.position = Vector3(sprite.position.x, 0, 0) + fwd * _nudge
+	# dust from running feet and the dash's afterimages
+	var parent := get_parent()
+	if parent == null or not model.visible:
+		return
+	if grounded and speed > Sim.WALK_SPEED * 0.9 and not dashing:
+		_step_d += speed * delta
+		if _step_d > 1.15:
+			_step_d = 0.0
+			MotionFx.puff(parent, position, 2 + int(speed > Sim.SPRINT_SPEED - 1.0), 0.6)
+	if dashing:
+		_ghost_t -= delta
+		if _ghost_t <= 0.0:
+			_ghost_t = 0.03
+			MotionFx.ghost_sprite(parent, sprite, label.modulate)
+			if grounded:
+				MotionFx.puff(parent, position, 2, 1.2)
+
+
+## Landing: squash by how hard he came down, and a ring of dust.
+func _land(fall: float) -> void:
+	_v_sq -= clampf(fall * 0.35, 0.8, 5.0)
+	if fall > 4.0 and get_parent() != null and model.visible:
+		MotionFx.land(get_parent(), position, clampf(fall / 14.0, 0.3, 1.4))
+
+
+# ================================================================ the wizard garb
+## Pip's head and body move from frame to frame, so where the hat, hood and robe go is read off the frame drawn now:
+## the first row of the head, the middle of the head, and the shoulders (cached per frame).
+static var _imgs: Array = []
+static var _scan := {}
+
+
+static func _cell_info(sheet: int, row: int, frame: int) -> Array:
+	var key := sheet * 1000000 + row * 1000 + frame
+	if _scan.has(key):
+		return _scan[key]
+	if _imgs.is_empty():
+		for t in _textures:
+			var im: Image = (t as Texture2D).get_image()
+			if im.is_compressed():
+				im.decompress()
+			_imgs.append(im)
+	var im: Image = _imgs[sheet]
+	var x0 := frame * _cell.x
+	var y0 := row * _cell.y
+	var top := -1
+	for y in _cell.y:
+		var n := 0
+		for x in _cell.x:
+			if im.get_pixel(x0 + x, y0 + y).a > 0.5:
+				n += 1
+		if n >= 5:
+			top = y
+			break
+	if top < 0:
+		top = int(_anchor.y) - 42
+	var neck := mini(top + 21, int(_anchor.y) - 6)
+	var out := [top, _mean_x(im, x0, y0, top, top + 10), neck, _mean_x(im, x0, y0, neck, neck + 8)]
+	_scan[key] = out
+	return out
+
+
+static func _mean_x(im: Image, x0: int, y0: int, ya: int, yb: int) -> float:
+	var sum := 0.0
+	var n := 0
+	for y in range(maxi(ya, 0), mini(yb, _cell.y)):
+		for x in _cell.x:
+			if im.get_pixel(x0 + x, y0 + y).a > 0.5:
+				sum += x
+				n += 1
+	return sum / n if n > 0 else _anchor.x
+
+
+func _dress(delta: float, cam: Camera3D) -> void:
+	var k := WizardGarb.kind_for(state)
+	if k != _garb_kind:
+		_garb_kind = k
+		_garb.set_kind(k)
+		# the robe's colours on his sprite too (tools/make_outfits.py: 4 the grey robe, 5 the dark one)
+		_tex = outfit_textures(5 if k == WizardGarb.Kind.SHADOW else (4 if k != WizardGarb.Kind.NONE else _outfit))
+		_show(cam)
+	if k == WizardGarb.Kind.NONE:
+		return
+	var dead := state != null and state.dead > 0
+	var a := _clip(_dir_for(cam))
+	var info := _cell_info(a.sheet, a.row, mini(_frame, a.frames - 1))
+	var right := Vector3(1, 0, 0)
+	if cam:
+		right = cam.global_transform.basis.x
+		right.y = 0.0
+		right = right.normalized() if right.length() > 0.01 else Vector3(1, 0, 0)
+	var flip := -1.0 if sprite.flip_h else 1.0
+	var base := global_position + sprite.position
+	var sy := sprite.scale.y
+	var sx := sprite.scale.x
+	var px := func(x: float, y: float) -> Vector3:
+		return base + right * ((x - _anchor.x) * PIXEL * flip * sx) + Vector3(0, (_anchor.y - y) * PIXEL * sy, 0)
+	var face := Vector3(-sin(yaw), 0, -cos(yaw))
+	var top := float(info[0])
+	var head_c: Vector3 = px.call(float(info[1]), top + 10.0)
+	var neck: Vector3 = px.call(float(info[3]), float(info[2]))
+	var ground := WorldLayout.ground_height(position.x, position.z, position.y)
+	_garb.update(delta, {
+		"hip": neck + Vector3(0, -0.02, 0), "basis": Basis(Vector3.UP, yaw) * Basis.from_scale(Vector3(1.0, 1.0, 0.82)),
+		"top_r": 0.36 * sx, "hem_r": 0.5 * sx, "len": maxf(neck.y - ground - 0.08, 0.3), "colliders": [],
+		"ground": ground, "vel": _vel,
+		"head_top": px.call(float(info[1]), top + 4.0), "head_c": head_c, "head_r": 0.44, "up": Vector3.UP, "face": face,
+		"neck": neck + Vector3(0, 0.05, 0), "hat_h": 0.78, "hat_r": 0.33, "brim_r": 0.56,
+		"visible": model.visible and not dead })
 

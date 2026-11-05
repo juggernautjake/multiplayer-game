@@ -77,7 +77,8 @@ owns everything the player sees and touches. Networking and simulation are not h
 | `--host` / `--join <address or invite code>` | Skip the menu. |
 | `--port <n>`, `--name <name>` | UDP port and player name. |
 | `--style pip` / `--style figure` | The host's look for everyone. |
-| `--bot`, `--bot fight`, `--bot aim`, `--bot close [--shots <dir>]` | Scripted test players (see below). |
+| `--bot`, `--bot fight`, `--bot aim`, `--bot close`, `--bot magic`, `--bot show`, `--bot golems` (`--shots <dir>`) | Scripted test players (see below). |
+| `--give-all`, `--give-staff`, `--give-wand`, `--give-guests`, `--max-level` | Test loadouts (Net reads them when hosting). |
 | `--screenshot <file.png> [--shot-frame 240] [--view first]` | Save one frame and quit. |
 | `--log` | Count every replicated event and print an audit line (with the fight bot); Net also prints hits and pick-ups. |
 | `--netsim ping,jitter,loss%` | Simulate a bad connection on this client (sets `net.sim_lat_ms`, `sim_jit_ms`, `sim_loss`). |
@@ -176,6 +177,9 @@ removes it and shows "+ Sword" if you took it, and `_update_items` makes weapons
   switches the look at 25 s; with `--log` it prints an audit line every 10 s (`_audit_print`);
 - `aim` (`_bot_fight` too): bow and slingshot only, steering the camera so the crosshair is on the dummy's chest, at
   10 m and 22 m;
+- `show` (`_bot_show`): runs toward the camera, strafes, backpedals, dashes, jumps, swings the sword and casts while
+  the camera circles; `--shots <dir>` saves a picture every 6 ticks (animation, garb and effects by eye);
+- `golems` (`_bot_golems`): summons a golem at the dummies, then the titan, and watches from the side;
 - `close` (`_bot_close`): walks into the dummy and into a pillar with every weapon, logs how far the body is turned
   from the target and the camera, prints the worst angles and quits; `--shots <dir>` saves screenshots.
 
@@ -588,3 +592,70 @@ stunned (violet, trembling) and crumbling (the blocks fly apart, tumble and sink
   look and door, the tower's beacon, `--give-all`, `--max-level` and `--bot magic` (`--plan2`, `--plan3`) for testing.
 - **avatar.gd** / **figure_avatar.gd**: the staff or wand in hand (Pip holds a small 3D model at his side), cast poses,
   the staff raised overhead while shielding; outfits per player (`tools/make_outfits.py`).
+
+## v0.8.0: animation, garb, effects and netcode
+
+### wizard_garb.gd
+
+`class_name WizardGarb` (Node3D, top-level: placed in world space). `kind_for(state)` picks the garb from what the
+player carries: `WIZARD` (staff: grey robe and pointed hat), `SHADOW` (wand: dark hooded robe), `BOTH` (grey robe and
+hat, the dark hood dropped round the neck) or `NONE`. Each avatar owns one and calls `update(delta, frame)` every
+frame with where its body is (`hip`, `basis`, robe radii and length, leg capsules to keep out of, the ground, head top,
+centre, size, up and facing, hat sizes).
+
+- **Robe:** 20 strands x 6 rows of Verlet particles. The top ring is pinned to the waist; the rest fall under gravity,
+  keep their length, spring gently back toward the robe's shape, never swing more than about 60 degrees from hanging
+  straight down, keep their spacing round the ring, are pushed out of the body and the legs, and stay above the
+  ground. Damping is relative to the body's own motion (damping world velocity would act like a gale and blow the robe
+  flat when running). Running and dashing add a flutter at the hem. Drawn each frame into an `ImmediateMesh`
+  (toon-shaded, a lighter trim at the hem).
+- **Hat:** a chain of 5 points from the brim to the tip, each springing toward its place (stiff at the base, loose
+  at the tip), drawn as tapered segments, with a band and a brim that tilts after the crown.
+- **Hood:** a dome over the back of the head, a rim round the face and a 4-point tail hanging down the back.
+
+### cast_pose.gd
+
+`class_name CastPose`, static: `at(weapon, spell, into, windup, cast)` gives the staff or wand's reach, lift, sideways
+offset, angle, crouch, lean, flare and whether the free hand joins, through each spell's gesture: `thrust` (Fireball,
+Stun, Teleport), `sky` (Lightning, Meteor, Arcane Storm), `slam` (Frost Nova, Earth Spikes), `summon` (Golem, Stone
+Titan), `vortex` (Gravity Well). Each gesture has anticipation, a fast release with overshoot and a follow-through; the
+wand adds a looping flourish while the spell builds. Pip's prop and the figure's hands both use it.
+
+### motion_fx.gd
+
+`class_name MotionFx`, static: `puff` (dust at the feet), `land` (a ring of dust on a hard landing), `ghost_sprite`
+(Pip's dash afterimages), `speed_lines` (the figure's dash).
+
+### fireball_view.gd
+
+`class_name FireballView` (MeshInstance3D): the fireball in flight. Each has its own size and colour; a white-hot core
+and two churning see-through shells of flame, a flickering light, embers, a smoke ribbon and sparks.
+`MagicFx.fireball_node()` returns one; Main flies it like any projectile.
+
+### Changes in the existing scripts
+
+- **avatar.gd (Pip):** squash and stretch over the drawn frames (stretching into a jump, squashing on landing by how
+  hard he fell, a jolt on every blow, a kick back on every shot), running dust, dash afterimages, the staff and wand
+  through `CastPose`, and the garb. Pip's head and shoulders move from frame to frame, so the garb reads where they
+  are from the frame being shown (`_cell_info`: the first row of the head and the middle of the head and shoulders,
+  cached per frame). With a robe, his sheets switch to the robe's colours (outfits 4 and 5).
+- **figure_avatar.gd:** strafing leans into the side, backpedalling leans back, the head leads turns, a crouch soaks
+  up landings (with dust) and it stretches on take-off, arms out for balance in the air, a low dash with the arms swept
+  back and speed lines, dust where running feet plant, a little variety in every swing (by its number), the casting
+  gestures, and the garb (recoloured tunic, sleeves and trousers, bell sleeves from the elbows, the cloth). Also fixed
+  an old "axis must be normalized" error when the weapon's direction barely changed.
+- **golems.gd:** golems after one target spread round it (`_assign_slots`, `SPREAD`), keep apart (`_separate`), leap
+  from 3-5.5 m (`State.LEAP`, `LEAP_*`), stand guard round their summoner (`GUARD_R`), and look 2.6 m ahead for
+  pillars (`_free_static`).
+- **golem_view.gd:** footfalls with dust, the leap's crouch, arc and landing, alternating slam and haymaker, a flinch
+  when hit, the head looking about, pulsing eyes; golems are drawn on the players' clock (`_interp`, from
+  `Net.render_tick`).
+- **magic_fx.gd:** fractal lightning (`_fractal`, `_bolt_paths`, `_ribbons`: one mesh per stroke) with re-strikes,
+  ground arcs, afterglow and a distance-scaled thunder shake (`_shake_near_scaled`); randomised explosions; ragged
+  scorches (`_scorch_ragged`); smoke (`_smoke`); rune circles under casters (`_rune`, `_make_rune`); the teleport's
+  collapsing and bursting columns (`_blink`); summoning circles (`_summon_circle`) and cracks (`_cracks`); crackling
+  arcs round stunned players.
+- **net.gd:** the interpolation delay's fixes (`_measure_jitter`), the predicted own fireball, channels 6 and 7 for
+  projectile and hit messages, input buffers starting at 3, the connection readout (`quality_line`, `loss_pct`,
+  `check_tailscale_path`). See [docs/networking.md](../docs/networking.md).
+- **main.gd:** the HUD's connection line; the `show` and `golems` bots; `--every` for the magic bot.

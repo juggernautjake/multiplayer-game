@@ -406,6 +406,9 @@ func _process(_delta: float) -> void:
 			net.roster.size(), net.ping_ms(), Engine.get_frames_per_second(),
 			"1st person" if view == View.FIRST else "3rd person", dash, net.corrections,
 			int(net.interp_delay * Config.DT * 1000.0), extrap]
+		var ql := net.quality_line()
+		if ql != "":
+			hud.text += "\n" + ql
 		hud.text += "\nPvP %s (P)" % ("ON: other PvP players can hurt you" if bool(net.roster.get(net.my_id, {}).get("pvp", false)) else "off: nobody can hurt you")
 		if host_info != "" and multiplayer.multiplayer_peer and multiplayer.is_server():
 			hud.text += "\n\n" + host_info
@@ -524,6 +527,10 @@ func _bot_input() -> Array:
 		return _bot_close()
 	if bot_mode == "magic":
 		return _bot_magic()
+	if bot_mode == "show":
+		return _bot_show()
+	if bot_mode == "golems":
+		return _bot_golems()
 	bot_t += 1
 	cam_yaw = wrapf(bot_t * 0.01, -PI, PI)
 	var b: int = Sim.Btn.FORWARD
@@ -579,13 +586,101 @@ func _bot_magic() -> Array:
 		print("[magic] t%d fps %d %s spell %d mana %d shield %d recharge %s golems %d" % [bot_t, Engine.get_frames_per_second(), Weapons.NAMES[weapon_slot], net.predicted.spell,
 			net.predicted.mana / 5, net.predicted.shield, str(net.predicted.recharge), golem_view.golems.size() if golem_view else -1])
 	var shots := str(_args().get("shots", ""))
-	if shots != "" and bot_t in [104, 116, 140, 156, 166, 186, 196, 250, 340, 372, 380, 418, 440, 470, 520, 580, 600, 660, 700, 734, 760, 860]:
+	if shots != "" and (bot_t in [104, 116, 140, 156, 166, 186, 196, 250, 340, 372, 380, 418, 440, 470, 520, 580, 600, 660, 700, 734, 760, 860] or (_args().has("every") and bot_t % 6 == 0)):
 		get_viewport().get_texture().get_image().save_png(shots.path_join("magic_%d.png" % bot_t))
 	if bot_t > 900:
 		_audit_print()
 		get_tree().quit()
 	spell_sel[weapon_slot] = spell
 	return [b, cam_yaw, 0.0, weapon_slot, aim_yaw, atan2(-(aim - me).x, -(aim - me).z), spell, aim]
+
+
+## Showcase bot (--host --give-staff | --give-wand | --give-all --bot show --shots <dir> [--style figure]): shows the
+## character from the front and the sides while it runs toward the camera, strafes, backpedals, dashes, jumps, swings
+## the sword (a combo), casts with the staff and the wand and holds the shield, saving a picture every few frames, so
+## the animation, the wizard garb's cloth and the effects can be checked by eye.
+func _bot_show() -> Array:
+	bot_t += 1
+	if net.predicted == null:
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var t := bot_t
+	var b := 0
+	var face := cam_yaw + PI   # toward the camera
+	var spell := 0
+	var me := net.predicted.pos
+	var owned := net.predicted.owned
+	var magic := Weapons.STAFF if (owned >> Weapons.STAFF) & 1 else Weapons.WAND
+	if t < 60:
+		cam_yaw = 0.0
+	elif t < 180:                       # run toward the camera, sprinting
+		b |= Sim.Btn.BACK | Sim.Btn.SPRINT
+	elif t < 290:                       # strafe right then left, facing away (the camera on the side)
+		cam_yaw = lerp_angle(cam_yaw, PI * 0.5, 0.05)
+		b |= Sim.Btn.FACE_CAM | (Sim.Btn.RIGHT if t < 235 else Sim.Btn.LEFT)
+		face = cam_yaw
+	elif t < 360:                       # backpedal, then dash toward the camera
+		cam_yaw = lerp_angle(cam_yaw, 0.0, 0.05)
+		b |= Sim.Btn.BACK
+		if t == 320 or t == 345:
+			b |= Sim.Btn.DASH
+	elif t < 430:                       # running jumps, seen from the side
+		cam_yaw = lerp_angle(cam_yaw, -PI * 0.5, 0.06)
+		b |= Sim.Btn.BACK
+		if t == 372 or t == 405:
+			b |= Sim.Btn.JUMP
+	elif t < 520:                       # a sword combo, facing the camera
+		cam_yaw = lerp_angle(cam_yaw, 0.0, 0.08)
+		weapon_slot = Weapons.SWORD
+		if t % 12 == 0:
+			b |= Sim.Btn.ATTACK
+	elif t < 900:                       # spells, facing the camera at an angle
+		cam_yaw = lerp_angle(cam_yaw, 0.6, 0.03)
+		weapon_slot = magic
+		var plan := [[540, 1], [600, 0], [690, 2, 100], [820, 0]] if magic == Weapons.STAFF else [[540, 0], [640, 1], [720, 2]]
+		for p in plan:
+			if t >= p[0] - 10:
+				spell = p[1]
+			if t >= p[0] and t < p[0] + (p[2] if p.size() > 2 else 3):
+				b |= Sim.Btn.ATTACK
+	else:
+		_audit_print()
+		get_tree().quit()
+	var aim := me + Vector3(-sin(face), 0, -cos(face)) * 8.0 + Vector3(0, 1.0, 0)
+	var shots := str(_args().get("shots", ""))
+	if shots != "" and t > 60 and t % 6 == 0:
+		get_viewport().get_texture().get_image().save_png(shots.path_join("show_%03d.png" % t))
+	spell_sel[weapon_slot] = spell
+	return [b, cam_yaw, 0.0, weapon_slot, face, face, spell, aim]
+
+
+## Golem-watching bot (--host --give-all --max-level --bot golems --shots <dir>): stands to one side of the dummies,
+## summons a golem at them, then the stone titan, and watches from the side as they walk, leap and slam.
+func _bot_golems() -> Array:
+	bot_t += 1
+	if net.predicted == null:
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var dummy: Vector3 = WorldLayout.DUMMIES[1]
+	var me := net.predicted.pos
+	var stand := dummy + Vector3(0.0, 0, 7.5)
+	var to := stand - me
+	var b := 0
+	if Vector2(to.x, to.z).length() > 0.5:
+		b |= Sim.Btn.FORWARD
+		cam_yaw = atan2(-to.x, -to.z)
+	else:
+		cam_yaw = lerp_angle(cam_yaw, atan2(-(dummy - me).x, -(dummy - me).z) + 0.5, 0.1)
+	weapon_slot = Weapons.WAND
+	var spell := 0 if bot_t < 600 else 5
+	var aim := dummy + Vector3(-2.0, 0, 3.0)
+	if (bot_t >= 200 and bot_t < 203) or (bot_t >= 700 and bot_t < 703):
+		b |= Sim.Btn.ATTACK
+	var shots := str(_args().get("shots", ""))
+	if shots != "" and bot_t > 200 and bot_t % 6 == 0:
+		get_viewport().get_texture().get_image().save_png(shots.path_join("show_%03d.png" % (bot_t / 6)))
+	if bot_t > 1300:
+		get_tree().quit()
+	spell_sel[weapon_slot] = spell
+	return [b, cam_yaw, 0.0, weapon_slot, atan2(-(aim - me).x, -(aim - me).z), atan2(-(aim - me).x, -(aim - me).z), spell, aim]
 
 
 ## Close-quarters test bot (--bot close [--shots <dir>]): picks up every weapon, then for each one walks into the

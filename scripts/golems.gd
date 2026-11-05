@@ -6,6 +6,11 @@
 ## summoner. Six golems per summoner at most (one every 10 s: the wand's recharge). It walks there round pillars and trunks (steering: the first free direction fanning out from the
 ## straight line, with a side it keeps to, and a detour when it notices it is stuck), and as it closes in it raises
 ## both arms and slams them down, still moving after its target while it swings. It crumbles when its health runs out or after 45 s.
+##
+## v0.8.0, smarter: several golems after the same target spread round it (each takes its own side) instead of queueing
+## behind one another, and keep a little apart from each other; from 3-5.5 m away a small golem may leap at its target
+## and come down on it (then can't leap again for 4 s); with nothing to fight they stand guard in a ring round their
+## summoner, facing out; and they look further ahead for pillars so they curve round them sooner.
 class_name Golems
 extends RefCounted
 
@@ -36,7 +41,15 @@ const TITAN_KNOCK := 8.0
 const TITAN_SLAM := 2.8        # metres round the slam's landing point that it crushes
 const TITAN_SCALE := 1.5
 const TITAN_LIFE := 30 * 60
-enum State { RISE, IDLE, WALK, ATTACK, DIE, STUN }
+enum State { RISE, IDLE, WALK, ATTACK, DIE, STUN, LEAP }
+const LEAP_MIN := 3.0          # metres from its target where a leap can start
+const LEAP_MAX := 5.5
+const LEAP_T := 26             # ticks in the air
+const LEAP_SPEED := 13.0       # m/s at most across the ground
+const LEAP_DAMAGE := 10
+const LEAP_CD := 240
+const SPREAD := 0.75           # radians between golems closing in on the same target
+const GUARD_R := 2.2           # the guard ring round the summoner
 
 
 class G:
@@ -56,6 +69,10 @@ class G:
 	var stun := 0
 	var titan := false
 	var max_hp := HP
+	var leap_cd := 0
+	var leap_step := Vector2.ZERO   # metres a tick while leaping
+	var slot := 0.0                 # its angle offset round a shared target
+	var guard_a := 0.0              # its place in the guard ring
 
 
 var list := {}        # id -> G
@@ -120,6 +137,7 @@ func tick(now: int, people: Array) -> Array:
 		pvp[pe[0]] = pe[2]
 		if pe[3]:
 			where[pe[0]] = pe[1]
+	_assign_slots()
 	for g: G in list.values().duplicate():
 		g.t += 1
 		if g.stun > 0:
@@ -138,6 +156,20 @@ func tick(now: int, people: Array) -> Array:
 			continue
 		if g.atk_cd > 0:
 			g.atk_cd -= 1
+		if g.leap_cd > 0:
+			g.leap_cd -= 1
+		if g.state == State.LEAP:   # in the air: on across the ground, then down on whoever is there
+			_move(g, g.leap_step)
+			if g.t >= LEAP_T:
+				var tp = _target_pos(g, where)
+				if tp != null:
+					var d := Vector2(tp.x - g.pos.x, tp.z - g.pos.z)
+					if d.length() <= _reach(g) + 0.6:
+						hits.append([g, g.target, LEAP_DAMAGE, Vector3(d.x, 0, d.y)])
+				g.atk_cd = COOLDOWN + 10
+				g.leap_cd = LEAP_CD
+				_to_state(g, State.IDLE)
+			continue
 		if g.state == State.ATTACK:
 			var chase = _target_pos(g, where)   # it keeps after its target while it swings
 			if chase != null:
@@ -176,14 +208,37 @@ func tick(now: int, people: Array) -> Array:
 			g.target = _pick(g, where, pvp)
 		var goal = _target_pos(g, where)
 		var keep := 0.0
-		if goal == null or g.target == 0:   # nothing to fight: stay near the summoner
-			goal = where.get(g.owner, null)
-			keep = 2.5
+		var guarding := false
+		if goal == null or g.target == 0:   # nothing to fight: take its place in the guard ring round the summoner
+			var home = where.get(g.owner, null)
+			if home != null:
+				goal = home + Vector3(cos(g.guard_a), 0, sin(g.guard_a)) * (GUARD_R * (1.8 if g.titan else 1.0))
+				guarding = true
+			keep = 0.5
 		if goal == null:
 			if g.state != State.IDLE:
 				_to_state(g, State.IDLE)
 			continue
 		var to := Vector2(goal.x - g.pos.x, goal.z - g.pos.z)
+		if guarding and to.length() <= keep:   # at its post: facing out, away from the summoner
+			g.yaw = lerp_angle(g.yaw, atan2(-cos(g.guard_a), -sin(g.guard_a)), 0.1)
+			if g.state != State.IDLE:
+				_to_state(g, State.IDLE)
+			continue
+		# a leap at the target from a few metres out (small golems), when the way is clear
+		if g.target != 0 and not g.titan and g.atk_cd == 0 and g.leap_cd == 0 and to.length() >= LEAP_MIN and to.length() <= LEAP_MAX:
+			var mid := g.pos + Vector3(to.x, 0, to.y) * 0.5
+			if _free(g, mid):
+				var go := minf(to.length() - _reach(g) * 0.7, LEAP_SPEED * LEAP_T * Config.DT)
+				g.leap_step = to.normalized() * (go / float(LEAP_T))
+				g.yaw = atan2(-to.x, -to.y)
+				_to_state(g, State.LEAP)
+				continue
+		# closing in on a target others are after too: aim for its own side of them, not the same spot
+		if g.target != 0 and g.slot != 0.0 and to.length() > _reach(g) + 1.0:
+			var from_t := Vector2(g.pos.x - goal.x, g.pos.z - goal.z)
+			var side_pt := Vector2.from_angle(from_t.angle() + g.slot) * (_reach(g) + 0.5)
+			to = Vector2(goal.x + side_pt.x - g.pos.x, goal.z + side_pt.y - g.pos.z)
 		if g.target != 0 and to.length() <= _reach(g) + 0.35 and g.atk_cd > 0:
 			g.yaw = atan2(-to.x, -to.y)   # in reach, waiting to swing again
 			continue
@@ -197,6 +252,7 @@ func tick(now: int, people: Array) -> Array:
 		var dir := _steer(g, to)
 		if dir == Vector2.ZERO:
 			continue
+		dir = _separate(g, dir)
 		if g.state != State.WALK:
 			_to_state(g, State.WALK)
 		_move(g, dir * _speed(g) * Config.DT)
@@ -267,6 +323,9 @@ func _steer(g: G, to: Vector2) -> Vector2:
 			var p1 := g.pos + Vector3(d.x, 0, d.y) * 0.7
 			var p2 := g.pos + Vector3(d.x, 0, d.y) * 1.4
 			if _free(g, p1) and _free(g, p2):
+				# straight ahead is clear for now, but a pillar further on: start curving round it already
+				if off == 0.0 and to.length() > 3.0 and not _free_static(g, g.pos + Vector3(d.x, 0, d.y) * 2.6):
+					continue
 				return d
 	return Vector2.ZERO
 
@@ -283,6 +342,59 @@ func _free(g: G, p: Vector3) -> bool:
 		if o != g and o.state != State.DIE and Vector2(p.x - o.pos.x, p.z - o.pos.z).length() < RADIUS * 2.0:
 			return false
 	return absf(p.x) < Config.WORLD_HALF and absf(p.z) < Config.WORLD_HALF
+
+
+## Pillars and trunks only (not other golems): for looking further ahead.
+func _free_static(g: G, p: Vector3) -> bool:
+	var rad := RADIUS * (TITAN_SCALE / SCALE if g.titan else 1.0)
+	for b: WorldLayout.Box in WorldLayout.boxes():
+		if b.h > 0.5 and absf(p.x - b.cx) < b.hx + rad and absf(p.z - b.cz) < b.hz + rad:
+			return false
+	return true
+
+
+## Keep a little apart from other golems nearby: bend the way it's going away from them.
+func _separate(g: G, dir: Vector2) -> Vector2:
+	var push := Vector2.ZERO
+	for o: G in list.values():
+		if o == g or o.state == State.DIE:
+			continue
+		var d := Vector2(g.pos.x - o.pos.x, g.pos.z - o.pos.z)
+		var l := d.length()
+		if l < 1.1 and l > 1e-4:
+			push += d / l * (1.1 - l)
+	if push == Vector2.ZERO:
+		return dir
+	var nd := (dir + push * 0.9).normalized()
+	var p := g.pos + Vector3(nd.x, 0, nd.y) * 0.7
+	return nd if _free(g, p) else dir
+
+
+## Who goes where: golems after the same target fan out round it (each its own angle offset); each summoner's golems
+## share out the guard ring.
+func _assign_slots() -> void:
+	var by_target := {}
+	var by_owner := {}
+	for g: G in list.values():
+		if g.state == State.DIE:
+			continue
+		if g.target != 0:
+			if not by_target.has(g.target):
+				by_target[g.target] = []
+			by_target[g.target].append(g)
+		if not by_owner.has(g.owner):
+			by_owner[g.owner] = []
+		by_owner[g.owner].append(g)
+	for k in by_target:
+		var gs: Array = by_target[k]
+		gs.sort_custom(func(a, b): return a.id < b.id)
+		for i in gs.size():
+			gs[i].slot = 0.0 if gs.size() == 1 else (float(i) - float(gs.size() - 1) * 0.5) * SPREAD
+	for k in by_owner:
+		var gs: Array = by_owner[k]
+		gs.sort_custom(func(a, b): return a.id < b.id)
+		for i in gs.size():
+			gs[i].guard_a = TAU * float(i) / float(gs.size()) + PI * 0.5
 
 
 func _move(g: G, step: Vector2) -> void:

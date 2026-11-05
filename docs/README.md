@@ -18,3 +18,12 @@ The PDF is dated November 4, 2026. Its source file is not in this repository, so
 when hosting, joining or the controls change. Two small differences from the README today: the PDF's controls table
 does not mention eating fruit with E, and the PDF says to allow the firewall on Private **and** Public networks
 while the README mentions private networks only.
+
+## networking.md
+
+Lag, rubber-banding and Tailscale (v0.8.0): what the netcode already did, what 0.8.0 changed and the measurements
+(two copies of the game with a simulated 140-150 ms connection: no prediction corrections), how to tell whether
+Tailscale is going direct or through a DERP relay (`tailscale ping`, `tailscale status`, `tailscale netcheck`, the
+in-game readout) and how to get a direct path (UPnP / NAT-PMP, forwarding UDP 41641, avoiding double NAT), and a
+brainstorm of future improvements, including when a dedicated server would help and what running one on a small VPS
+would look like (cost, region, a systemd service, invite codes and updates).
