@@ -258,14 +258,23 @@ static func _face(s: PlayerState, inp: PlayerInput, wish: Vector2, w: Dictionary
 		return
 	var moving := wish.length_squared() > 0.0
 	var want := atan2(-wish.x, -wish.y) if moving else s.yaw
+	# the body faces the camera's heading when aiming or attacking. Not the line from the body to the crosshair point:
+	# the camera sits over the shoulder, so up close (a dummy, a wall) that line swung the body 10-20 degrees sideways.
+	# Shots still fly at the crosshair point (inp.aim_yaw, used where the projectile is made).
 	if inp.buttons & Btn.FACE_CAM or s.charge > 0:
-		s.yaw = inp.aim_yaw
+		s.yaw = inp.yaw
 		return
-	# holding attack: keep turning toward the crosshair, mid-swing too, so swinging the camera round steers the blows
+	# holding attack: keep turning toward where the camera looks, mid-swing too, so swinging the camera round steers the
+	# blows. Fast while winding up; once a melee blow has landed the follow-through is committed, so it turns slower;
+	# a tiny dead zone stops the body twitching on small mouse moves
 	if inp.buttons & Btn.ATTACK:
-		var da := wrapf(inp.aim_yaw - s.yaw, -PI, PI)
-		var st := ATTACK_TURN_RATE * Config.DT
-		s.yaw = wrapf(s.yaw + clampf(da, -st, st), -PI, PI)
+		var rate := ATTACK_TURN_RATE
+		if w.kind == "melee" and s.atk > 0 and int(mv.swing) - s.atk >= int(mv.windup):
+			rate *= 0.4
+		var da := wrapf(inp.yaw - s.yaw, -PI, PI)
+		if absf(da) > 0.035:
+			var st := rate * Config.DT
+			s.yaw = wrapf(s.yaw + clampf(da, -st, st), -PI, PI)
 		return
 	if w.kind == "melee" and s.atk > 0:
 		if s.atk == int(mv.swing) and moving:

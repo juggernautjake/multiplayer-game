@@ -89,8 +89,15 @@ func _init() -> void:
 	for i in 60:
 		Sim.step(f, Sim.PlayerInput.new(i, Sim.Btn.RIGHT, 0.0))
 	check(absf(wrapf(f.yaw - (-PI / 2.0), -PI, PI)) < 0.01, "walking right turns to face right (yaw %.2f)" % f.yaw)
-	Sim.step(f, Sim.PlayerInput.new(61, Sim.Btn.FACE_CAM, 0.0, 0.0, 0, 0, 1.0))
-	check(absf(f.yaw - 1.0) < 0.001, "aiming faces where the camera looks")
+	Sim.step(f, Sim.PlayerInput.new(61, Sim.Btn.FACE_CAM, 1.0, 0.0, 0, 0, 1.3))
+	check(absf(f.yaw - 1.0) < 0.001, "aiming faces where the camera looks (not the skewed line to a close crosshair point)")
+	# 8) holding attack up close: the crosshair point's line is 0.3 rad off the camera heading; the body follows the
+	#    camera heading, turns there over a few frames, and stays put once there
+	var atk := Sim.PlayerState.new()
+	atk.owned = 0b11111
+	for i in 40:
+		Sim.step(atk, Sim.PlayerInput.new(i, Sim.Btn.ATTACK if i % 2 == 0 else 0, 0.8, 0.0, Weapons.SWORD, 0, 0.8 + 0.3))
+	check(absf(wrapf(atk.yaw - 0.8, -PI, PI)) < 0.05, "holding attack faces the camera heading, not the close crosshair point (yaw %.2f)" % atk.yaw)
 
 	print("%d failed" % fails)
 	quit(1 if fails else 0)

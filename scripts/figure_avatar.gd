@@ -469,7 +469,7 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 			if _fight_t < 3.0 and speed < Sim.SPRINT_SPEED:
 				p.hand_l = Vector3(-0.1, 1.5, -0.3)
 				p.hand_r = Vector3(0.14, 1.46, -0.2)
-				p.twist = -0.25
+				p.twist = -0.15
 				p.crouch = 0.05
 				p.pole_r = Vector3(0.3, -1.0, 0.4)
 				p.guard = true
