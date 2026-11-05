@@ -720,7 +720,7 @@ func _build_ui() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 	name_edit = _field(box, "Your name", "Player")
-	addr_edit = _field(box, "Server address (to join)", "127.0.0.1")
+	addr_edit = _field(box, "Invite code or address (to join)", "127.0.0.1")
 	port_edit = _field(box, "Port (UDP)", str(Config.DEFAULT_PORT))
 	var cl := Label.new()
 	cl.text = "Look for everyone (when you host)"
@@ -739,7 +739,7 @@ func _build_ui() -> void:
 		row.add_child(btn)
 	status_label = Label.new()
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-	status_label.text = "Play / Host starts a game (alone, or friends join you). To join a friend's game, type their address and click Join a friend."
+	status_label.text = "Play / Host starts a game (alone, or friends join you). To join a friend's game, paste their invite code (or address) and click Join a friend."
 	box.add_child(status_label)
 
 
@@ -768,6 +768,10 @@ func _start_host() -> void:
 ## message instead of leaving you in an empty world.
 func _start_join() -> void:
 	var addr := addr_edit.text.strip_edges()
+	var inv := decode_invite(addr)
+	if inv.size() == 2:   # an invite code: it carries the address and the port
+		addr = inv[0]
+		port_edit.text = str(inv[1])
 	var err := net.join(addr, int(port_edit.text), name_edit.text)
 	if err != OK:
 		status_label.text = "Could not start: %s" % error_string(err)
@@ -799,14 +803,82 @@ func _enter_game() -> void:
 
 
 func _print_addresses(port: int) -> void:
-	var lines := ["Friends can join with one of these addresses, UDP port %d:" % port]
+	var lines := ["Invite codes (give one to a friend; they paste it into Join):"]
+	var best := ""
 	for ip in IP.get_local_addresses():
 		if ip.count(".") == 3 and not ip.begins_with("127.") and not ip.begins_with("169.254."):
-			var kind := "Tailscale" if ip.begins_with("100.") else "same Wi-Fi / LAN"
-			lines.append("  %s: %s" % [kind, ip])
-	lines.append("  over the internet: your public IP, after forwarding UDP %d on the router (see README)" % port)
+			var ts := ip.begins_with("100.")
+			var kind := "Tailscale" if ts else "same Wi-Fi"
+			var code := invite_code(ip, port)
+			lines.append("  %s: %s   (%s)" % [kind, code, ip])
+			if ts or best == "":
+				best = code
+	host_lines = lines
+	_show_host_info(best)
+	_fetch_public_ip(port)
+
+
+var host_lines: Array = []
+
+func _show_host_info(copy_code: String) -> void:
+	if copy_code != "":
+		DisplayServer.clipboard_set(copy_code)
+	var lines := host_lines.duplicate()
+	if copy_code != "":
+		lines.append("  (copied to the clipboard: %s)" % copy_code)
 	print("\n".join(lines))
 	host_info = "\n".join(lines)
+
+
+## Ask a public service for this PC's internet address, for the over-the-internet invite code (needs UDP port
+## forwarding on the host's router).
+func _fetch_public_ip(port: int) -> void:
+	if bot:
+		return
+	var req := HTTPRequest.new()
+	req.timeout = 6.0
+	add_child(req)
+	req.request_completed.connect(func(result, code, _h, body):
+		req.queue_free()
+		var ip := (body as PackedByteArray).get_string_from_utf8().strip_edges()
+		if result == HTTPRequest.RESULT_SUCCESS and code == 200 and ip.is_valid_ip_address() and ip.count(".") == 3:
+			host_lines.append("  over the internet: %s   (%s, needs UDP %d forwarded on your router)" % [invite_code(ip, port), ip, port])
+			_show_host_info(""))
+	req.request("https://api.ipify.org")
+
+
+## Invite codes: an IPv4 address and port packed into 48 bits and written as ten letters/digits in two groups
+## (Crockford base 32: no I, L, O or U, so it reads aloud cleanly), e.g. "3J8QZ-K0W7P".
+const CODE_ABC := "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+static func invite_code(ip: String, port: int) -> String:
+	var p := ip.split(".")
+	var n := 0
+	for i in 4:
+		n = (n << 8) | (int(p[i]) & 255)
+	n = (n << 16) | (port & 0xFFFF)
+	var s := ""
+	for i in 10:
+		s = CODE_ABC[n & 31] + s
+		n >>= 5
+	return s.substr(0, 5) + "-" + s.substr(5)
+
+
+## The address and port in an invite code, or [] if the text isn't one.
+static func decode_invite(text: String) -> Array:
+	var t := text.strip_edges().to_upper().replace("-", "").replace(" ", "")
+	t = t.replace("O", "0").replace("I", "1").replace("L", "1")
+	if t.length() != 10:
+		return []
+	var n := 0
+	for ch in t:
+		var v := CODE_ABC.find(ch)
+		if v < 0:
+			return []
+		n = (n << 5) | v
+	var port := n & 0xFFFF
+	n >>= 16
+	return ["%d.%d.%d.%d" % [(n >> 24) & 255, (n >> 16) & 255, (n >> 8) & 255, n & 255], port]
 
 
 # ================================================================ combat visuals

@@ -35,27 +35,37 @@ Two looks, picked by the host for everyone: Pip (Jacob's sprite character, with 
 from his sheet by `tools/make_weapon_frames.py`) or the rigged 3D figure (`scripts/figure_avatar.gd`: IK arms and
 legs, keyframed attacks, live bow string and slingshot bands; `tools/figure_poses.gd` renders a pose sheet).
 
-## Getting started
+## Download and play (Windows)
+
+1. Go to <https://github.com/juggernautjake/multiplayer-game/releases/latest> and download
+   `MultiplayerGame-windows.zip`.
+2. Unzip it and run `MultiplayerGame.exe`. Windows SmartScreen may warn about an unknown app: click **More info →
+   Run anyway**.
+3. **Play / Host** starts a game (alone, or friends join you). Its invite codes show at the top left, and the best one
+   is copied to the clipboard. **Join a friend**: paste their invite code, then click Join a friend.
+
+## Getting started (from the source)
 
 1. Download **Godot 4.7** (standard, not .NET) from <https://godotengine.org/download>. It's a single program, so no
    install is needed: unzip it anywhere.
-2. Open Godot, choose **Import**, and pick `dev/multiplayer-game/project.godot`.
+2. Open Godot, choose **Import**, and pick `project.godot` from this repository (Code → Download ZIP, or `git clone`).
 3. Press **F5** (Play). In the menu:
-   - **Play solo / Host** starts a game on your PC that friends can join. The screen shows the addresses to give them.
-   - **Join**: type the host's address, then Join.
+   - **Play / Host** starts a game on your PC that friends can join. The screen shows the invite codes to give them.
+   - **Join a friend**: paste the host's invite code (or type an address), then Join.
 
 To test two players on one PC, go to **Debug → Customize Run Instances**, set 2 instances, and press F5. Host in one
 window and join `127.0.0.1` in the other.
 
 ## Playing with a friend
 
-The host's PC listens on **UDP port 7777**.
+The host's PC listens on **UDP port 7777**. An invite code (like `34CP1-P07KE`) is the host's address and port
+packed into ten letters and digits; the host's screen lists one per way of reaching it:
 
-| Where your friend is | What to give them |
+| Where your friend is | Which invite code |
 |---|---|
-| Same Wi-Fi / LAN | your LAN address, shown on screen (e.g. `192.168.1.23`) |
-| Over the internet | your public IP (search "what is my IP"), after forwarding **UDP 7777** on your router to your PC |
-| Over the internet, no router changes | both of you install [Tailscale](https://tailscale.com) (free), then give your Tailscale address (`100.x.y.z`) |
+| Same Wi-Fi / LAN | "same Wi-Fi" |
+| Over the internet, no router changes (easiest) | both of you install [Tailscale](https://tailscale.com) (free) and the host shares their PC with the friend; use the "Tailscale" code |
+| Over the internet | "over the internet", after forwarding **UDP 7777** on the host's router to the host's PC |
 
 The first time you host, Windows Firewall asks whether Godot (or the exported game) may use the network. Allow it on
 private networks, or friends can't connect.
