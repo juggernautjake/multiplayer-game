@@ -22,6 +22,7 @@ const DASH_TICKS := 9         # 0.15 s burst
 const DASH_COOLDOWN := 54     # 0.9 s
 const RADIUS := 0.4           # the player's collision radius
 const TURN_RATE := 14.0       # rad/s: how fast you turn to face the way you walk
+const ATTACK_TURN_RATE := 12.0  # rad/s: how fast you turn toward the crosshair while holding attack (mid-swing too)
 const MAX_HP := 100
 const RESPAWN_TICKS := 180    # 3 s on the ground after dying
 
@@ -259,6 +260,12 @@ static func _face(s: PlayerState, inp: PlayerInput, wish: Vector2, w: Dictionary
 	var want := atan2(-wish.x, -wish.y) if moving else s.yaw
 	if inp.buttons & Btn.FACE_CAM or s.charge > 0:
 		s.yaw = inp.aim_yaw
+		return
+	# holding attack: keep turning toward the crosshair, mid-swing too, so swinging the camera round steers the blows
+	if inp.buttons & Btn.ATTACK:
+		var da := wrapf(inp.aim_yaw - s.yaw, -PI, PI)
+		var st := ATTACK_TURN_RATE * Config.DT
+		s.yaw = wrapf(s.yaw + clampf(da, -st, st), -PI, PI)
 		return
 	if w.kind == "melee" and s.atk > 0:
 		if s.atk == int(mv.swing) and moving:
