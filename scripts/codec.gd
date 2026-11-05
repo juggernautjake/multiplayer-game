@@ -1,5 +1,5 @@
 ## Binary packing for the two hot messages (inputs and snapshots). Small packets, no Variant overhead:
-## an input is 17 bytes, a player in a snapshot 45 bytes.
+## an input is 25 bytes, a player in a snapshot 45 bytes.
 class_name Codec
 
 
@@ -15,10 +15,11 @@ static func encode_inputs(inputs: Array) -> PackedByteArray:
 		b.put_u8(i.weapon)
 		b.put_u32(i.view_tick)
 		b.put_float(i.aim_yaw)
+		b.put_float(i.face_yaw)
 	return b.data_array
 
 
-const INPUT_BYTES := 21
+const INPUT_BYTES := 25
 
 
 static func decode_inputs(data: PackedByteArray) -> Array:
@@ -38,8 +39,9 @@ static func decode_inputs(data: PackedByteArray) -> Array:
 		var weapon := b.get_u8()
 		var view := b.get_u32()
 		var aim_yaw := b.get_float()
-		if is_finite(yaw) and is_finite(aim_yaw):
-			out.append(Sim.PlayerInput.new(seq, btn, yaw, pitch, weapon, view, aim_yaw))
+		var face_yaw := b.get_float()
+		if is_finite(yaw) and is_finite(aim_yaw) and is_finite(face_yaw):
+			out.append(Sim.PlayerInput.new(seq, btn, yaw, pitch, weapon, view, aim_yaw, face_yaw))
 	return out
 
 

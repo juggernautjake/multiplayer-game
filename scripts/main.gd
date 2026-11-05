@@ -37,6 +37,7 @@ var bot_mode := ""
 var weapon_slot := 0
 var aim_pitch := 0.0
 var aim_yaw := 0.0
+var face_yaw := 0.0   # where the body turns to attack: from the body's centre to what the crosshair is on
 var cam_focus := Vector3.INF    # smoothed point the camera orbits
 var cam_shoulder := 0.3
 var projs := {}            # server projectile id -> { node, kind, tick0, pos0, vel0, g, end_tick, end_pos, stuck, local_t0 }
@@ -395,7 +396,7 @@ func _sample_input() -> Array:
 			b |= Sim.Btn.ATTACK
 		if Input.is_physical_key_pressed(KEY_E): b |= Sim.Btn.INTERACT
 		if view == View.FIRST or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT): b |= Sim.Btn.FACE_CAM
-	return [b, cam_yaw, aim_pitch, weapon_slot, aim_yaw]
+	return [b, cam_yaw, aim_pitch, weapon_slot, aim_yaw, face_yaw]
 
 
 ## Aim where the crosshair points: find what the camera's centre ray hits (ground, a pillar, or 80 m away) and pitch
@@ -409,13 +410,26 @@ func _update_aim() -> void:
 	if fwd.y < -0.001:
 		t = minf(t, -o.y / fwd.y)
 	t = minf(t, WorldLayout.ray_hit(o, fwd, t))
-	t = minf(t, _ray_people(o, fwd, t))
+	var tp := _ray_people(o, fwd, t)
+	var on_body := tp < t        # the crosshair is on a dummy or a player: face its centre, not the near side of it
+	t = minf(t, tp)
 	var target := o + fwd * t
 	# the next position (the shot leaves after this tick's step): close enough at walking speed
 	var m := Weapons.muzzle(net.predicted.pos, cam_yaw)
 	var to := target - m
 	var flat := Vector2(to.x, to.z).length()
 	aim_yaw = atan2(-to.x, -to.z) if flat > 0.3 else cam_yaw   # straight at the crosshair point, from the bow
+	# the body faces the crosshair point from its own centre. Only for a point in front of you along the camera heading
+	# (looking down at the ground near your feet the point can be beside or behind you), and never more than 60 degrees
+	# off the camera heading; otherwise just the camera heading
+	var tb := (ray_hit_centre if on_body else target) - net.predicted.pos
+	var fwd_flat := Vector2(-sin(cam_yaw), -cos(cam_yaw))
+	var ahead := Vector2(tb.x, tb.z).dot(fwd_flat)
+	if ahead > 0.12 and Vector2(tb.x, tb.z).length() < 40.0:
+		var fy := atan2(-tb.x, -tb.z)
+		face_yaw = wrapf(cam_yaw + clampf(wrapf(fy - cam_yaw, -PI, PI), -PI / 3.0, PI / 3.0), -PI, PI)
+	else:
+		face_yaw = cam_yaw
 	# lift for gravity: the low arc that lands on the point at the speed the shot would leave at now
 	var st := net.predicted
 	var w := Weapons.get_data(st.weapon)
@@ -432,6 +446,8 @@ func _update_aim() -> void:
 
 
 ## Distance along a ray to the first practice dummy or other player it passes through (upright cylinders), or INF.
+var ray_hit_centre := Vector3.ZERO   # the centre of the dummy / player _ray_people last hit
+
 func _ray_people(o: Vector3, d: Vector3, max_t: float) -> float:
 	var best := INF
 	var cyls: Array = []
@@ -456,6 +472,7 @@ func _ray_people(o: Vector3, d: Vector3, max_t: float) -> float:
 			var y := o.y + d.y * tt
 			if y > c.y and y < c.y + 1.9 and tt < best:
 				best = tt
+				ray_hit_centre = c
 	return best
 
 
@@ -463,6 +480,8 @@ func _ray_people(o: Vector3, d: Vector3, max_t: float) -> float:
 func _bot_input() -> Array:
 	if bot_mode == "fight" or bot_mode == "aim":
 		return _bot_fight()
+	if bot_mode == "close":
+		return _bot_close()
 	bot_t += 1
 	cam_yaw = wrapf(bot_t * 0.01, -PI, PI)
 	var b: int = Sim.Btn.FORWARD
@@ -475,6 +494,83 @@ func _bot_input() -> Array:
 			net.roster.size(), net.ping_ms(), net.corrections, int(net.interp_delay * Config.DT * 1000.0),
 			100.0 * net.extrap_frames / maxf(net.drawn_frames, 1.0)])
 	return [b | Sim.Btn.FACE_CAM, cam_yaw, 0.0, weapon_slot]
+
+
+## Close-quarters test bot (--bot close [--shots <dir>]): picks up every weapon, then for each one walks into the
+## middle dummy and then into a pillar, pressing forward the whole time (as close as you can get), keeps the crosshair
+## on the target like a player would, and attacks: clicks, then holds attack (bows: draws and lets go). Every 6 ticks it
+## logs how far the body is turned from the target and from the camera; at the end, the worst angle per weapon.
+var close_t := 0
+var close_worst := {}
+var close_pillar := Vector3.ZERO
+var close_locked := false
+
+func _bot_close() -> Array:
+	if net.predicted == null or net.predicted.owned != 0b11111 or net.predicted.arrows == 0 or net.predicted.rocks == 0:
+		if close_t == 0:
+			return _bot_fight()
+	close_t += 1
+	var phase := close_t / 420               # 7 s per weapon and target
+	var weapons := [Weapons.FISTS, Weapons.CLUB, Weapons.SWORD, Weapons.BOW, Weapons.SLING]
+	if phase >= weapons.size() * 2:
+		if close_t == weapons.size() * 2 * 420 + 1:
+			print("[close] worst body angle once at the target (degrees from the target / from the camera):")
+			for k in close_worst:
+				print("[close]   %-22s target %5.1f   camera %5.1f" % [k, close_worst[k][0], close_worst[k][1]])
+			get_tree().quit()
+		return [0, cam_yaw, 0.0, weapon_slot]
+	weapon_slot = weapons[phase / 2]
+	var at_pillar := phase % 2 == 1
+	var me := net.predicted.pos
+	var target: Vector3 = WorldLayout.DUMMIES[1] + Vector3(0, 1.2, 0)
+	if at_pillar:   # the middle of the nearest tall pillar's nearest face, chosen once, at chest height
+		if close_t % 420 == 1 or close_pillar == Vector3.ZERO:
+			var best := INF
+			for bx: WorldLayout.Box in WorldLayout.boxes():
+				if bx.h < 1.5:
+					continue
+				var p := Vector3(clampf(me.x, bx.cx - bx.hx, bx.cx + bx.hx), 1.2, clampf(me.z, bx.cz - bx.hz, bx.cz + bx.hz))
+				if p.distance_to(me) < best:
+					best = p.distance_to(me)
+					var fx := absf(p.x - bx.cx) >= bx.hx - 0.001
+					close_pillar = Vector3(p.x, 1.2, bx.cz) if fx else Vector3(bx.cx, 1.2, p.z)
+		target = close_pillar
+	# put the crosshair on the target: the camera's forward ray through it (the camera sits over the shoulder)
+	var o := cam.global_position if cam else me + Vector3(0, 1.6, 0)
+	var tc := target - o
+	var touching := Vector2(target.x - me.x, target.z - me.z).length() < (Sim.RADIUS + 0.08 if at_pillar else Sim.RADIUS + Sim.DUMMY_RADIUS + 0.08)
+	if close_t % 420 < 2:
+		close_locked = false
+	if not close_locked:   # aim the mouse until touching, then hold it still like a person would
+		cam_yaw = atan2(-tc.x, -tc.z)
+		close_locked = touching and close_t % 420 > 60
+	_update_aim()
+	var t := close_t % 420
+	var touch := (Vector2(target.x - me.x, target.z - me.z).length() < (Sim.RADIUS + 0.08 if at_pillar else Sim.RADIUS + Sim.DUMMY_RADIUS + 0.08))
+	var b := Sim.Btn.FORWARD if t < 400 and not touch else 0   # walk in until touching: as close as the collision allows
+	var ranged := not Weapons.is_melee(weapon_slot)
+	if t > 90:
+		if ranged:
+			if (t / 60) % 2 == 0: b |= Sim.Btn.ATTACK   # draw 1 s, let go, again
+		elif t < 250:
+			if t % 14 == 0: b |= Sim.Btn.ATTACK         # clicks: the combo
+		else:
+			b |= Sim.Btn.ATTACK                          # held down
+	var to := target - me
+	var flat := Vector2(to.x, to.z)
+	var want := atan2(-to.x, -to.z)
+	var e_t := rad_to_deg(absf(wrapf(net.predicted.yaw - want, -PI, PI)))
+	var e_c := rad_to_deg(absf(wrapf(net.predicted.yaw - cam_yaw, -PI, PI)))
+	var key := "%s at %s" % [Weapons.NAMES[weapon_slot], "pillar" if at_pillar else "dummy"]
+	if t > 150:   # arrived and attacking
+		var wv: Array = close_worst.get(key, [0.0, 0.0])
+		close_worst[key] = [maxf(wv[0], e_t), maxf(wv[1], e_c)]
+	if t % 6 == 0:
+		print("[close] %-18s t%3d dist %.2f  body vs target %5.1f  vs camera %5.1f  atk %d" % [key, t, flat.length(), e_t, e_c, net.predicted.atk])
+	var shots := str(_args().get("shots", ""))
+	if shots != "" and t in [200, 300, 360]:
+		get_viewport().get_texture().get_image().save_png(shots.path_join("%s_%d.png" % [key.replace(" ", "_"), t]))
+	return [b, cam_yaw, 0.0, weapon_slot, aim_yaw, face_yaw]
 
 
 ## Fighting test bot: walk up to the middle dummy, then use each weapon on it for 6 s (club, sword from close up;
@@ -539,7 +635,7 @@ func _bot_fight() -> Array:
 		pitch = aim_pitch
 		if (bot_t % 70) < 55 and absf(dist - want) < 1.0:
 			b |= Sim.Btn.ATTACK
-		return [b | Sim.Btn.FACE_CAM, cam_yaw, pitch, weapon_slot, aim_yaw]
+		return [b | Sim.Btn.FACE_CAM, cam_yaw, pitch, weapon_slot, aim_yaw, face_yaw]
 	else:
 		var m := Weapons.muzzle(me, cam_yaw)
 		var sd := Weapons.shot(weapon_slot, int(Weapons.get_data(weapon_slot).draw))

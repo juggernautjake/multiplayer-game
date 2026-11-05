@@ -732,7 +732,8 @@ func _client_tick() -> void:
 	var b_y: Array = input_source.call() if input_source.is_valid() else [0, 0.0, 0.0, 0]
 	var pitch: float = round(float(b_y[2]) * 10000.0) / 10000.0   # the precision the packet carries, so the server agrees
 	var aim_yaw: float = PackedFloat32Array([float(b_y[4]) if b_y.size() > 4 else float(b_y[1])])[0]
-	var inp := Sim.PlayerInput.new(next_seq, int(b_y[0]), float(b_y[1]), pitch, int(b_y[3]), int(render_tick), aim_yaw)
+	var face_yaw: float = PackedFloat32Array([float(b_y[5]) if b_y.size() > 5 else float(b_y[1])])[0]
+	var inp := Sim.PlayerInput.new(next_seq, int(b_y[0]), float(b_y[1]), pitch, int(b_y[3]), int(render_tick), aim_yaw, face_yaw)
 	next_seq += 1
 	# predict at once
 	prev_pos = cur_pos

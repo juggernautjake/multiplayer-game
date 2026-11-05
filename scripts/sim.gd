@@ -39,8 +39,9 @@ class PlayerInput:
 	var weapon := 0
 	var view_tick := 0
 	var aim_yaw := 0.0      # the shot's own direction (to the crosshair), apart from the body's facing
+	var face_yaw := 0.0     # where the body should face to attack: from the body to what the crosshair is on
 
-	func _init(s := 0, b := 0, y := 0.0, p := 0.0, w := 0, v := 0, ay := 0.0) -> void:
+	func _init(s := 0, b := 0, y := 0.0, p := 0.0, w := 0, v := 0, ay := 0.0, fy := INF) -> void:
 		seq = s
 		buttons = b
 		yaw = y
@@ -48,6 +49,7 @@ class PlayerInput:
 		weapon = w
 		view_tick = v
 		aim_yaw = ay
+		face_yaw = y if is_inf(fy) else fy
 
 
 class PlayerState:
@@ -179,6 +181,7 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 		s.vel.y = 0.0
 		s.grounded = true
 	_collide_boxes(s, prev_y)
+	_collide_dummies(s)
 	var lim := Config.WORLD_HALF  # the edge of the world
 	if absf(s.pos.x) > lim:
 		s.pos.x = clampf(s.pos.x, -lim, lim)
@@ -258,11 +261,12 @@ static func _face(s: PlayerState, inp: PlayerInput, wish: Vector2, w: Dictionary
 		return
 	var moving := wish.length_squared() > 0.0
 	var want := atan2(-wish.x, -wish.y) if moving else s.yaw
-	# the body faces the camera's heading when aiming or attacking. Not the line from the body to the crosshair point:
-	# the camera sits over the shoulder, so up close (a dummy, a wall) that line swung the body 10-20 degrees sideways.
-	# Shots still fly at the crosshair point (inp.aim_yaw, used where the projectile is made).
+	# aiming or attacking, the body faces what the crosshair is on, measured from the body's centre (inp.face_yaw, worked
+	# out on the client). Not the camera heading (the camera sits over the shoulder, so up close that misses the target
+	# by the shoulder offset) and not the line from the weapon's tip (up close that swung the body sideways). Shots
+	# still fly from the tip at the crosshair point (inp.aim_yaw, used where the projectile is made).
 	if inp.buttons & Btn.FACE_CAM or s.charge > 0:
-		s.yaw = inp.yaw
+		s.yaw = inp.face_yaw
 		return
 	# holding attack: keep turning toward where the camera looks, mid-swing too, so swinging the camera round steers the
 	# blows. Fast while winding up; once a melee blow has landed the follow-through is committed, so it turns slower;
@@ -271,7 +275,7 @@ static func _face(s: PlayerState, inp: PlayerInput, wish: Vector2, w: Dictionary
 		var rate := ATTACK_TURN_RATE
 		if w.kind == "melee" and s.atk > 0 and int(mv.swing) - s.atk >= int(mv.windup):
 			rate *= 0.4
-		var da := wrapf(inp.yaw - s.yaw, -PI, PI)
+		var da := wrapf(inp.face_yaw - s.yaw, -PI, PI)
 		if absf(da) > 0.035:
 			var st := rate * Config.DT
 			s.yaw = wrapf(s.yaw + clampf(da, -st, st), -PI, PI)
@@ -320,6 +324,29 @@ static func _collide_boxes(s: PlayerState, prev_y: float) -> void:
 			if into < 0.0:
 				s.vel.x -= n.x * into
 				s.vel.z -= n.y * into
+
+
+## The practice dummies are solid: upright posts of radius DUMMY_RADIUS you can walk right up to but not through.
+const DUMMY_RADIUS := 0.3
+
+static func _collide_dummies(s: PlayerState) -> void:
+	var r := RADIUS + DUMMY_RADIUS
+	for dp: Vector3 in WorldLayout.DUMMIES:
+		if s.pos.y > 1.9:
+			continue
+		var dx := s.pos.x - dp.x
+		var dz := s.pos.z - dp.z
+		var d2 := dx * dx + dz * dz
+		if d2 >= r * r:
+			continue
+		var dl := sqrt(d2)
+		var n := Vector2(dx, dz) / dl if dl > 1e-6 else Vector2(0, 1)
+		s.pos.x = dp.x + n.x * r
+		s.pos.z = dp.z + n.y * r
+		var into := s.vel.x * n.x + s.vel.z * n.y
+		if into < 0.0:
+			s.vel.x -= n.x * into
+			s.vel.z -= n.y * into
 
 
 ## Round to float32, the precision snapshots carry, so the server's state and the client's copy match bit for bit.
