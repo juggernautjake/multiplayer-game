@@ -7,8 +7,8 @@
 ## and use ammo (arrows, rocks) that you pick up.
 class_name Weapons
 
-enum { FISTS, CLUB, SWORD, BOW, SLING }
-const NAMES := ["Fists", "Club", "Sword", "Bow", "Slingshot"]
+enum { FISTS, CLUB, SWORD, BOW, SLING, STAFF, WAND }
+const NAMES := ["Fists", "Club", "Sword", "Bow", "Slingshot", "Staff", "Wand"]
 const COMBO_WINDOW := 18   # ticks after a move ends in which pressing attack chains the next
 const CANCEL_AT := 0.35    # a combo can cancel into its next move once only this much of the recovery is left
 
@@ -37,7 +37,51 @@ const DATA := [
 	  "gravity": 9.8, "shot": 16, "cooldown": 28, "slow": 0.35, "projectile": "arrow", "ammo": "arrows" },
 	{ "kind": "ranged", "draw": 20, "min_speed": 20.0, "max_speed": 36.0, "min_damage": 6, "max_damage": 8,
 	  "gravity": 14.0, "shot": 12, "cooldown": 14, "slow": 0.85, "projectile": "stone", "ammo": "rocks" },
+	# magic: hold attack to cast the selected spell (R picks the spell) if you have the mana. cast: the whole casting
+	# move in ticks; windup: ticks until the spell goes off; cooldown: extra ticks before the next cast; cost: mana.
+	{ "kind": "magic", "slow": 0.5, "uses": "mana", "spells": [   # the wizard's staff, on top of the tower: uses mana
+		{ "name": "Lightning", "cost": 34, "windup": 16, "cast": 34, "cooldown": 30, "range": 40.0,
+		  "radius": 3.0, "max_damage": 28, "min_damage": 8, "knock": 5.0, "delay": 24 },
+		{ "name": "Fireball", "cost": 22, "windup": 12, "cast": 28, "cooldown": 12, "speed": 26.0, "gravity": 3.0,
+		  "radius": 3.4, "max_damage": 24, "min_damage": 6, "knock": 6.5 },
+		{ "name": "Shield", "cost": 30, "windup": 6, "cast": 18, "cooldown": 40, "duration": 300 },
+	] },
+	# the wand from the hidden vault: no mana; each spell has its own recharge (ticks) instead (Jacob 2026-11-04)
+	{ "kind": "magic", "slow": 0.6, "uses": "recharge", "spells": [
+		{ "name": "Golem", "cost": 0, "windup": 24, "cast": 40, "cooldown": 10, "recharge": 600, "range": 9.0 },
+		{ "name": "Teleport", "cost": 0, "windup": 8, "cast": 16, "cooldown": 6, "recharge": 240, "range": 18.0 },
+		{ "name": "Stun", "cost": 0, "windup": 10, "cast": 26, "cooldown": 10, "recharge": 480, "range": 24.0, "duration": 180 },
+	] },
 ]
+
+const MAX_MANA := 100
+const MANA_EVERY := 5      # ticks per point of mana back (12 a second), not while casting
+const SHIELD_RADIUS := 1.25
+
+
+static func is_magic(w: int) -> bool:
+	return get_data(w).kind == "magic"
+
+
+static func is_ranged(w: int) -> bool:
+	return get_data(w).kind == "ranged"
+
+
+## The spell slot i of a magic weapon, or {}.
+static func spell(w: int, i: int) -> Dictionary:
+	var d := get_data(w)
+	if d.kind != "magic":
+		return {}
+	var sp: Array = d.spells
+	return sp[clampi(i, 0, sp.size() - 1)]
+
+
+## Area damage: full at the centre, falling off evenly to min_damage at the edge, nothing beyond.
+static func area_damage(sp: Dictionary, dist: float) -> int:
+	var r := float(sp.radius)
+	if dist > r:
+		return 0
+	return int(round(lerpf(float(sp.max_damage), float(sp.min_damage), clampf(dist / r, 0.0, 1.0))))
 
 
 static func get_data(w: int) -> Dictionary:
@@ -87,7 +131,7 @@ static func shot(w: int, charge: int) -> Array:
 # ---------------------------------------------------------------------------------------------- items on the ground
 ## Pick-ups: the four weapons and two kinds of ammo. Weapons are kept for good once picked up (one bit each in
 ## PlayerState.owned); ammo adds to a count.
-enum Item { CLUB, SWORD, BOW, SLING, ARROWS, ROCKS }
-const ITEM_NAMES := ["Club", "Sword", "Bow", "Slingshot", "Arrows", "Rocks"]
-const ITEM_WEAPON := [CLUB, SWORD, BOW, SLING, -1, -1]
+enum Item { CLUB, SWORD, BOW, SLING, ARROWS, ROCKS, STAFF, WAND }
+const ITEM_NAMES := ["Club", "Sword", "Bow", "Slingshot", "Arrows", "Rocks", "Wizard staff", "Magic wand"]
+const ITEM_WEAPON := [CLUB, SWORD, BOW, SLING, -1, -1, STAFF, WAND]
 const MAX_AMMO := 60

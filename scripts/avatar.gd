@@ -202,6 +202,7 @@ func animate(delta: float, cam: Camera3D) -> void:
 				break
 	_show(cam)
 	_swing_fx()
+	_update_prop(delta)
 
 	_flash = maxf(_flash - delta, 0.0)
 	sprite.modulate = Color(1, 0.45, 0.45) if _flash > 0.0 else Color.WHITE
@@ -248,7 +249,10 @@ func _pick(speed: float) -> String:
 				if speed > 0.6:
 					return "w" + anim
 			return anim
-		if not melee:
+		if Weapons.is_magic(st.weapon):
+			if st.atk > 0:
+				return "jab"   # Pip thrusts the staff / wand forward to cast
+		elif not melee:
 			var b := "bow" if st.weapon == Weapons.BOW else "sling"
 			if st.charge > 0:
 				return b + "Draw"
@@ -322,3 +326,38 @@ func _show(cam: Camera3D = null) -> void:
 	sprite.region_rect = Rect2(f * _cell.x, a.row * _cell.y, _cell.x, _cell.y)
 	var by_dir: Dictionary = _anims.get(_anim, _anims["idle"])
 	sprite.flip_h = MIRROR.has(dir) and by_dir.has(MIRROR[dir])
+
+
+## The staff or wand in Pip's hand (his sheets have no frames for them): a small 3D model at his side, turned with
+## him, swung up and forward while he casts, its orb flaring.
+var _prop: Node3D
+var _prop_w := -1
+
+
+func _update_prop(delta: float) -> void:
+	var w := state.weapon if state != null and state.dead == 0 else -1
+	if w != _prop_w:
+		if _prop:
+			_prop.queue_free()
+			_prop = null
+		_prop_w = w
+		if w == Weapons.STAFF or w == Weapons.WAND:
+			_prop = WeaponModels.for_weapon(w)
+			model.add_child(_prop)
+	if _prop == null:
+		return
+	var right := Vector3(cos(yaw), 0, -sin(yaw))
+	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
+	var k := 0.0
+	if state.atk > 0:
+		var sp := Weapons.spell(w, state.spell)
+		var into := int(sp.cast) - state.atk
+		k = clampf(float(into) / float(maxi(int(sp.windup), 1)), 0.0, 1.0) * clampf(float(state.atk) / 10.0, 0.0, 1.0)
+	var staff := w == Weapons.STAFF
+	_prop.position = right * 0.34 + fwd * lerpf(0.05, 0.35, k) + Vector3(0, (0.95 if staff else 0.85) + 0.3 * k, 0)
+	var tilt := lerpf(0.08 if staff else 1.1, 0.7 if staff else 1.45, k)
+	_prop.basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -tilt)
+	var orb := _prop.get_node_or_null("Orb") as MeshInstance3D
+	if orb:
+		orb.scale = Vector3.ONE * (1.0 + 0.8 * k + 0.08 * sin(Time.get_ticks_msec() * 0.006))
+

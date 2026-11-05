@@ -1,5 +1,5 @@
 ## Binary packing for the two hot messages (inputs and snapshots). Small packets, no Variant overhead:
-## an input is 25 bytes, a player in a snapshot 45 bytes.
+## an input is 38 bytes, a player in a snapshot 59 bytes.
 class_name Codec
 
 
@@ -16,10 +16,14 @@ static func encode_inputs(inputs: Array) -> PackedByteArray:
 		b.put_u32(i.view_tick)
 		b.put_float(i.aim_yaw)
 		b.put_float(i.face_yaw)
+		b.put_u8(i.spell)
+		b.put_float(i.aim_point.x)
+		b.put_float(i.aim_point.y)
+		b.put_float(i.aim_point.z)
 	return b.data_array
 
 
-const INPUT_BYTES := 25
+const INPUT_BYTES := 38
 
 
 static func decode_inputs(data: PackedByteArray) -> Array:
@@ -40,8 +44,10 @@ static func decode_inputs(data: PackedByteArray) -> Array:
 		var view := b.get_u32()
 		var aim_yaw := b.get_float()
 		var face_yaw := b.get_float()
-		if is_finite(yaw) and is_finite(aim_yaw) and is_finite(face_yaw):
-			out.append(Sim.PlayerInput.new(seq, btn, yaw, pitch, weapon, view, aim_yaw, face_yaw))
+		var spell := b.get_u8()
+		var ap := Vector3(b.get_float(), b.get_float(), b.get_float())
+		if is_finite(yaw) and is_finite(aim_yaw) and is_finite(face_yaw) and is_finite(ap.x) and is_finite(ap.y) and is_finite(ap.z):
+			out.append(Sim.PlayerInput.new(seq, btn, yaw, pitch, weapon, view, aim_yaw, face_yaw, spell, ap))
 	return out
 
 
@@ -72,6 +78,12 @@ static func encode_snapshot(tick: int, ack: int, ents: Array) -> PackedByteArray
 		b.put_u8(s.rocks)
 		b.put_u8(s.combo)
 		b.put_u8(s.combo_t)
+		b.put_u16(s.mana)
+		b.put_u8(s.spell)
+		b.put_u16(s.shield)
+		b.put_u8(s.stun)
+		for i in 3:
+			b.put_u16(s.recharge[i])
 	return b.data_array
 
 
@@ -104,5 +116,11 @@ static func decode_snapshot(data: PackedByteArray) -> Dictionary:
 		s.rocks = b.get_u8()
 		s.combo = b.get_u8()
 		s.combo_t = b.get_u8()
+		s.mana = b.get_u16()
+		s.spell = b.get_u8()
+		s.shield = b.get_u16()
+		s.stun = b.get_u8()
+		for i in 3:
+			s.recharge[i] = b.get_u16()
 		ents[id] = s
 	return { "tick": tick, "ack": ack, "ents": ents }

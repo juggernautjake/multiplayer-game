@@ -443,7 +443,7 @@ func _step_foot(ph: float, stride: float, lift: float, dir: Vector2, side: float
 ## Notice a release (bow string / slingshot bands spring) and how long a full draw has been held.
 func _track_release(st: Sim.PlayerState, w: int, delta: float) -> void:
 	_release_t += delta
-	if st == null or Weapons.is_melee(w):
+	if st == null or not Weapons.is_ranged(w):
 		_last_pull = 0.0
 		return
 	var d := Weapons.get_data(w)
@@ -495,6 +495,12 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 		Weapons.SLING:   # fork up in the left hand at the waist
 			p.hand_l = Vector3(-0.24, 1.05, -0.22 + swing)
 			p.wdir = Vector3(0, 1.0, -0.25)
+		Weapons.STAFF:   # the staff upright in the right hand, like a walking stick
+			p.hand_r = Vector3(0.3, 1.02, -0.18 - swing * 0.2)
+			p.wdir = Vector3(0, 1.0, -0.12)
+		Weapons.WAND:	# the wand held low, pointing ahead
+			p.hand_r = Vector3(0.26, 1.0, -0.26 - swing * 0.3)
+			p.wdir = Vector3(0, 0.2, -1.0)
 
 	if Weapons.is_melee(w) and st.atk > 0:
 		var mv := Weapons.move(w, st.combo)
@@ -530,6 +536,15 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 			p.hand_l = p.hand_r - (p.wdir as Vector3).normalized() * 0.14 + Vector3(-0.04, 0, 0)
 		return p
 
+	if Weapons.is_magic(w):   # staff upright / wand pointing; casting thrusts it forward and up
+		if st.atk > 0:
+			var sp := Weapons.spell(w, st.spell)
+			var k := clampf(1.0 - float(st.atk - (int(sp.cast) - int(sp.windup))) / float(maxi(int(sp.windup), 1)), 0.0, 1.0)
+			p.hand_r = Vector3(0.22, lerpf(1.2, 1.5, k), lerpf(-0.3, -0.62, k))
+			p.wdir = Vector3(0, 0.8, -0.6) if w == Weapons.STAFF else Vector3(0, 0.25, -1.0)
+			p.lean = -0.12 * k
+			p.twist = -0.2
+		return p
 	if not Weapons.is_melee(w):
 		var d := Weapons.get_data(w)
 		var pull := clampf(float(st.charge) / float(d.draw), 0.0, 1.0)
@@ -791,7 +806,7 @@ func _update_held(w: int) -> void:
 func _draw_weapon(st: Sim.PlayerState, w: int, hand_r: Vector3, hand_l: Vector3, dead: bool, pose: Dictionary) -> void:
 	var drawing := st != null and st.charge > 0
 	var pull := 0.0
-	if st != null and not Weapons.is_melee(w):
+	if st != null and Weapons.is_ranged(w):
 		pull = clampf(float(st.charge) / float(Weapons.get_data(w).draw), 0.0, 1.0)
 	# after a release: the limbs / bands spring back and wobble (a damped oscillation)
 	var spring := _release_pull * exp(-_release_t * 9.0) * cos(_release_t * 38.0) if _release_t < 0.6 else 0.0

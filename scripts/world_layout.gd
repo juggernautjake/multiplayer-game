@@ -9,8 +9,24 @@ class Box:
 	var hx := 0.0
 	var hz := 0.0
 	var h := 0.0
+	var kind := ""   # "" a plain pillar, "step" / "tower" the wizard's tower, "vault" the hidden vault (drawn specially)
 
 static var _boxes: Array = []
+
+## The wizard's tower (Jacob 2026-11-04): a spiral of pillar steps round a tall column, each a jump higher than the
+## last, up to a platform 15.6 m up where the wizard's staff lies. In sight of the spawn.
+const TOWER_C := Vector2(-26.0, -34.0)
+const TOWER_TOP := 15.6
+const TOWER_HALF := 2.0
+const TOWER_STEPS := 12
+const TOWER_R := 4.6          # the steps' distance from the column's centre
+## The hidden vault: a low stone block far from the spawn, its trapdoor on the far side (you have to walk round to see
+## it). E at the door opens it; the magic wand sits on a shelf inside.
+const VAULT_C := Vector2(54.0, 38.0)
+const VAULT_HALF := 1.8
+const VAULT_H := 2.6
+const VAULT_DOOR := Vector3(55.8, 0.0, 38.0)   # the middle of the door, on the vault's +x face (facing away from the spawn)
+const VAULT_SHELF := Vector3(55.35, 0.55, 38.0)
 
 ## Practice dummies near the spawn: hit them to see your damage. Target ids -1, -2, -3.
 const DUMMIES := [Vector3(-4.0, 0.0, -9.0), Vector3(0.0, 0.0, -10.0), Vector3(4.0, 0.0, -9.0)]
@@ -43,6 +59,8 @@ const ITEM_SPAWNS := [
 	[0, Vector3(-7.0, 0.0, -3.0), 1], [1, Vector3(-5.5, 0.0, -1.5), 1], [2, Vector3(5.5, 0.0, -1.5), 1],
 	[3, Vector3(7.0, 0.0, -3.0), 1], [4, Vector3(6.5, 0.0, 0.5), 12], [5, Vector3(8.5, 0.0, -1.0), 15],
 	[4, Vector3(-2.0, 0.0, -14.0), 8], [5, Vector3(2.0, 0.0, -14.0), 10],
+	[6, Vector3(-26.0, 15.6, -34.0), 1],    # the wizard's staff, on top of the tower
+	[7, Vector3(55.35, 0.55, 38.0), 1],     # the magic wand, in the vault (only reachable with its door open)
 ]
 
 
@@ -59,6 +77,9 @@ static func boxes() -> Array:
 			var a := rng.randf() * TAU
 			b.cx = cos(a) * r
 			b.cz = sin(a) * r
+			var c := Vector2(b.cx, b.cz)
+			if c.distance_to(TOWER_C) < TOWER_R + 4.5 or c.distance_to(VAULT_C) < VAULT_HALF + 4.0:
+				continue   # keep the tower and the vault clear
 			_boxes.append(b)
 		for t in TREES:   # tree trunks are solid
 			var tb := Box.new()
@@ -69,6 +90,23 @@ static func boxes() -> Array:
 			tb.hz = tk[0]
 			tb.h = tk[1]
 			_boxes.append(tb)
+		# the wizard's tower: the column, then the steps spiralling up from the side facing the spawn
+		var col := Box.new()
+		col.cx = TOWER_C.x; col.cz = TOWER_C.y; col.hx = TOWER_HALF; col.hz = TOWER_HALF; col.h = TOWER_TOP; col.kind = "tower"
+		_boxes.append(col)
+		var a0 := atan2(-TOWER_C.y, -TOWER_C.x)
+		for i in TOWER_STEPS:
+			var st := Box.new()
+			var a := a0 + deg_to_rad(32.0) * i
+			st.cx = TOWER_C.x + cos(a) * TOWER_R
+			st.cz = TOWER_C.y + sin(a) * TOWER_R
+			st.hx = 0.85; st.hz = 0.85
+			st.h = 1.1 + 1.2 * i
+			st.kind = "step"
+			_boxes.append(st)
+		var v := Box.new()
+		v.cx = VAULT_C.x; v.cz = VAULT_C.y; v.hx = VAULT_HALF; v.hz = VAULT_HALF; v.h = VAULT_H; v.kind = "vault"
+		_boxes.append(v)
 		# three steps near the spawn, to try jumping onto things
 		for spec in [[6.0, -6.0, 1.0, 1.0, 0.9], [9.0, -9.0, 1.2, 1.2, 1.9], [12.5, -12.5, 1.4, 1.4, 3.0]]:
 			var s := Box.new()

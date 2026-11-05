@@ -20,6 +20,8 @@ static func make(kind: int) -> Node3D:
 		Weapons.Item.BOW: return bow()
 		Weapons.Item.SLING: return sling()
 		Weapons.Item.ARROWS: return quiver()
+		Weapons.Item.STAFF: return staff()
+		Weapons.Item.WAND: return wand()
 		_: return rocks()
 
 
@@ -30,6 +32,8 @@ static func for_weapon(w: int) -> Node3D:
 		Weapons.SWORD: return sword()
 		Weapons.BOW: return bow()
 		Weapons.SLING: return sling()
+		Weapons.STAFF: return staff()
+		Weapons.WAND: return wand()
 	return null
 
 
@@ -143,3 +147,61 @@ static func _sphere(parent: Node3D, r: float, at: Vector3, c: Color) -> MeshInst
 	s.radius = r
 	s.height = r * 2.0
 	return _mesh(parent, s, at, c)
+
+
+## The wizard's staff: a long dark shaft, silver bands, a three-pronged claw at the top holding a glowing blue orb.
+## Gripped at the origin (about a third of the way down from the top).
+static func staff() -> Node3D:
+	var n := Node3D.new()
+	_box(n, Vector3(0.05, 1.62, 0.05), Vector3(0, -0.21, 0), WOOD_DARK, 0.85, 0.0)
+	for y in [-0.85, -0.2, 0.42]:
+		_box(n, Vector3(0.068, 0.04, 0.068), Vector3(0, y, 0), STEEL, 0.3, 0.8)
+	for k in 3:
+		var a := TAU * k / 3.0
+		var prong := _box(n, Vector3(0.026, 0.2, 0.026), Vector3(cos(a) * 0.06, 0.66, sin(a) * 0.06), WOOD, 0.8, 0.0)
+		prong.rotation = Vector3(sin(a) * 0.35, 0, -cos(a) * 0.35)
+	var orb := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.085
+	sm.height = 0.17
+	orb.mesh = sm
+	var om := StandardMaterial3D.new()
+	om.albedo_color = Color("7fd8ff")
+	om.emission_enabled = true
+	om.emission = Color("4fb4ff")
+	om.emission_energy_multiplier = 2.6
+	orb.material_override = om
+	orb.position = Vector3(0, 0.76, 0)
+	orb.name = "Orb"
+	n.add_child(orb)
+	var light := OmniLight3D.new()
+	light.light_color = Color("6cc6ff")
+	light.light_energy = 0.8
+	light.omni_range = 2.2
+	light.position = orb.position
+	n.add_child(light)
+	return n
+
+
+## The magic wand: a slim dark wand with a silver grip ring and a glowing violet tip. Gripped at the origin.
+static func wand() -> Node3D:
+	var n := Node3D.new()
+	_box(n, Vector3(0.028, 0.36, 0.028), Vector3(0, 0.12, 0), Color("3a2418"), 0.7, 0.0)
+	_box(n, Vector3(0.04, 0.06, 0.04), Vector3(0, -0.03, 0), STEEL, 0.3, 0.8)
+	_box(n, Vector3(0.036, 0.03, 0.036), Vector3(0, 0.05, 0), GOLD, 0.3, 0.8)
+	var tip := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.03
+	sm.height = 0.06
+	tip.mesh = sm
+	var tm := StandardMaterial3D.new()
+	tm.albedo_color = Color("d9a8ff")
+	tm.emission_enabled = true
+	tm.emission = Color("b066ff")
+	tm.emission_energy_multiplier = 3.0
+	tip.material_override = tm
+	tip.position = Vector3(0, 0.31, 0)
+	tip.name = "Orb"
+	n.add_child(tip)
+	return n
+

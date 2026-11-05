@@ -49,6 +49,12 @@ var charge_fill: ColorRect
 var shake := 0.0           # camera shake left (s), when our hit lands
 var items := {}            # item id -> { node, kind, pos }
 var prompt: Label3D        # "E  pick up Sword" over the nearest weapon
+var magic_fx: MagicFx      # spells' effects, shield bubbles, stuns
+var golem_view: GolemView  # the wand's stone golems
+var spell_sel := {}        # weapon -> the spell picked for it (R cycles)
+var aim_point := Vector3.ZERO   # what the crosshair is on (spells use it)
+var mana_fill: ColorRect
+var hud_spells: Label
 var owned_seen := 1        # weapons we had last frame (a new one gets selected)
 var char_pick: OptionButton
 var mouse_sens := 0.0025     # radians per pixel (Esc menu)
@@ -227,6 +233,9 @@ void fragment() {
 	var tint := RandomNumberGenerator.new()
 	tint.seed = 7
 	for b: WorldLayout.Box in WorldLayout.boxes():
+		if b.kind == "vault":
+			_build_vault(b)
+			continue
 		var pillar := MeshInstance3D.new()
 		var bm := BoxMesh.new()
 		bm.size = Vector3(b.hx * 2.0, b.h, b.hz * 2.0)
@@ -234,6 +243,26 @@ void fragment() {
 		pillar.material_override = _mat(Color.from_hsv(tint.randf_range(0.05, 0.15), 0.25, tint.randf_range(0.55, 0.8)))
 		pillar.position = Vector3(b.cx, b.h / 2.0, b.cz)
 		add_child(pillar)
+		if b.kind == "step" or b.kind == "tower":   # the wizard's tower: blue-grey stone with a pale cap
+			pillar.material_override = _mat(Color("6f7690") if b.kind == "tower" else Color("8a8fa6"))
+			var cap := MeshInstance3D.new()
+			var cm := BoxMesh.new()
+			cm.size = Vector3(b.hx * 2.0 + 0.12, 0.14, b.hz * 2.0 + 0.12)
+			cap.mesh = cm
+			cap.material_override = _mat(Color("c9cde0"))
+			cap.position = Vector3(b.cx, b.h - 0.07, b.cz)
+			add_child(cap)
+
+	_build_beacon()
+	magic_fx = MagicFx.new()
+	magic_fx.name = "Magic"
+	add_child(magic_fx)
+	magic_fx.setup(net, self)
+	magic_fx._vault_door = vault_door
+	golem_view = GolemView.new()
+	golem_view.name = "Golems"
+	add_child(golem_view)
+	golem_view.setup(net)
 
 	var eco := EcoView.new()   # trees, fruit, worms and birds, drawn from the server's events
 	eco.name = "Eco"
@@ -357,6 +386,12 @@ func _process(_delta: float) -> void:
 
 	_update_projectiles(frac)
 	_update_items(_delta)
+	if magic_fx:
+		magic_fx.avatars = avatars
+		var sts := {}
+		for id in avatars.keys():
+			sts[id] = avatars[id].state
+		magic_fx.update(_delta, sts)
 	if shake > 0.0:
 		shake = maxf(shake - _delta, 0.0)
 		cam.position += Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.07 * (shake / 0.14)
@@ -400,7 +435,7 @@ func _sample_input() -> Array:
 			b |= Sim.Btn.ATTACK
 		if Input.is_physical_key_pressed(KEY_E): b |= Sim.Btn.INTERACT
 		if view == View.FIRST or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT): b |= Sim.Btn.FACE_CAM
-	return [b, cam_yaw, aim_pitch, weapon_slot, aim_yaw, face_yaw]
+	return [b, cam_yaw, aim_pitch, weapon_slot, aim_yaw, face_yaw, int(spell_sel.get(weapon_slot, 0)), aim_point]
 
 
 ## Aim where the crosshair points: find what the camera's centre ray hits (ground, a pillar, or 80 m away) and pitch
@@ -418,6 +453,7 @@ func _update_aim() -> void:
 	var on_body := tp < t        # the crosshair is on a dummy or a player: face its centre, not the near side of it
 	t = minf(t, tp)
 	var target := o + fwd * t
+	aim_point = target
 	# the next position (the shot leaves after this tick's step): close enough at walking speed
 	var m := Weapons.muzzle(net.predicted.pos, cam_yaw)
 	var to := target - m
@@ -486,6 +522,8 @@ func _bot_input() -> Array:
 		return _bot_fight()
 	if bot_mode == "close":
 		return _bot_close()
+	if bot_mode == "magic":
+		return _bot_magic()
 	bot_t += 1
 	cam_yaw = wrapf(bot_t * 0.01, -PI, PI)
 	var b: int = Sim.Btn.FORWARD
@@ -498,6 +536,49 @@ func _bot_input() -> Array:
 			net.roster.size(), net.ping_ms(), net.corrections, int(net.interp_delay * Config.DT * 1000.0),
 			100.0 * net.extrap_frames / maxf(net.drawn_frames, 1.0)])
 	return [b | Sim.Btn.FACE_CAM, cam_yaw, 0.0, weapon_slot]
+
+
+## Magic test bot (--host --give-all --bot magic [--shots <dir>]): stands 6 m from the middle dummy and casts every
+## staff spell (lightning, fireball twice, shield) and every wand spell (golem, teleport, stun) at it, logging what
+## happens and saving pictures along the way.
+func _bot_magic() -> Array:
+	bot_t += 1
+	if net.predicted == null:
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var dummy: Vector3 = WorldLayout.DUMMIES[1]
+	var me := net.predicted.pos
+	var stand := dummy + Vector3(0, 0, 6.0)
+	var b := 0
+	var to := stand - me
+	cam_yaw = atan2(-(dummy - me).x, -(dummy - me).z)
+	if bot_t < 520 and Vector2(to.x, to.z).length() > 0.4:
+		cam_yaw = atan2(-to.x, -to.z)
+		b |= Sim.Btn.FORWARD
+	_update_aim()
+	var spell := 0
+	var aim := dummy + Vector3(0, 1.0, 0)
+	weapon_slot = Weapons.STAFF if bot_t < 400 else Weapons.WAND
+	var plan := [[90, 0], [170, 1], [230, 1], [300, 2], [420, 0], [540, 1], [700, 2]]
+	for p in plan:
+		if bot_t >= p[0] and bot_t < p[0] + 3:
+			b |= Sim.Btn.ATTACK
+		if bot_t >= p[0] - 10:
+			spell = p[1]
+	if bot_t >= 420 and bot_t < 540:
+		aim = dummy + Vector3(0, 0, 2.5)
+	elif bot_t >= 540 and bot_t < 700:
+		aim = me + Vector3(7.0, 0, 0)
+	if bot_t % 30 == 0:
+		print("[magic] t%d %s spell %d mana %d shield %d recharge %s golems %d" % [bot_t, Weapons.NAMES[weapon_slot], net.predicted.spell,
+			net.predicted.mana / 5, net.predicted.shield, str(net.predicted.recharge), golem_view.golems.size() if golem_view else -1])
+	var shots := str(_args().get("shots", ""))
+	if shots != "" and bot_t in [104, 116, 186, 196, 320, 470, 520, 600, 640, 712, 760, 860]:
+		get_viewport().get_texture().get_image().save_png(shots.path_join("magic_%d.png" % bot_t))
+	if bot_t > 900:
+		_audit_print()
+		get_tree().quit()
+	spell_sel[weapon_slot] = spell
+	return [b, cam_yaw, 0.0, weapon_slot, aim_yaw, atan2(-(aim - me).x, -(aim - me).z), spell, aim]
 
 
 ## Close-quarters test bot (--bot close [--shots <dir>]): picks up every weapon, then for each one walks into the
@@ -674,7 +755,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_switch_character()
 	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_P and menu and not menu.visible:
 		net.request_pvp(not bool(net.roster.get(net.my_id, {}).get("pvp", false)))
-	elif key and key.pressed and not key.echo and key.physical_keycode >= KEY_1 and key.physical_keycode <= KEY_5:
+	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_R and net.predicted != null and Weapons.is_magic(weapon_slot):
+		var n: int = (Weapons.get_data(weapon_slot).spells as Array).size()
+		spell_sel[weapon_slot] = (int(spell_sel.get(weapon_slot, 0)) + 1) % n
+	elif key and key.pressed and not key.echo and key.physical_keycode >= KEY_1 and key.physical_keycode <= KEY_7:
 		var want := key.physical_keycode - KEY_1
 		if net.predicted != null and (net.predicted.owned >> want) & 1:
 			weapon_slot = want
@@ -770,7 +854,7 @@ func _build_ui() -> void:
 	hud.add_theme_constant_override("outline_size", 6)
 	layer.add_child(hud)
 	var help := Label.new()
-	help.text = "WASD move  Shift sprint  Space jump  Q dash  LMB attack (click again for combos, hold to draw)  RMB aim  E pick up  1-5 / Tab weapons  V view  P PvP on/off  F2 Pip / 3D figure  Esc menu"
+	help.text = "WASD move  Shift sprint  Space jump  Q dash  LMB attack (click again for combos, hold to draw)  RMB aim  E pick up  1-7 / Tab weapons  R spell  V view  P PvP on/off  F2 Pip / 3D figure  Esc menu"
 	help.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	help.position = Vector2(12, -34)
 	help.add_theme_color_override("font_outline_color", Color.BLACK)
@@ -795,6 +879,26 @@ func _build_ui() -> void:
 	hp_fill.size = Vector2(296, 12)
 	hp_fill.position = Vector2(2, 2)
 	hp_back.add_child(hp_fill)
+	var mana_back := ColorRect.new()   # mana, under the health bar
+	mana_back.color = Color(0, 0, 0, 0.55)
+	mana_back.size = Vector2(300, 10)
+	mana_back.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	mana_back.position = Vector2(-150, -42)
+	layer.add_child(mana_back)
+	mana_fill = ColorRect.new()
+	mana_fill.color = Color(0.3, 0.55, 1.0)
+	mana_fill.size = Vector2(296, 6)
+	mana_fill.position = Vector2(2, 2)
+	mana_back.add_child(mana_fill)
+	hud_spells = Label.new()
+	hud_spells.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	hud_spells.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	hud_spells.position.y -= 122
+	hud_spells.add_theme_font_size_override("font_size", 18)
+	hud_spells.add_theme_color_override("font_color", Color("bcd6ff"))
+	hud_spells.add_theme_color_override("font_outline_color", Color.BLACK)
+	hud_spells.add_theme_constant_override("outline_size", 6)
+	layer.add_child(hud_spells)
 	charge_fill = ColorRect.new()  # bow / slingshot draw, under the crosshair
 	charge_fill.color = Color(1, 0.85, 0.3)
 	charge_fill.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -1032,7 +1136,7 @@ func _on_local_shot(kind: int, pos0: Vector3, vel0: Vector3, g: float) -> void:
 
 
 func _on_proj_spawn(id: int, owner: int, kind: int, tick0: int, pos0: Vector3, vel0: Vector3, g: float) -> void:
-	if owner == net.my_id and not local_shots.is_empty():
+	if owner == net.my_id and not local_shots.is_empty() and int(local_shots[0].kind) == kind:
 		var e: Dictionary = local_shots.pop_front()   # the server's copy of a shot we already drew: link them
 		e.tick0 = tick0
 		projs[id] = e
@@ -1053,6 +1157,8 @@ func _on_proj_end(id: int, tick: int, pos: Vector3, stuck: bool) -> void:
 
 
 func _proj_node(kind: int) -> MeshInstance3D:
+	if kind == 2:
+		return MagicFx.fireball_node() as MeshInstance3D
 	var mi := MeshInstance3D.new()
 	var m := StandardMaterial3D.new()
 	if kind == 0:  # arrow: a thin shaft along -Z
@@ -1133,7 +1239,11 @@ func _on_hit(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool,
 	var weapon := -1
 	if avatars.has(attacker) and avatars[attacker].state != null:
 		weapon = avatars[attacker].state.weapon
-	if target < 0:
+	if target <= -1000:
+		if golem_view:
+			golem_view.flash(-1000 - target)
+		Fx.burst(self, pos, dir, Color("9a8f80"), 14, 4.0, 0.07)   # stone chips
+	elif target < 0:
 		var i := -target - 1
 		if i < dummies.size():
 			(dummies[i] as Dummy).hit(amount, dir)
@@ -1196,6 +1306,22 @@ func _update_combat_hud() -> void:
 	hp_fill.color = Color(0.9, 0.25, 0.2).lerp(Color(0.3, 0.85, 0.35), float(st.hp) / float(Sim.MAX_HP))
 	var w := Weapons.get_data(st.weapon)
 	charge_fill.size.x = 60.0 * float(st.charge) / float(w.draw) if w.kind == "ranged" else 0.0
+	mana_fill.size.x = 296.0 * float(st.mana) / float(Sim.MANA_FULL)
+	if w.kind == "magic":
+		var parts := []
+		var sel := int(spell_sel.get(st.weapon, 0))
+		for i in (w.spells as Array).size():
+			var sp: Dictionary = w.spells[i]
+			var t: String
+			if w.get("uses", "mana") == "recharge":
+				var left: int = st.recharge[i]
+				t = "%s %s" % [sp.name, ("%.0fs" % ceil(left * Config.DT)) if left > 0 else "ready"]
+			else:
+				t = "%s %d" % [sp.name, int(sp.cost)] + ("" if st.mana >= int(sp.cost) * 5 else " (mana)")
+			parts.append(("[ %s ]" if i == sel else "  %s  ") % t)
+		hud_spells.text = "R spell:  " + "   ".join(parts) + ("\nSTUNNED" if st.stun > 0 else "")
+	else:
+		hud_spells.text = "STUNNED" if st.stun > 0 else ""
 	if st.dead > 0:
 		hud_weapons.text = "Knocked out: back up in %.1f s" % (st.dead * Config.DT)
 
@@ -1254,6 +1380,8 @@ func _update_items(delta: float) -> void:
 	for id in items.keys():
 		var e: Dictionary = items[id]
 		e.t += delta
+		if e.kind == Weapons.Item.WAND and magic_fx and magic_fx._door_target == 0.0:
+			continue
 		if Weapons.ITEM_WEAPON[e.kind] >= 0:
 			var m: Node3D = e.model
 			m.position.y = 0.16 + sin(e.t * 2.2) * 0.05
@@ -1262,8 +1390,89 @@ func _update_items(delta: float) -> void:
 			if d < best_d:
 				best_d = d
 				best = id
+	var door := WorldLayout.VAULT_DOOR
+	if best < 0 and magic_fx and magic_fx._door_target == 0.0 and Vector2(me.x - door.x, me.z - door.z).length() < 2.0 and me.x > door.x - 0.3:
+		prompt.visible = true
+		prompt.text = "E  open the door"
+		prompt.global_position = door + Vector3(0, 1.9, 0)
+		return
 	prompt.visible = best >= 0
 	if best >= 0:
 		var e: Dictionary = items[best]
 		prompt.text = "E  pick up " + Weapons.ITEM_NAMES[e.kind]
 		prompt.global_position = e.pos + Vector3(0, 1.0, 0)
+
+
+# ================================================================ the vault and the tower's beacon
+var vault_door: Node3D
+
+## The hidden vault: a squat stone block with a dark doorway on its far side (+x), a shelf inside it for the wand, and
+## a heavy wooden door on an iron hinge that swings open (MagicFx turns it). Drawn as blocks round the opening; the
+## simulation collides with the whole block.
+func _build_vault(b: WorldLayout.Box) -> void:
+	var stone := _mat(Color("6b6560"))
+	var dark := _mat(Color("1d1a18"))
+	var x0 := b.cx - b.hx
+	var x1 := b.cx + b.hx
+	var z0 := b.cz - b.hz
+	var z1 := b.cz + b.hz
+	var ow := 0.55   # half the opening's width
+	var oh := 1.5    # its height
+	var depth := 0.7
+	for spec in [
+		[Vector3(x1 - x0 - depth, b.h, z1 - z0), Vector3((x0 + x1 - depth) / 2.0, b.h / 2.0, b.cz), stone],   # the back of the block
+		[Vector3(depth, b.h, (z1 - z0) / 2.0 - ow), Vector3(x1 - depth / 2.0, b.h / 2.0, (z0 + b.cz - ow) / 2.0), stone],
+		[Vector3(depth, b.h, (z1 - z0) / 2.0 - ow), Vector3(x1 - depth / 2.0, b.h / 2.0, (z1 + b.cz + ow) / 2.0), stone],
+		[Vector3(depth, b.h - oh, ow * 2.0), Vector3(x1 - depth / 2.0, oh + (b.h - oh) / 2.0, b.cz), stone],   # over the door
+		[Vector3(0.05, oh, ow * 2.0), Vector3(x1 - depth + 0.03, oh / 2.0, b.cz), dark],                     # the back of the niche
+		[Vector3(depth - 0.1, 0.06, ow * 2.0), Vector3(x1 - depth / 2.0, 0.5, b.cz), _mat(Color("8a6a4a"))],   # the shelf
+	]:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = spec[0]
+		mi.mesh = bm
+		mi.material_override = spec[2]
+		mi.position = spec[1]
+		add_child(mi)
+	# the door: planks with two iron bands and a ring pull, hinged on the -z edge of the opening
+	vault_door = Node3D.new()
+	vault_door.position = Vector3(x1 + 0.04, 0.0, b.cz - ow)
+	add_child(vault_door)
+	for spec in [[Vector3(0.08, oh, ow * 2.0), Vector3(0, oh / 2.0, ow), Color("7a5232")],
+			[Vector3(0.1, 0.1, ow * 2.0), Vector3(0.01, 0.35, ow), Color("3b3b40")],
+			[Vector3(0.1, 0.1, ow * 2.0), Vector3(0.01, 1.15, ow), Color("3b3b40")],
+			[Vector3(0.12, 0.14, 0.14), Vector3(0.06, 0.8, ow * 1.6), Color("9a9aa2")]]:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = spec[0]
+		mi.mesh = bm
+		mi.material_override = _mat(spec[2])
+		mi.position = spec[1]
+		vault_door.add_child(mi)
+	# a faint glow from inside, so the curious notice something
+	var l := OmniLight3D.new()
+	l.light_color = Color("b066ff")
+	l.light_energy = 0.6
+	l.omni_range = 2.5
+	l.position = Vector3(x1 - depth / 2.0, 0.8, b.cz)
+	add_child(l)
+
+
+## A pale shaft of light over the tower's top, so you can see where the staff is from the spawn.
+func _build_beacon() -> void:
+	var mi := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.5
+	cm.bottom_radius = 0.9
+	cm.height = 40.0
+	mi.mesh = cm
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0.55, 0.8, 1.0, 0.12)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = Vector3(WorldLayout.TOWER_C.x, WorldLayout.TOWER_TOP + 20.0, WorldLayout.TOWER_C.y)
+	add_child(mi)
+

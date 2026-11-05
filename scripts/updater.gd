@@ -1,5 +1,5 @@
-## Updates from GitHub: each release carries game.pck (all the game's scripts, scenes and art, a few MB) and
-## manifest.json ({"version": "0.2.0", "godot": "4.7.2"}). At start the game asks GitHub for the latest release; if it is
+## Updates from GitHub: each release carries game.pck (all the game's scripts, scenes and art, under 1 MB); its notes end
+## with a line "godot: 4.7.2" (the Godot it was built with). At start the game asks GitHub for the latest release; if it is
 ## newer, it downloads game.pck into the updates folder beside the game (boot.gd loads it on the next start) and offers
 ## a restart. A release made with a different Godot version can't be patched in: then it points to the download page.
 class_name Updater

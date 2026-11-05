@@ -25,6 +25,8 @@ signal item_added(id: int, kind: int, pos: Vector3, count: int)
 signal style_changed(style: String)
 signal eco(kind: String, args: Array)   # the living yard (trees, fruit, worms, birds): see Ecology / EcoView
 signal item_removed(id: int, taker: int)
+signal magic_fx(kind: String, args: Array)        # spells: see MagicFx
+signal golems_changed(tick: int, data: Array)   # golems' state from the server: see GolemView
 
 const COLORS := [Color("e6194b"), Color("3cb44b"), Color("ffe119"), Color("4363d8"), Color("f58231"), Color("911eb4"),
 	Color("46f0f0"), Color("f032e6"), Color("bcf60c"), Color("fabebe"), Color("008080"), Color("e6beff")]
@@ -86,6 +88,9 @@ class Proj:
 ## How everyone is drawn, chosen by the host for the whole game: "pip" (sprite) or "figure" (3D test character).
 var style := "pip"
 var ecology: Ecology   # server only
+var golems := Golems.new()   # server only: the wand's stone golems
+var pending_spells: Array = []   # [tick, kind, where, caster]: lightning that strikes after its warning
+var vault_open_until := 0        # tick the vault's door shuts again (0 = shut)
 var projectiles := {}  # id -> Proj (server)
 var LOG := OS.get_cmdline_user_args().has("--log")   # print hits and pick-ups (testing)
 var next_proj := 1
@@ -146,6 +151,10 @@ func host(port: int, player_name: String, with_player := true) -> Error:
 	ecology.event.connect(_on_eco_event)
 	if with_player:
 		_server_add_player(1, player_name, str(get_meta("character", "pip")))
+		if OS.get_cmdline_user_args().has("--give-all"):   # testing: the host starts with every weapon
+			players[1].state.owned = 0b1111111
+			players[1].state.arrows = 30
+			players[1].state.rocks = 30
 		predicted = players[1].state.copy()
 		prev_pos = predicted.pos
 		cur_pos = predicted.pos
@@ -230,6 +239,8 @@ func hello(player_name: String, character := "pip", version := "") -> void:
 	for it: Item in items.values():
 		list.append([it.id, it.kind, it.pos, it.count])
 	items_full.rpc_id(id, list)
+	if vault_open_until > 0:
+		spell_fx.rpc_id(id, "vault_door", [true])
 	print("+ %s joined (%d online)" % [players[id].name, players.size()])
 
 
@@ -426,6 +437,7 @@ func _server_tick() -> void:
 			p.hist.pop_front()
 	_server_projectiles()
 	_server_items()
+	_server_spells()
 	if ecology:
 		var people := []
 		for p: ServerPlayer in players.values():
@@ -479,6 +491,7 @@ func _server_step_player(p: ServerPlayer) -> void:
 		p.waited = 0
 		var inp: Sim.PlayerInput = p.queue[nxt]
 		p.queue.erase(nxt)
+		var before := p.state.pos
 		var ev := Sim.step(p.state, inp)
 		p.last_applied = inp.seq
 		budget -= 1
@@ -486,6 +499,8 @@ func _server_step_player(p: ServerPlayer) -> void:
 			_melee(p, inp)
 		elif ev == Sim.Ev.SHOT:
 			_shoot(p, inp)
+		elif ev == Sim.Ev.CAST:
+			_cast(p, inp, before)
 		if p.was_dead and p.state.dead == 0:  # back on your feet: a fresh spawn, keeping what you carry
 			var old := p.state
 			p.state = Sim.spawn_state(p.slot)
@@ -496,7 +511,7 @@ func _server_step_player(p: ServerPlayer) -> void:
 		p.was_dead = p.state.dead > 0
 		var interact := inp.buttons & Sim.Btn.INTERACT != 0
 		if interact and not p.interact_prev and p.state.dead == 0:
-			if not _pick_up(p, 2.2, true) and ecology:
+			if not _vault_interact(p) and not _pick_up(p, 2.2, true) and ecology:
 				var gain := ecology.try_eat(p.state.pos, server_tick)
 				if gain > 0:
 					p.state.hp = mini(p.state.hp + gain, Sim.MAX_HP)
@@ -526,6 +541,9 @@ func _melee(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
 			targets.append([q.id, _pos_at(q, vt)])
 	for i in WorldLayout.DUMMIES.size():
 		targets.append([-(i + 1), WorldLayout.DUMMIES[i]])
+	for g: Golems.G in golems.list.values():
+		if g.owner != p.id:
+			targets.append([-1000 - g.id, g.pos])
 	var impact := me + Vector3(face.x, 0, face.y) * 1.3
 	if ecology:   # a tree within reach in front: shake it (fruit trees drop fruit from the 3rd hit)
 		for i in WorldLayout.TREES.size():
@@ -581,13 +599,34 @@ func _server_projectiles() -> void:
 		var done := false
 		for k in range(1, 5):
 			var pt := prev.lerp(cur, k / 4.0)
+			var shielded := _shield_at(pt, pr.owner)
+			if shielded > 0:   # a shield bubble stops it at its surface
+				_fx("shield_hit", [shielded, pt])
+				if pr.kind == 2:
+					_burst(pr, pt)
+				else:
+					_end_proj(pr, pt, false)
+				done = true
+				break
+			var gh := _golem_at(pt, pr.owner)
+			if gh > 0:
+				if pr.kind == 2:
+					_burst(pr, pt)
+				else:
+					_damage(-1000 - gh, pr.damage, pr.owner, cur - prev, 0.0)
+					_end_proj(pr, pt, false)
+				done = true
+				break
 			for q: ServerPlayer in players.values():
 				if q.id == pr.owner or q.state.dead > 0 or not can_hurt(pr.owner, q.id):
 					continue
 				var qp := q.state.pos
 				if Vector2(pt.x - qp.x, pt.z - qp.z).length() < 0.5 and pt.y > qp.y - 0.1 and pt.y < qp.y + 1.9:
-					_damage(q.id, pr.damage, pr.owner, cur - prev, 1.5)
-					_end_proj(pr, pt, false)
+					if pr.kind == 2:
+						_burst(pr, pt)
+					else:
+						_damage(q.id, pr.damage, pr.owner, cur - prev, 1.5)
+						_end_proj(pr, pt, false)
 					done = true
 					break
 			if done:
@@ -595,24 +634,36 @@ func _server_projectiles() -> void:
 			for i in WorldLayout.DUMMIES.size():
 				var dp: Vector3 = WorldLayout.DUMMIES[i]
 				if Vector2(pt.x - dp.x, pt.z - dp.z).length() < 0.45 and pt.y > 0.0 and pt.y < 1.9:
-					_damage(-(i + 1), pr.damage, pr.owner, cur - prev, 0.0)
-					_end_proj(pr, pt, true)
+					if pr.kind == 2:
+						_burst(pr, pt)
+					else:
+						_damage(-(i + 1), pr.damage, pr.owner, cur - prev, 0.0)
+						_end_proj(pr, pt, true)
 					done = true
 					break
 			if done:
 				break
 			var tree := WorldLayout.tree_at(pt, 0.4)
 			if tree >= 0 and ecology:
-				ecology.hit_tree(tree, int(pr.damage * 0.6), server_tick, cur - prev)
-				_end_proj(pr, pt, true)
+				if pr.kind == 2:
+					_burst(pr, pt)
+				else:
+					ecology.hit_tree(tree, int(pr.damage * 0.6), server_tick, cur - prev)
+					_end_proj(pr, pt, true)
 				done = true
 				break
 			if pt.y <= 0.0 or WorldLayout.ground_height(pt.x, pt.z, pt.y + 0.05) > pt.y or _in_box(pt):
-				_end_proj(pr, Vector3(pt.x, maxf(pt.y, 0.02), pt.z), true)
+				if pr.kind == 2:
+					_burst(pr, Vector3(pt.x, maxf(pt.y, 0.05), pt.z))
+				else:
+					_end_proj(pr, Vector3(pt.x, maxf(pt.y, 0.02), pt.z), true)
 				done = true
 				break
 		if not done and n > 300:
-			_end_proj(pr, cur, false)
+			if pr.kind == 2:
+				_burst(pr, cur)
+			else:
+				_end_proj(pr, cur, false)
 
 
 func _in_box(pt: Vector3) -> bool:
@@ -622,8 +673,37 @@ func _in_box(pt: Vector3) -> bool:
 	return false
 
 
+## A fireball bursts: everything nearby takes area damage.
+func _burst(pr: Proj, pos: Vector3) -> void:
+	projectiles.erase(pr.id)
+	proj_end.rpc(pr.id, server_tick, pos, false)
+	if is_host_player:
+		proj_end(pr.id, server_tick, pos, false)
+	var sp := Weapons.spell(Weapons.STAFF, 1)
+	_fx("explode", [pos, float(sp.radius)])
+	_blast(pos, sp, pr.owner)
+
+
+## The player whose shield bubble the point is inside (not the shot's own), or 0.
+func _shield_at(pt: Vector3, owner: int) -> int:
+	for q: ServerPlayer in players.values():
+		if q.id != owner and q.state.shield > 0 and q.state.dead == 0 and pt.distance_to(q.state.pos + Vector3(0, 0.95, 0)) < Weapons.SHIELD_RADIUS:
+			return q.id
+	return 0
+
+
+## The golem (not the shooter's) a point is inside, or 0.
+func _golem_at(pt: Vector3, owner: int) -> int:
+	for g: Golems.G in golems.list.values():
+		if g.owner != owner and g.state != Golems.State.DIE and Vector2(pt.x - g.pos.x, pt.z - g.pos.z).length() < 0.4 and pt.y > g.pos.y and pt.y < g.pos.y + 1.3:
+			return g.id
+	return 0
+
+
 func _end_proj(pr: Proj, pos: Vector3, stuck: bool) -> void:
 	projectiles.erase(pr.id)
+	if pr.kind > 1:
+		return
 	if stuck or pos.y < 0.1:   # it can be picked up again where it landed
 		_add_item(Weapons.Item.ARROWS if pr.kind == 0 else Weapons.Item.ROCKS, Vector3(pos.x, maxf(WorldLayout.ground_height(pos.x, pos.z, pos.y + 0.1), 0.0), pos.z), 1, -1)
 	proj_end.rpc(pr.id, server_tick, pos, stuck)
@@ -686,6 +766,8 @@ func _pick_up(p: ServerPlayer, reach: float, weapons: bool) -> bool:
 		var is_weapon: bool = Weapons.ITEM_WEAPON[it.kind] >= 0
 		if is_weapon != weapons:
 			continue
+		if it.kind == Weapons.Item.WAND and vault_open_until == 0:   # behind the vault's door
+			continue
 		var d := Vector2(it.pos.x - p.state.pos.x, it.pos.z - p.state.pos.z).length()
 		if d <= best_d and absf(it.pos.y - p.state.pos.y) < 1.6:
 			best = it
@@ -720,6 +802,23 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		return
 	var killed := false
 	var pos: Vector3
+	if target <= -1000:   # a golem
+		var gid := -1000 - target
+		if not golems.list.has(gid) or golems.list[gid].owner == from:
+			return
+		killed = golems.hurt(gid, amount, from, dir)
+		pos = golems.list[gid].pos + Vector3(0, 0.9, 0)
+		hit_fx.rpc(target, amount, pos, dir, killed, from)
+		if is_host_player:
+			hit_fx(target, amount, pos, dir, killed, from)
+		return
+	if target > 0 and players.has(target) and players[target].state.shield > 0:   # the bubble takes it
+		var c: Vector3 = players[target].state.pos + Vector3(0, 0.95, 0)
+		var back := -Vector3(dir.x, 0, dir.z)
+		if back.length() < 1e-4:
+			back = Vector3(0, 1, 0)
+		_fx("shield_hit", [target, c + back.normalized() * Weapons.SHIELD_RADIUS])
+		return
 	if target < 0:
 		pos = WorldLayout.DUMMIES[-target - 1] + Vector3(0, 1.3, 0)
 	else:
@@ -772,7 +871,10 @@ func _client_tick() -> void:
 	var pitch: float = round(float(b_y[2]) * 10000.0) / 10000.0   # the precision the packet carries, so the server agrees
 	var aim_yaw: float = PackedFloat32Array([float(b_y[4]) if b_y.size() > 4 else float(b_y[1])])[0]
 	var face_yaw: float = PackedFloat32Array([float(b_y[5]) if b_y.size() > 5 else float(b_y[1])])[0]
-	var inp := Sim.PlayerInput.new(next_seq, int(b_y[0]), float(b_y[1]), pitch, int(b_y[3]), int(render_tick), aim_yaw, face_yaw)
+	var spell: int = int(b_y[6]) if b_y.size() > 6 else 0
+	var ap: Vector3 = b_y[7] if b_y.size() > 7 else Vector3.ZERO
+	ap = Vector3(PackedFloat32Array([ap.x])[0], PackedFloat32Array([ap.y])[0], PackedFloat32Array([ap.z])[0])   # as sent
+	var inp := Sim.PlayerInput.new(next_seq, int(b_y[0]), float(b_y[1]), pitch, int(b_y[3]), int(render_tick), aim_yaw, face_yaw, spell, ap)
 	next_seq += 1
 	# predict at once
 	prev_pos = cur_pos
@@ -898,3 +1000,221 @@ func ping_ms() -> int:
 		return 0
 	var p := peer.get_peer(1)
 	return int(p.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)) if p else 0
+
+
+# ================================================================ magic (server)
+## A spell goes off (the moment in the cast the simulation reports Ev.CAST). Shield and teleport already happened in
+## the simulation; here: lightning, fireballs, golems, stuns, and the effects everyone sees.
+func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
+	var s := p.state
+	var sp := Weapons.spell(s.weapon, s.spell)
+	var hand := s.pos + Vector3(0, 1.45, 0) + Vector3(-sin(s.yaw), 0, -cos(s.yaw)) * 0.45
+	match str(sp.name):
+		"Lightning":
+			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
+			pending_spells.append([server_tick + int(sp.delay), "lightning", at, p.id])
+			_fx("lightning_warn", [at, int(sp.delay), p.id])
+		"Fireball":
+			var to := inp.aim_point - hand
+			if to.length() < 1.0:
+				to = Vector3(-sin(s.yaw), 0.05, -cos(s.yaw))
+			var pr := Proj.new()
+			pr.id = next_proj
+			next_proj += 1
+			pr.owner = p.id
+			pr.kind = 2
+			pr.tick0 = server_tick
+			pr.pos0 = hand
+			pr.vel0 = to.normalized() * float(sp.speed)
+			pr.g = float(sp.gravity)
+			pr.last = pr.pos0
+			projectiles[pr.id] = pr
+			proj_spawn.rpc(pr.id, pr.owner, pr.kind, pr.tick0, pr.pos0, pr.vel0, pr.g)
+			if is_host_player:
+				proj_spawn(pr.id, pr.owner, pr.kind, pr.tick0, pr.pos0, pr.vel0, pr.g)
+			_fx("cast", [p.id, "fire"])
+		"Shield":
+			_fx("shield_up", [p.id])
+		"Golem":
+			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
+			at.y = 0.0
+			var g := golems.spawn(p.id, at, s.yaw, server_tick)
+			_fx("golem_rise", [g.id, at])
+		"Teleport":
+			_fx("teleport", [p.id, before, s.pos])
+		"Stun":
+			var tgt := _stun_target(p, hand, inp.aim_point, float(sp.range))
+			var end: Vector3 = tgt[1]
+			if tgt[0] > 0 and players[tgt[0]].state.shield > 0:
+				_fx("shield_hit", [tgt[0], end])
+				_fx("stun_beam", [p.id, hand, end, 0])
+			elif tgt[0] > 0:
+				players[tgt[0]].state.stun = int(sp.duration)
+				players[tgt[0]].state.charge = 0
+				_fx("stun_beam", [p.id, hand, end, tgt[0]])
+			elif tgt[0] <= -1000:
+				golems.stun(-1000 - tgt[0], int(sp.duration))
+				_fx("stun_beam", [p.id, hand, end, tgt[0]])
+			else:
+				_fx("stun_beam", [p.id, hand, end, 0])
+
+
+## A point on the ground (or a pillar top) under where the crosshair is, no further than `reach` from `from`.
+func _aim_ground(from: Vector3, aim: Vector3, reach: float, yaw: float) -> Vector3:
+	var d := Vector2(aim.x - from.x, aim.z - from.z)
+	if d.length() < 0.5:
+		d = Vector2(-sin(yaw), -cos(yaw)) * minf(reach, 8.0)
+	if d.length() > reach:
+		d = d.normalized() * reach
+	var x := from.x + d.x
+	var z := from.z + d.y
+	return Vector3(x, WorldLayout.ground_height(x, z, maxf(aim.y, from.y) + 0.3), z)
+
+
+## Who the stun bolt hits: the first player (that the caster may fight) or other summoner's golem along the line from
+## the wand toward the crosshair point, within reach. -> [target id or 0, where the bolt ends].
+func _stun_target(p: ServerPlayer, from: Vector3, aim: Vector3, reach: float) -> Array:
+	var dir := aim - from
+	if dir.length() < 0.5:
+		dir = Vector3(-sin(p.state.yaw), 0, -cos(p.state.yaw))
+	dir = dir.normalized()
+	var best := 0
+	var best_t := reach
+	for q: ServerPlayer in players.values():
+		if q.id == p.id or q.state.dead > 0 or not can_hurt(p.id, q.id):
+			continue
+		var t := _ray_cyl(from, dir, q.state.pos, 0.6, 1.9)
+		if t < best_t:
+			best_t = t
+			best = q.id
+	for g: Golems.G in golems.list.values():
+		if g.owner != p.id and g.state != Golems.State.DIE:
+			var t := _ray_cyl(from, dir, g.pos, 0.45, 1.3)
+			if t < best_t:
+				best_t = t
+				best = -1000 - g.id
+	var wall := WorldLayout.ray_hit(from, dir, best_t)
+	if wall < best_t:
+		return [0, from + dir * wall]
+	return [best, from + dir * best_t]
+
+
+func _ray_cyl(o: Vector3, d: Vector3, c: Vector3, r: float, h: float) -> float:
+	var oc := Vector2(o.x - c.x, o.z - c.z)
+	var dd := Vector2(d.x, d.z)
+	var a := dd.dot(dd)
+	if a < 1e-8:
+		return INF
+	var b := 2.0 * oc.dot(dd)
+	var cc := oc.dot(oc) - r * r
+	var disc := b * b - 4.0 * a * cc
+	if disc < 0.0:
+		return INF
+	var t := (-b - sqrt(disc)) / (2.0 * a)
+	if t < 0.0:
+		t = (-b + sqrt(disc)) / (2.0 * a)
+	if t < 0.0:
+		return INF
+	var y := o.y + d.y * t
+	return t if y > c.y - 0.2 and y < c.y + h else INF
+
+
+## Area damage round a point (lightning, a fireball's blast): the closer to the centre, the harder it hits (full
+## damage at the centre down to the spell's minimum at its edge), and the further it throws. Shields soak it.
+func _blast(center: Vector3, sp: Dictionary, owner: int) -> void:
+	var r := float(sp.radius)
+	for q: ServerPlayer in players.values():
+		if q.state.dead > 0 or q.id == owner:
+			continue
+		var body := q.state.pos + Vector3(0, 0.9, 0)
+		var d := _dist_to_body(center, q.state.pos)
+		var dmg := Weapons.area_damage(sp, d)
+		if dmg > 0:
+			var dir := body - center
+			_damage(q.id, dmg, owner, Vector3(dir.x, 0, dir.z), float(sp.knock) * (1.0 - 0.5 * d / r))
+	for i in WorldLayout.DUMMIES.size():
+		var d := _dist_to_body(center, WorldLayout.DUMMIES[i])
+		var dmg := Weapons.area_damage(sp, d)
+		if dmg > 0:
+			_damage(-(i + 1), dmg, owner, WorldLayout.DUMMIES[i] - center, 0.0)
+	for g: Golems.G in golems.list.values().duplicate():
+		var d := _dist_to_body(center, g.pos)
+		var dmg := Weapons.area_damage(sp, d)
+		if dmg > 0:
+			_damage(-1000 - g.id, dmg, owner, g.pos - center, 0.0)
+	if ecology:
+		for i in WorldLayout.TREES.size():
+			var tp: Vector3 = WorldLayout.TREES[i][1]
+			if Vector2(tp.x - center.x, tp.z - center.z).length() < r + 0.4:
+				ecology.hit_tree(i, Weapons.area_damage(sp, 0.0), server_tick, tp - center)
+		ecology.blast_fruit(center, r, server_tick)
+
+
+## Distance from a point to a standing body (an upright segment from its feet to 1.8 m up).
+func _dist_to_body(c: Vector3, feet: Vector3) -> float:
+	var y := clampf(c.y, feet.y, feet.y + 1.8)
+	return c.distance_to(Vector3(feet.x, y, feet.z))
+
+
+func _server_spells() -> void:
+	for e in pending_spells.duplicate():
+		if server_tick >= e[0]:
+			pending_spells.erase(e)
+			var caster: ServerPlayer = players.get(e[3], null)
+			var sp := Weapons.spell(Weapons.STAFF, 0)
+			_fx("lightning", [e[2]])
+			_blast(e[2], sp, e[3] if caster != null else 0)
+	# golems
+	var people := []
+	for p: ServerPlayer in players.values():
+		people.append([p.id, p.state.pos, p.pvp, p.state.dead == 0])
+	for h in golems.tick(server_tick, people):
+		var g: Golems.G = h[0]
+		var tid: int = h[1]
+		if tid <= -1000:
+			_damage(tid, int(h[2]), g.owner, h[3], 0.0)
+		else:
+			_damage(tid, int(h[2]), g.owner, h[3], Golems.KNOCK)
+		_fx("golem_slam", [g.id, g.pos + Vector3(-sin(g.yaw), 0, -cos(g.yaw)) * 0.7])
+	if server_tick % 3 == 0 and (not golems.list.is_empty() or _golems_were):
+		_golems_were = not golems.list.is_empty()
+		var data := golems.pack()
+		golem_states.rpc(server_tick, data)
+		if is_host_player:
+			golem_states(server_tick, data)
+	# the vault door shuts itself after a while
+	if vault_open_until > 0 and server_tick >= vault_open_until:
+		vault_open_until = 0
+		_fx("vault_door", [false])
+
+
+var _golems_were := false
+
+
+## E at the vault's door: open it (it shuts itself after 25 s). True if this press was used on the door.
+func _vault_interact(p: ServerPlayer) -> bool:
+	var d := WorldLayout.VAULT_DOOR
+	var me := p.state.pos
+	if vault_open_until > 0 or Vector2(me.x - d.x, me.z - d.z).length() > 2.0 or me.x < d.x - 0.3 or me.y > 1.5:
+		return false
+	vault_open_until = server_tick + 25 * Config.TICK_RATE
+	_fx("vault_door", [true])
+	return true
+
+
+## A spell effect for everyone to see (reliable, in order); the host's own screen gets it too.
+func _fx(kind: String, args: Array) -> void:
+	spell_fx.rpc(kind, args)
+	if is_host_player:
+		magic_fx.emit(kind, args)
+
+
+@rpc("authority", "call_remote", "reliable", 4)
+func spell_fx(kind: String, args: Array) -> void:
+	magic_fx.emit(kind, args)
+
+
+## Golems, a few times a second: [id, owner, x, y, z, yaw, state, t, hp, stunned] each.
+@rpc("authority", "call_remote", "unreliable_ordered", 5)
+func golem_states(tick: int, data: Array) -> void:
+	golems_changed.emit(tick, data)

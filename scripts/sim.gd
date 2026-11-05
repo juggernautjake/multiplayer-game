@@ -7,7 +7,7 @@ class_name Sim
 enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64, ATTACK = 128, INTERACT = 256, FACE_CAM = 512 }
 
 ## What a step reports, for the server to act on (hit test, launch a projectile) and the client to show.
-enum Ev { NONE, MELEE_HIT, SHOT }
+enum Ev { NONE, MELEE_HIT, SHOT, CAST }
 
 const WALK_SPEED := 6.0
 const SPRINT_SPEED := 10.0
@@ -25,6 +25,7 @@ const TURN_RATE := 14.0       # rad/s: how fast you turn to face the way you wal
 const ATTACK_TURN_RATE := 12.0  # rad/s: how fast you turn toward the crosshair while holding attack (mid-swing too)
 const MAX_HP := 100
 const RESPAWN_TICKS := 180    # 3 s on the ground after dying
+const MANA_FULL := 500       # Weapons.MAX_MANA in fifths: one fifth comes back each tick (12 mana a second)
 
 
 ## One tick of player intent. yaw: the camera's heading (radians, 0 = looking down -Z): WASD move relative to it.
@@ -40,8 +41,10 @@ class PlayerInput:
 	var view_tick := 0
 	var aim_yaw := 0.0      # the shot's own direction (to the crosshair), apart from the body's facing
 	var face_yaw := 0.0     # where the body should face to attack: from the body to what the crosshair is on
+	var spell := 0          # the spell picked for a staff or wand (0-2)
+	var aim_point := Vector3.ZERO   # what the crosshair is on (spells land there; teleport goes toward it)
 
-	func _init(s := 0, b := 0, y := 0.0, p := 0.0, w := 0, v := 0, ay := 0.0, fy := INF) -> void:
+	func _init(s := 0, b := 0, y := 0.0, p := 0.0, w := 0, v := 0, ay := 0.0, fy := INF, sp := 0, ap := Vector3.ZERO) -> void:
 		seq = s
 		buttons = b
 		yaw = y
@@ -50,6 +53,8 @@ class PlayerInput:
 		view_tick = v
 		aim_yaw = ay
 		face_yaw = y if is_inf(fy) else fy
+		spell = sp
+		aim_point = ap
 
 
 class PlayerState:
@@ -72,6 +77,11 @@ class PlayerState:
 	var hp := MAX_HP
 	var dead := 0           # ticks until respawn (0 = alive)
 	var last_charge := 0    # how far the last shot was drawn (not sent: the server reads it at the shot)
+	var mana := MANA_FULL   # magic power, in fifths of a point (Weapons.MAX_MANA * 5 when full)
+	var spell := 0          # the spell picked for the staff / wand
+	var shield := 0         # ticks the shield bubble has left
+	var stun := 0           # ticks left held in place by a stun (no moving, attacking or casting)
+	var recharge := [0, 0, 0]   # the wand's spells: ticks until each can be cast again
 
 	func copy() -> PlayerState:
 		var s := PlayerState.new()
@@ -94,6 +104,11 @@ class PlayerState:
 		s.hp = hp
 		s.dead = dead
 		s.last_charge = last_charge
+		s.mana = mana
+		s.spell = spell
+		s.shield = shield
+		s.stun = stun
+		s.recharge = recharge.duplicate()
 		return s
 
 
@@ -108,7 +123,15 @@ static func spawn_state(slot: int) -> PlayerState:
 
 ## Advance a player one fixed tick with this input, in place. Returns what happened (Ev).
 static func step(s: PlayerState, inp: PlayerInput) -> int:
+	if s.shield > 0:
+		s.shield -= 1
+	if s.stun > 0:   # held in place: the input does nothing until it wears off
+		s.stun -= 1
+		inp = PlayerInput.new(inp.seq, 0, inp.yaw, inp.pitch, s.weapon, inp.view_tick, s.yaw, s.yaw, s.spell, s.pos)
+		s.charge = 0
 	var ev := _combat(s, inp)
+	if ev == Ev.CAST:
+		_cast_self(s, inp)
 	var alive := s.dead == 0
 
 	var f := 0.0
@@ -123,11 +146,11 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 	var wish := Vector2(-csy * f + ccy * r, -ccy * f - csy * r)
 	var w := Weapons.get_data(s.weapon)
 	var mv := Weapons.move(s.weapon, s.combo)
-	var busy: bool = s.charge > 0 or (s.atk > 0 and w.kind == "melee")
+	var busy: bool = s.charge > 0 or (s.atk > 0 and w.kind != "ranged")
 	var speed := SPRINT_SPEED if inp.buttons & Btn.SPRINT and not busy else WALK_SPEED
 	if busy:
 		speed *= w.slow   # drawing a bow or mid-swing: slower
-	if not alive:
+	if not alive or s.stun > 0:
 		wish = Vector2.ZERO
 	if wish.length_squared() > 0.0:
 		wish = wish.normalized() * speed
@@ -166,7 +189,7 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 			s.vel.x = -sy * float(mv.lunge)
 			s.vel.z = -cy * float(mv.lunge)
 
-	if s.grounded and inp.buttons & Btn.JUMP and alive:
+	if s.grounded and inp.buttons & Btn.JUMP and alive and s.stun == 0:
 		s.vel.y = JUMP_SPEED
 		s.grounded = false
 	if not s.grounded and s.dash_ticks == 0:
@@ -208,6 +231,11 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 		s.dead -= 1
 		s.charge = 0
 		return ev
+	if s.mana < MANA_FULL and not (s.atk > 0 and Weapons.is_magic(s.weapon)):
+		s.mana += 1
+	for i in 3:
+		if s.recharge[i] > 0:
+			s.recharge[i] -= 1
 	var want := inp.weapon
 	if want != s.weapon and want >= 0 and want < Weapons.DATA.size() and (s.owned >> want) & 1 and s.atk == 0 and s.charge == 0:
 		s.weapon = want
@@ -215,6 +243,21 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 		s.combo_t = 0
 	var w := Weapons.get_data(s.weapon)
 	var attack := inp.buttons & Btn.ATTACK != 0
+	if w.kind == "magic":
+		if s.atk == 0 and inp.spell != s.spell and inp.spell >= 0 and inp.spell < (w.spells as Array).size():
+			s.spell = inp.spell
+		var sp := Weapons.spell(s.weapon, s.spell)
+		var ready: bool = s.recharge[s.spell] == 0 if w.get("uses", "mana") == "recharge" else s.mana >= int(sp.cost) * 5
+		if attack and s.atk == 0 and s.atk_cd == 0 and ready:
+			s.mana -= int(sp.cost) * 5
+			if w.get("uses", "mana") == "recharge":
+				s.recharge[s.spell] = int(sp.recharge)
+			s.atk = int(sp.cast)
+			s.atk_cd = int(sp.cast) + int(sp.cooldown)
+			s.swing_n = (s.swing_n + 1) % 256
+		elif s.atk > 0 and s.atk == int(sp.cast) - int(sp.windup):
+			ev = Ev.CAST
+		return ev
 	if w.kind == "melee":
 		var moves: Array = w.moves
 		var cur: Dictionary = moves[s.combo]
@@ -253,6 +296,46 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 	return ev
 
 
+## The spells that change the caster (worked out here so the client predicts them exactly): the shield bubble, and
+## the teleport: straight toward what the crosshair is on, in any direction (along the ground, up onto a pillar's top,
+## or up into the air, to fall from there), as far as that point but never more than the spell's reach (five dashes);
+## a blink, so only where you arrive matters: if you wouldn't fit there, you arrive a little short of it.
+static func _cast_self(s: PlayerState, inp: PlayerInput) -> void:
+	var sp := Weapons.spell(s.weapon, s.spell)
+	if s.weapon == Weapons.STAFF and sp.name == "Shield":
+		s.shield = int(sp.duration)
+	elif s.weapon == Weapons.WAND and sp.name == "Teleport":
+		s.pos = teleport_target(s.pos, s.yaw, inp.aim_point, float(sp.range))
+		s.vel = Vector3.ZERO
+		s.grounded = false
+
+
+static func teleport_target(from: Vector3, yaw: float, aim: Vector3, reach: float) -> Vector3:
+	var to := aim - from
+	if to.length() < 0.5:   # nothing under the crosshair: straight ahead
+		to = Vector3(-sin(yaw), 0, -cos(yaw)) * reach
+	var dist := minf(to.length(), reach)
+	var dir := to.normalized()
+	var best := dist   # a blink: only where you arrive matters; step back toward you until the body fits there
+	while best > 0.0 and _body_in_box(_on_top(from + dir * best)):
+		best = maxf(best - 0.25, 0.0)
+	var e := _on_top(from + dir * best)
+	return Vector3(e.x, e.y + 0.02, e.z)
+
+
+## A point lifted onto the top under it, if it is just below a top (aimed at the top surface).
+static func _on_top(q: Vector3) -> Vector3:
+	var top := WorldLayout.ground_height(q.x, q.z, q.y + 0.6)
+	return Vector3(q.x, maxf(maxf(q.y, top), 0.0), q.z)
+
+
+static func _body_in_box(q: Vector3) -> bool:
+	for b: WorldLayout.Box in WorldLayout.boxes():
+		if absf(q.x - b.cx) < b.hx + RADIUS and absf(q.z - b.cz) < b.hz + RADIUS and q.y < b.h - 0.05 and q.y + 1.8 > 0.0:
+			return true
+	return false
+
+
 ## Which way the body faces: where the camera looks while aiming / drawing / in first person; otherwise it turns
 ## toward the way you walk. A melee swing is committed to its direction, except that pressing a direction as it starts
 ## turns you to it.
@@ -279,6 +362,10 @@ static func _face(s: PlayerState, inp: PlayerInput, wish: Vector2, w: Dictionary
 		if absf(da) > 0.035:
 			var st := rate * Config.DT
 			s.yaw = wrapf(s.yaw + clampf(da, -st, st), -PI, PI)
+		return
+	if w.kind == "magic" and s.atk > 0:   # casting: stays facing where the spell was aimed
+		return
+	if s.stun > 0:
 		return
 	if w.kind == "melee" and s.atk > 0:
 		if s.atk == int(mv.swing) and moving:

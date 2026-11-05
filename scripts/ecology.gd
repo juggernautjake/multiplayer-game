@@ -294,6 +294,20 @@ func _kicks(now: int, players: Array) -> void:
 			break
 
 
+## A blast (lightning, a fireball): loose fruit nearby is thrown away from it, harder the closer it was.
+func blast_fruit(center: Vector3, radius: float, now: int) -> void:
+	for f in fruits.values():
+		var q = _loose_pos(f, now)
+		if q == null:
+			continue
+		var d := Vector2(q.x - center.x, q.z - center.z)
+		if d.length() > radius:
+			continue
+		var dir := d.normalized() if d.length() > 1e-3 else Vector2(1, 0)
+		var k := 1.0 - d.length() / radius
+		_launch(f, now, q + Vector3(0, 0.02, 0), Vector3(dir.x * (2.0 + 5.0 * k), 2.0 + 4.0 * k, dir.y * (2.0 + 5.0 * k)))
+
+
 ## A melee swing lands: fruit on the ground within reach and in front flies off the way the blow goes.
 func hit_fruit(origin: Vector3, face: Vector2, reach: float, arc_deg: float, knock: float, now: int) -> void:
 	for f in fruits.values():
