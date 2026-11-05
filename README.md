@@ -37,6 +37,8 @@ legs, keyframed attacks, live bow string and slingshot bands; `tools/figure_pose
 
 ## Download and play (Windows)
 
+Step-by-step for hosts and guests, with Tailscale and port forwarding: [docs/how-to-host-and-join.pdf](docs/how-to-host-and-join.pdf).
+
 1. Go to <https://github.com/juggernautjake/multiplayer-game/releases/latest> and download
    `MultiplayerGame-windows.zip`.
 2. Unzip it and run `MultiplayerGame.exe`. Windows SmartScreen may warn about an unknown app: click **More info →
