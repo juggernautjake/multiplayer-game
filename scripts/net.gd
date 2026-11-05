@@ -187,7 +187,7 @@ func _on_server_disconnected() -> void:
 
 func _on_connected() -> void:
 	my_id = multiplayer.get_unique_id()
-	hello.rpc_id(1, str(get_meta("join_name", "Player")), str(get_meta("character", "pip")))
+	hello.rpc_id(1, str(get_meta("join_name", "Player")), str(get_meta("character", "pip")), Updater.running_version())
 	status.emit("Connected.")
 
 
@@ -204,10 +204,18 @@ func _on_peer_disconnected(id: int) -> void:
 
 # ================================================================ RPCs
 @rpc("any_peer", "call_remote", "reliable")
-func hello(player_name: String, character := "pip") -> void:
+func hello(player_name: String, character := "pip", version := "") -> void:
 	if not multiplayer.is_server():
 		return
 	var id := multiplayer.get_remote_sender_id()
+	var mine := Updater.running_version()
+	if version != mine:   # host and guest must run the same version (the same rules and the same packets)
+		turned_away.rpc_id(id, mine, version)
+		print("- turned away a guest on v%s (host is v%s)" % [version, mine])
+		get_tree().create_timer(1.0).timeout.connect(func():
+			if multiplayer.multiplayer_peer:
+				multiplayer.multiplayer_peer.disconnect_peer(id))
+		return
 	if players.has(id) or players.size() >= Config.MAX_PLAYERS:
 		return
 	_server_add_player(id, player_name, character)
@@ -221,6 +229,14 @@ func hello(player_name: String, character := "pip") -> void:
 		list.append([it.id, it.kind, it.pos, it.count])
 	items_full.rpc_id(id, list)
 	print("+ %s joined (%d online)" % [players[id].name, players.size()])
+
+
+@rpc("authority", "call_remote", "reliable")
+func turned_away(host_version: String, my_version: String) -> void:
+	var older := Updater.newer(host_version, my_version)
+	status.emit(("The host is on v%s and you're on v%s. " % [host_version, my_version]) +
+		("Restart the game to update, then join again." if older else "Ask the host to restart their game to update."))
+	_reset()
 
 
 @rpc("authority", "call_remote", "reliable")

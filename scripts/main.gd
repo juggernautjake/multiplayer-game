@@ -84,7 +84,7 @@ func _ready() -> void:
 		var port := int(args.get("port", Config.DEFAULT_PORT))
 		var err := net.host(port, "", false)
 		net.style = "figure" if str(args.get("style", "pip")) == "figure" else "pip"
-		print("Dedicated server on UDP port %d: %s (look: %s)" % [port, "ok" if err == OK else error_string(err), net.style])
+		print("Dedicated server v%s on UDP port %d: %s (look: %s)" % [Updater.running_version(), port, "ok" if err == OK else error_string(err), net.style])
 		_print_addresses(port)
 		return
 
@@ -115,6 +115,12 @@ func _ready() -> void:
 
 
 func _on_status(text: String) -> void:
+	if text.begins_with("The host is on v"):   # turned away for a different version: stop waiting, show why
+		joining_until = 0
+		if menu:
+			menu.visible = true
+		if updater:
+			updater.check()
 	if status_label:
 		status_label.text = text
 	if menu and net.my_id == 0:  # the connection failed or dropped: back to the menu
@@ -741,6 +747,39 @@ func _build_ui() -> void:
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	status_label.text = "Play / Host starts a game (alone, or friends join you). To join a friend's game, paste their invite code (or address) and click Join a friend."
 	box.add_child(status_label)
+	# updates: the version, what the update check found, and a restart / download button when there is one
+	var urow := HBoxContainer.new()
+	box.add_child(urow)
+	update_label = Label.new()
+	update_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	update_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	update_label.add_theme_font_size_override("font_size", 13)
+	update_label.text = "v" + Updater.running_version()
+	urow.add_child(update_label)
+	update_btn = Button.new()
+	update_btn.visible = false
+	urow.add_child(update_btn)
+	update_btn.pressed.connect(func():
+		if update_page != "":
+			OS.shell_open(update_page)
+		else:
+			Updater.restart())
+	if not bot:
+		updater = Updater.new()
+		updater.changed.connect(_on_update)
+		add_child(updater)
+
+
+var updater: Updater
+var update_label: Label
+var update_btn: Button
+var update_page := ""
+
+func _on_update(text: String, can_restart: bool, page_url: String) -> void:
+	update_label.text = text
+	update_page = page_url
+	update_btn.visible = can_restart or page_url != ""
+	update_btn.text = "Restart now" if can_restart else "Download page"
 
 
 func _field(box: VBoxContainer, label: String, value: String) -> LineEdit:
