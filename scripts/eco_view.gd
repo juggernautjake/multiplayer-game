@@ -175,18 +175,15 @@ func _draw_fruit(f: Dictionary, t: float) -> void:
 		var g: float = f.grow
 		n.scale = Vector3.ONE * (0.5 + 0.5 * g)
 		return
-	# falling / on the ground: the server's parabola segments
-	var segs: Array = f.segs
-	var cur: Array = segs[0]
-	for s in segs:
-		if s[0] <= t:
-			cur = s
-	var dt := maxf(t - float(cur[0]), 0.0) * Config.DT
-	var p0: Vector3 = cur[1]
-	var v0: Vector3 = cur[2]
-	var p := p0 + v0 * dt - Vector3(0, Ecology.GRAVITY * dt * dt / 2.0, 0)
-	if p.y < 0.09:
-		p.y = 0.09
+	# falling, rolling or resting: the server's path segments; the fruit turns over as it rolls (distance / radius)
+	var p := Ecology.path_pos(f.segs, t)
+	var last: Vector3 = f.get("last", p)
+	var d := p - last
+	var flat := Vector2(d.x, d.z).length()
+	if flat > 1e-5 and flat < 1.0:
+		var axis := Vector3(d.z, 0.0, -d.x).normalized()
+		n.rotate(axis, flat / Ecology.FRUIT_R * (1.0 if p.y < Ecology.FRUIT_R + 0.02 else 0.35))
+	f.last = p
 	n.global_position = p
 	n.scale = Vector3.ONE
 

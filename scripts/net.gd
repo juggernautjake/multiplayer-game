@@ -394,7 +394,7 @@ func _server_tick() -> void:
 		var people := []
 		for p: ServerPlayer in players.values():
 			if p.state.dead == 0:
-				people.append([p.id, p.state.pos, Vector2(p.state.vel.x, p.state.vel.z).length()])
+				people.append([p.id, p.state.pos, Vector2(p.state.vel.x, p.state.vel.z).length(), Vector2(p.state.vel.x, p.state.vel.z)])
 		ecology.tick(server_tick, people)
 	if server_tick % Config.SNAPSHOT_EVERY == 0:
 		var ents := []
@@ -497,6 +497,7 @@ func _melee(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
 			var td := Vector2(tp.x - me.x, tp.z - me.z)
 			if td.length() <= float(w.range) + 0.5 and (td.length() < 0.6 or absf(face.angle_to(td)) <= deg_to_rad(float(w.arc) / 2.0)):
 				ecology.hit_tree(i, int(w.damage), server_tick, Vector3(td.x, 0, td.y))
+		ecology.hit_fruit(me, face, float(w.range), float(w.arc), float(w.knock), server_tick)
 	for t in targets:
 		var d: Vector3 = t[1] - me
 		var flat := Vector2(d.x, d.z)

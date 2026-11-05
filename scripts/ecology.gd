@@ -16,6 +16,10 @@ const DROP_CHANCE := 0.25
 const MAX_FRUIT := 4
 const MAX_GROUND := 4
 const GRAVITY := 420.0 * PX           # 16.8 m/s^2
+const FRUIT_R := 0.09                 # a fruit's radius: it rests and rolls with its centre this high
+const ROLL_DECEL := 2.4               # m/s^2: grass slows a rolling fruit (a 3 m/s kick rolls about 1.9 m)
+const ROLL_BOUNCE := 0.45             # share of its speed a rolling fruit keeps off a wall, trunk or dummy
+const KICK_COOLDOWN := 12             # ticks before the same fruit can be kicked again
 const SLOTS := [Vector2(-0.55, 0.35), Vector2(0.5, 0.42), Vector2(-0.15, 0.62), Vector2(0.25, 0.2)]
 const GREETINGS := ["Hello world!", "Hi there!", "Mmm, apple!", "Oh, hello!", "Nice day!"]
 const QUIRKS := ["look", "yawn", "munch", "wave", "stretch", "burp"]
@@ -74,7 +78,7 @@ func _current(steps: Array, now: int) -> Array:
 
 
 # ================================================================ the tick
-## players: Array of [id, position, speed (m/s)].
+## players: Array of [id, position, speed (m/s), horizontal velocity (Vector2)].
 func tick(now: int, players: Array) -> void:
 	# fruit grows and drops on its own
 	if now >= next_grow:
@@ -101,6 +105,7 @@ func tick(now: int, players: Array) -> void:
 			f.state = "ground"
 			f.pos = f.end
 			f.ground_since = now
+	_kicks(now, players)
 	_worms_tick(now, players)
 	_birds_tick(now, players)
 
@@ -123,7 +128,7 @@ func _ground_count(tree_i: int) -> int:
 
 func _new_fruit(tr: Dictionary, slot: int, grow: float, _now: int) -> void:
 	var f := { "id": next_id, "tree": tr.i, "slot": slot, "state": "hang", "grow": grow, "pos": Vector3.ZERO,
-		"land": 0, "ground_since": 0, "worm": 0, "fall": [], "end": Vector3.ZERO }
+		"land": 0, "ground_since": 0, "worm": 0, "fall": [], "end": Vector3.ZERO, "kicked": -999 }
 	next_id += 1
 	fruits[f.id] = f
 	event.emit("fruit_hang", [f.id, tr.i, slot, grow])
@@ -135,32 +140,173 @@ static func slot_pos(tree_pos: Vector3, slot: int) -> Vector3:
 	return tree_pos + Vector3(s.x * 24.0 * PX * 2.2, 48.0 * PX + s.y * 40.0 * PX + 0.6, 0.35 + s.y * 0.3)
 
 
-## Knock a fruit loose: it falls, maybe bounces once, and lies on the ground. The path is worked out here and sent as
-## parabola segments [tick, start, velocity], so every client draws the same fall.
+## Knock a fruit loose: it falls from its branch, maybe bounces once, rolls and comes to rest.
 func _drop(f: Dictionary, now: int, kick := 1.0) -> void:
 	var tr: Dictionary = trees[f.tree]
 	var p := slot_pos(tr.pos, f.slot)
 	var v := Vector3(rng.randf_range(-14, 14) * PX * kick, rng.randf_range(0, 20) * PX * kick, rng.randf_range(4, 14) * PX * kick)
+	_launch(f, now, p, v)
+	event.emit("sound", ["fruitDrop", f.end])
+
+
+## Send a fruit on its way from p at velocity v: the whole path is worked out here and sent as segments, so every
+## client draws the same flight and roll. Flight: parabola segments [tick, start, velocity] (one bounce if it lands
+## hard). Then rolling: [tick, start, velocity, decel] segments, slowing on the grass, glancing off walls, trunks and
+## dummies; the last one has zero velocity (at rest).
+func _launch(f: Dictionary, now: int, p: Vector3, v: Vector3) -> void:
 	var segs := []
 	var t := now
-	for bounce in 2:
-		segs.append([t, p, v])
-		# time to reach the ground: p.y + v.y t - g t^2 / 2 = 0
-		var tt := (v.y + sqrt(v.y * v.y + 2.0 * GRAVITY * maxf(p.y, 0.0))) / GRAVITY
-		var land := p + Vector3(v.x * tt, -p.y, v.z * tt)
-		var vy := v.y - GRAVITY * tt
-		t += int(tt * Config.TICK_RATE)
-		p = Vector3(land.x, 0.0, land.z)
-		if vy < -40.0 * PX and bounce == 0:
-			v = Vector3(v.x * 0.6, -vy * 0.35, v.z * 0.6)   # one bounce, as in the village
-		else:
-			break
+	if p.y > FRUIT_R + 0.01 or v.y > 0.0:
+		for bounce in 2:
+			segs.append([t, p, v])
+			# time to reach the ground: p.y + v.y t - g t^2 / 2 = 0
+			var tt := (v.y + sqrt(v.y * v.y + 2.0 * GRAVITY * maxf(p.y, 0.0))) / GRAVITY
+			var land := p + Vector3(v.x * tt, -p.y, v.z * tt)
+			var vy := v.y - GRAVITY * tt
+			t += int(tt * Config.TICK_RATE)
+			p = Vector3(land.x, 0.0, land.z)
+			if vy < -40.0 * PX and bounce == 0:
+				v = Vector3(v.x * 0.6, -vy * 0.35, v.z * 0.6)   # one bounce, as in the village
+			else:
+				v = Vector3(v.x * 0.55, 0.0, v.z * 0.55)         # lands and rolls on
+				break
+	var res := _roll(segs, t, Vector3(p.x, FRUIT_R, p.z), Vector3(v.x, 0.0, v.z))
 	f.state = "fall"
 	f.fall = segs
-	f.land = t
-	f.end = p + Vector3(0, 0.07, 0)
+	f.land = res[0]
+	f.end = Vector3(res[1].x, 0.07, res[1].z)
+	f.kicked = now
 	event.emit("fruit_fall", [f.id, f.tree, segs])
-	event.emit("sound", ["fruitDrop", f.end])
+
+
+## Roll along the ground from p at horizontal velocity v until the grass stops it, bouncing off what it meets.
+## Appends the segments; returns [tick it stops, where].
+func _roll(segs: Array, t: int, p: Vector3, v: Vector3) -> Array:
+	for bounce in 6:
+		var sp := v.length()
+		if sp < 0.05:
+			break
+		segs.append([t, p, v, ROLL_DECEL])
+		var dir := v / sp
+		var tstop := sp / ROLL_DECEL
+		var steps := int(ceil(tstop * Config.TICK_RATE))
+		var hit := 0
+		var n := Vector2.ZERO
+		for k in range(1, steps + 1):
+			var tt := minf(k * Config.DT, tstop)
+			var q := p + dir * (sp * tt - 0.5 * ROLL_DECEL * tt * tt)
+			n = _wall_normal(q)
+			if n != Vector2.ZERO:
+				hit = k
+				break
+		if hit == 0:
+			p = p + dir * (sp * tstop * 0.5)
+			t += steps
+			v = Vector3.ZERO
+			break
+		var th := (hit - 1) * Config.DT
+		p = p + dir * (sp * th - 0.5 * ROLL_DECEL * th * th)
+		var vn := dir * (sp - ROLL_DECEL * th)
+		var vv := Vector2(vn.x, vn.z)
+		vv = (vv - 2.0 * vv.dot(n) * n) * ROLL_BOUNCE
+		v = Vector3(vv.x, 0.0, vv.y)
+		t += hit - 1
+	segs.append([t, p, Vector3.ZERO, ROLL_DECEL])   # at rest
+	return [t, p]
+
+
+## The outward normal of whatever a fruit at q is touching (a pillar, a trunk, a dummy, the world's edge), or zero.
+func _wall_normal(q: Vector3) -> Vector2:
+	for b: WorldLayout.Box in WorldLayout.boxes():
+		var nx := clampf(q.x, b.cx - b.hx, b.cx + b.hx)
+		var nz := clampf(q.z, b.cz - b.hz, b.cz + b.hz)
+		var d := Vector2(q.x - nx, q.z - nz)
+		if d.length() < FRUIT_R:
+			if d.length() > 1e-5:
+				return d.normalized()
+			var ox := q.x - b.cx
+			var oz := q.z - b.cz
+			return Vector2(signf(ox), 0.0) if absf(ox) / b.hx > absf(oz) / b.hz else Vector2(0.0, signf(oz))
+	for dp: Vector3 in WorldLayout.DUMMIES:
+		var d := Vector2(q.x - dp.x, q.z - dp.z)
+		if d.length() < Sim.DUMMY_RADIUS + FRUIT_R:
+			return d.normalized() if d.length() > 1e-5 else Vector2(0, 1)
+	var lim := Config.WORLD_HALF
+	if absf(q.x) > lim:
+		return Vector2(-signf(q.x), 0)
+	if absf(q.z) > lim:
+		return Vector2(0, -signf(q.z))
+	return Vector2.ZERO
+
+
+## Where a fruit on its way is at tick t (the same maths the clients draw with).
+static func path_pos(segs: Array, t: float) -> Vector3:
+	var cur: Array = segs[0]
+	for sg in segs:
+		if sg[0] <= t:
+			cur = sg
+	var dt := maxf(t - float(cur[0]), 0.0) * Config.DT
+	var p0: Vector3 = cur[1]
+	var v0: Vector3 = cur[2]
+	if cur.size() > 3:   # rolling: slowing at decel until it stops
+		var sp := v0.length()
+		if sp < 1e-4:
+			return Vector3(p0.x, FRUIT_R, p0.z)
+		var dec: float = cur[3]
+		var tt := minf(dt, sp / dec)
+		var r := p0 + v0 / sp * (sp * tt - 0.5 * dec * tt * tt)
+		return Vector3(r.x, FRUIT_R, r.z)
+	var p := p0 + v0 * dt - Vector3(0, GRAVITY * dt * dt / 2.0, 0)
+	p.y = maxf(p.y, FRUIT_R)
+	return p
+
+
+## Fruit on the ground (resting or rolling, no worm inside): where it is now, or null if it can't be pushed.
+func _loose_pos(f: Dictionary, now: int):
+	if f.state == "hang" or f.worm != 0:
+		return null
+	if f.state == "ground":
+		return Vector3(f.pos.x, FRUIT_R, f.pos.z)
+	var q := path_pos(f.fall, now)
+	return q if q.y < FRUIT_R + 0.05 else null
+
+
+## People walking into fruit on the ground kick it along (the faster you go, the further it rolls); standing on one
+## nudges it out from under you.
+func _kicks(now: int, players: Array) -> void:
+	for f in fruits.values():
+		if now - int(f.get("kicked", -999)) < KICK_COOLDOWN:
+			continue
+		var q = _loose_pos(f, now)
+		if q == null:
+			continue
+		for pl in players:
+			var pp: Vector3 = pl[1]
+			var d := Vector2(q.x - pp.x, q.z - pp.z)
+			if d.length() > Sim.RADIUS + FRUIT_R or pp.y > 0.5:
+				continue
+			var pv: Vector2 = pl[3] if pl.size() > 3 else Vector2.ZERO
+			var away := d.normalized() if d.length() > 1e-4 else Vector2(1, 0)
+			var push := maxf(pv.dot(away), 0.0)
+			var dir := (away + (pv.normalized() if pv.length() > 0.1 else Vector2.ZERO) * 0.6).normalized()
+			var speed := maxf(0.8, push * 1.4 + 0.3)
+			_launch(f, now, q, Vector3(dir.x * speed, speed * 0.12, dir.y * speed))
+			break
+
+
+## A melee swing lands: fruit on the ground within reach and in front flies off the way the blow goes.
+func hit_fruit(origin: Vector3, face: Vector2, reach: float, arc_deg: float, knock: float, now: int) -> void:
+	for f in fruits.values():
+		var q = _loose_pos(f, now)
+		if q == null:
+			continue
+		var d := Vector2(q.x - origin.x, q.z - origin.z)
+		if d.length() > reach + 0.4 or (d.length() > 0.5 and absf(face.angle_to(d)) > deg_to_rad(arc_deg / 2.0)):
+			continue
+		var dir := (face * 0.65 + d.normalized() * 0.35).normalized()
+		var speed := 3.0 + knock * 0.6
+		_launch(f, now, q + Vector3(0, 0.02, 0), Vector3(dir.x * speed, 1.6 + knock * 0.15, dir.y * speed))
+		event.emit("sound", ["fruitDrop", q])
 
 
 ## A tree is hit (melee or arrow) with this much damage: it shakes and drops leaves; from the 3rd hit, ripe fruit falls.
