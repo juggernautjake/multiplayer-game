@@ -129,7 +129,7 @@ func _init() -> void:
 	for i in 1000:
 		if Sim.step(w3, Sim.PlayerInput.new(i, Sim.Btn.ATTACK, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 2, Vector3(0, 0, -10))) == Sim.Ev.CAST:
 			st.append(i)
-	check(st.size() >= 2 and st[1] - st[0] == 480, "stun every 8 s (%s)" % str(st))
+	check(st.size() >= 2 and st[1] - st[0] == 300, "stun every 5 s (%s)" % str(st))
 
 	# 4) stunned: can't move for 3 s; shield lasts 5 s
 	var v := Sim.PlayerState.new()

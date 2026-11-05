@@ -84,5 +84,26 @@ func _initialize() -> void:
 	b.state.pos = Vector3(60, 0, 40)
 	net._cast(a, Sim.PlayerInput.new(2, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 2, Vector3(64, 0, 47.5)), a.state.pos)
 	check(b.state.stun == 0, "8 m away they're not caught")
+	# your own blasts never hurt you
+	a.state.hp = Sim.MAX_HP
+	a.state.dead = 0
+	a.state.shield = 0
+	net._blast(a.state.pos + Vector3(0, 0.5, 0), Weapons.spell(Weapons.STAFF, 1), 1, Weapons.STAFF)
+	net._damage(1, 20, 1, Vector3(1, 0, 0), 2.0)
+	check(a.state.hp == Sim.MAX_HP, "a fireball at your own feet, and any damage you'd deal yourself: nothing")
+	# the staff is one of a kind: taken, no new one appears; its holder leaves, it's back on the tower
+	for i in WorldLayout.ITEM_SPAWNS.size():
+		net._spawn_item_at(i)
+	var staff_item: Net.Item = null
+	for it: Net.Item in net.items.values():
+		if it.kind == Weapons.Item.STAFF:
+			staff_item = it
+	a.state.owned |= 1 << Weapons.STAFF
+	net._remove_item(staff_item, 1)
+	var queued := net.respawns.filter(func(r): return int(WorldLayout.ITEM_SPAWNS[r[1]][0]) == Weapons.Item.STAFF)
+	check(queued.is_empty(), "taking the staff: no second staff will appear")
+	net._return_unique(a)
+	var back := net.items.values().filter(func(it): return it.kind == Weapons.Item.STAFF)
+	check(back.size() == 1 and absf(back[0].pos.y - WorldLayout.TOWER_TOP) < 0.01, "its holder leaves: it's back on top of the tower")
 	print("%d failed" % bad)
 	quit(bad)

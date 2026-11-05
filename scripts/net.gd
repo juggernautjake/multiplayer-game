@@ -211,9 +211,18 @@ func _on_peer_connected(_id: int) -> void:
 	pass  # a player only counts once it says hello
 
 
+## One of a kind (Jacob 2026-11-04): only one player at a time can have the staff, and one the wand.
+const UNIQUE := [Weapons.Item.STAFF, Weapons.Item.WAND]
+
+
 func _on_peer_disconnected(id: int) -> void:
 	if multiplayer.is_server() and players.has(id):
 		print("- %s left" % players[id].name)
+		_return_unique(players[id])
+		for g: Golems.G in golems.list.values():   # their golems crumble
+			if g.owner == id:
+				g.hp = 0
+				golems._to_state(g, Golems.State.DIE)
 		players.erase(id)
 		_server_send_roster()
 
@@ -746,7 +755,9 @@ func _add_item(kind: int, pos: Vector3, count: int, spawn: int) -> void:
 
 func _remove_item(it: Item, taker: int) -> void:
 	items.erase(it.id)
-	if it.spawn >= 0:
+	if it.spawn >= 0 and taker > 0 and it.kind in UNIQUE:
+		pass   # the staff and the wand are one of a kind: no new one while someone has it (back when they leave)
+	elif it.spawn >= 0:
 		respawns.append([server_tick + 20 * Config.TICK_RATE, it.spawn])
 	item_remove.rpc(it.id, taker)
 	if is_host_player:
@@ -806,6 +817,8 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		var ps: Sim.PlayerState = players[from].state
 		var mv := Weapons.move(ps.weapon, ps.combo)
 		print("hit %d for %d with %s %s" % [target, amount, Weapons.NAMES[ps.weapon], mv.get("name", "shot")])
+	if from > 0 and from == target:   # nobody hurts themselves (their own blasts, spikes, golems)
+		return
 	if not can_hurt(from, target):
 		return
 	var killed := false
@@ -1308,3 +1321,12 @@ func _shield_soak(q: ServerPlayer, cost: int, at: Vector3) -> int:
 	_fx("shield_shatter", [q.id, s.pos + Vector3(0, 0.95, 0), at])
 	return left
 
+
+## A player who had the staff or the wand leaves: it goes back where it came from (the tower's top, the vault).
+func _return_unique(p: ServerPlayer) -> void:
+	for kind in UNIQUE:
+		var w: int = Weapons.ITEM_WEAPON[kind]
+		if (p.state.owned >> w) & 1:
+			for i in WorldLayout.ITEM_SPAWNS.size():
+				if int(WorldLayout.ITEM_SPAWNS[i][0]) == kind:
+					_spawn_item_at(i)

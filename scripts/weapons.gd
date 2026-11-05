@@ -57,7 +57,7 @@ const DATA := [
 		{ "name": "Teleport", "cost": 0, "windup": 8, "cast": 16, "cooldown": 6, "recharge": 240, "range": 18.0 },
 		# the stun bolt bursts where it lands (the first person or golem in its way, a wall, or the crosshair point):
 		# every enemy within `radius` of the burst is held for `duration` (Jacob 2026-11-04: an area, to catch them)
-		{ "name": "Stun", "cost": 0, "windup": 10, "cast": 26, "cooldown": 10, "recharge": 480, "range": 24.0, "duration": 180, "radius": 2.5 },
+		{ "name": "Stun", "cost": 0, "windup": 10, "cast": 26, "cooldown": 10, "recharge": 300, "range": 24.0, "duration": 180, "radius": 2.5 },
 		# level 2 (3 kills with the wand): stone spikes burst up one after another in a line toward the crosshair
 		{ "name": "Earth Spikes", "level": 2, "cost": 0, "windup": 12, "cast": 30, "cooldown": 10, "recharge": 360,
 		  "range": 16.0, "spikes": 9, "spacing": 1.7, "radius": 1.5, "max_damage": 16, "min_damage": 8, "knock": 7.0 },
