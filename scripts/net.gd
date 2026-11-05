@@ -92,6 +92,7 @@ var ecology: Ecology   # server only
 var golems := Golems.new()   # server only: the wand's stone golems
 var pending_spells: Array = []   # [tick, kind, where, caster]: lightning that strikes after its warning
 var vault_open_until := 0        # tick the vault's door shuts again (0 = shut)
+var wells: Array = []             # gravity wells: [tick it bursts, centre, caster]
 var projectiles := {}  # id -> Proj (server)
 var LOG := OS.get_cmdline_user_args().has("--log")   # print hits and pick-ups (testing)
 var next_proj := 1
@@ -1070,6 +1071,14 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 			_fx("golem_rise", [g.id, at])
 		"Teleport":
 			_fx("teleport", [p.id, before, s.pos])
+		"Meteor":
+			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
+			pending_spells.append([server_tick + int(sp.delay), "meteor", at, p.id])
+			_fx("meteor_warn", [at, int(sp.delay), float(sp.radius)])
+		"Gravity Well":
+			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
+			wells.append([server_tick + int(sp.duration), at + Vector3(0, 1.0, 0), p.id])
+			_fx("well", [at + Vector3(0, 1.0, 0), int(sp.duration), float(sp.pull_radius)])
 		"Frost Nova":
 			_fx("frost_nova", [p.id, s.pos, float(sp.radius)])
 			_blast(s.pos + Vector3(0, 0.5, 0), sp, p.id, Weapons.STAFF)
@@ -1223,6 +1232,17 @@ func _server_spells() -> void:
 				"spike":
 					_fx("spike", [e[2]])
 					_blast(e[2], Weapons.spell(Weapons.WAND, 3), owner, Weapons.WAND)
+				"meteor":
+					var sp := Weapons.spell(Weapons.STAFF, 4)
+					_fx("meteor", [e[2], float(sp.radius), int(sp.burn_ticks), float(sp.burn_radius)])
+					_blast(e[2], sp, owner, Weapons.STAFF)
+					for k in int(sp.burn_ticks) / int(sp.burn_every):
+						pending_spells.append([server_tick + int(sp.burn_every) * (k + 1), "burn", e[2], e[3]])
+				"burn":
+					var sp := Weapons.spell(Weapons.STAFF, 4)
+					var burn := { "radius": sp.burn_radius, "max_damage": sp.burn_damage, "min_damage": sp.burn_damage, "knock": 0.0 }
+					_blast(e[2], burn, owner, Weapons.STAFF)
+	_server_wells()
 	# golems
 	var people := []
 	for p: ServerPlayer in players.values():
@@ -1330,3 +1350,46 @@ func _return_unique(p: ServerPlayer) -> void:
 			for i in WorldLayout.ITEM_SPAWNS.size():
 				if int(WorldLayout.ITEM_SPAWNS[i][0]) == kind:
 					_spawn_item_at(i)
+
+
+## Gravity wells: each tick, enemies within reach are dragged toward the centre (harder the closer they are, like real
+## gravity, up to a cap) and the caster's enemies' golems slide in too; every half second those near its heart take a
+## nibble; at the end it bursts outward.
+func _server_wells() -> void:
+	var sp := Weapons.spell(Weapons.WAND, 4)
+	for e in wells.duplicate():
+		var c: Vector3 = e[1]
+		var owner: int = e[2]
+		if server_tick >= e[0]:
+			wells.erase(e)
+			_fx("well_burst", [c, float(sp.radius)])
+			_blast(c, sp, owner if players.has(owner) else 0, Weapons.WAND)
+			continue
+		for q: ServerPlayer in players.values():
+			if q.id == owner or q.state.dead > 0 or not can_hurt(owner, q.id):
+				continue
+			var d := Vector2(c.x - q.state.pos.x, c.z - q.state.pos.z)
+			if d.length() > float(sp.pull_radius) or d.length() < 0.3:
+				continue
+			# stronger the closer you are; on top of cancelling the ground's grip, so standing still you drift in and
+			# running away you lose ground
+			var k := clampf(1.2 - d.length() / float(sp.pull_radius), 0.35, 1.0)
+			var pull := d.normalized() * (float(sp.pull) * k + Sim.GROUND_ACCEL) * Config.DT
+			q.state.vel.x += pull.x
+			q.state.vel.z += pull.y
+			var hv := Vector2(q.state.vel.x, q.state.vel.z)
+			if hv.length() > 8.0:
+				hv = hv.normalized() * 8.0
+				q.state.vel.x = hv.x
+				q.state.vel.z = hv.y
+			Sim.quantize(q.state)
+			if server_tick % 30 == 0 and d.length() <= float(sp.nibble_radius):
+				dmg_src = Weapons.WAND
+				_damage(q.id, int(sp.nibble), owner, Vector3(-d.x, 0, -d.y), 0.0)
+				dmg_src = -1
+		for g: Golems.G in golems.list.values():
+			if g.owner != owner and g.state != Golems.State.DIE:
+				var d := Vector2(c.x - g.pos.x, c.z - g.pos.z)
+				if d.length() < float(sp.pull_radius) and d.length() > 0.3:
+					golems._move(g, d.normalized() * 3.0 * Config.DT)
+

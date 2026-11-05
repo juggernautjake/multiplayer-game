@@ -50,6 +50,11 @@ const DATA := [
 		# level 2 (3 kills with the staff): a ring of ice bursts out from you: damage, a shove, and a 2 s slow
 		{ "name": "Frost Nova", "level": 2, "cost": 30, "windup": 14, "cast": 30, "cooldown": 30, "radius": 6.0,
 		  "max_damage": 18, "min_damage": 6, "knock": 3.5, "slow": 120 },
+		# level 3 (8 kills): a flaming rock falls where you aim after `delay` ticks, a big blast (strongest at the
+		# centre), then the ground burns for burn_ticks: burn_damage every burn_every ticks within burn_radius
+		{ "name": "Meteor", "level": 3, "cost": 45, "windup": 22, "cast": 40, "cooldown": 60, "range": 35.0, "delay": 60,
+		  "radius": 5.0, "max_damage": 40, "min_damage": 10, "knock": 9.0,
+		  "burn_radius": 3.0, "burn_ticks": 180, "burn_every": 30, "burn_damage": 4 },
 	] },
 	# the wand from the hidden vault: no mana; each spell has its own recharge (ticks) instead (Jacob 2026-11-04)
 	{ "kind": "magic", "slow": 0.6, "uses": "recharge", "spells": [
@@ -61,6 +66,11 @@ const DATA := [
 		# level 2 (3 kills with the wand): stone spikes burst up one after another in a line toward the crosshair
 		{ "name": "Earth Spikes", "level": 2, "cost": 0, "windup": 12, "cast": 30, "cooldown": 10, "recharge": 360,
 		  "range": 16.0, "spikes": 9, "spacing": 1.7, "radius": 1.5, "max_damage": 16, "min_damage": 8, "knock": 7.0 },
+		# level 3 (8 kills): a vortex where you aim, dragging enemies within `pull_radius` toward it for `duration`
+		# ticks (nibbling at those near its heart), then bursting outward
+		{ "name": "Gravity Well", "level": 3, "cost": 0, "windup": 14, "cast": 30, "cooldown": 10, "recharge": 900,
+		  "range": 25.0, "duration": 180, "pull_radius": 7.0, "pull": 14.0, "nibble": 3, "nibble_radius": 2.0,
+		  "radius": 3.5, "max_damage": 18, "min_damage": 8, "knock": 9.0 },
 	] },
 ]
 

@@ -105,5 +105,42 @@ func _initialize() -> void:
 	net._return_unique(a)
 	var back := net.items.values().filter(func(it): return it.kind == Weapons.Item.STAFF)
 	check(back.size() == 1 and absf(back[0].pos.y - WorldLayout.TOWER_TOP) < 0.01, "its holder leaves: it's back on top of the tower")
+	# meteor: a big blast where it lands, then the ground burns
+	a.state.pos = Vector3(60, 0, 60)
+	a.state.weapon = Weapons.STAFF
+	a.state.spell = 4
+	b.state.pos = Vector3(60, 0, 50.5)
+	b.state.hp = Sim.MAX_HP
+	b.state.dead = 0
+	b.state.shield = 0
+	b.state.stun = 0
+	net._cast(a, Sim.PlayerInput.new(3, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 4, Vector3(60, 0, 50)), a.state.pos)
+	var hp_after_hit := -1
+	for t in 280:
+		net.server_tick += 1
+		net._server_spells()
+		if hp_after_hit < 0 and b.state.hp < Sim.MAX_HP:
+			hp_after_hit = b.state.hp
+	check(hp_after_hit > 0 and Sim.MAX_HP - hp_after_hit >= 30, "a meteor landing 0.5 m off hits hard (%d)" % (Sim.MAX_HP - hp_after_hit))
+	check(b.state.hp < hp_after_hit, "and standing in the flames keeps burning (%d more)" % (hp_after_hit - b.state.hp))
+	# gravity well: someone 5 m away is dragged in
+	b.state.hp = Sim.MAX_HP
+	b.state.vel = Vector3.ZERO
+	b.state.pos = Vector3(66, 0, 60)
+	a.state.weapon = Weapons.WAND
+	a.state.spell = 4
+	net._cast(a, Sim.PlayerInput.new(4, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 4, Vector3(61, 0, 60)), a.state.pos)
+	var d0 := Vector2(b.state.pos.x - 61, b.state.pos.z - 60).length()
+	for t in 90:
+		net.server_tick += 1
+		net._server_spells()
+		Sim.step(b.state, Sim.PlayerInput.new(10 + t, 0, 0.0))
+	var d1 := Vector2(b.state.pos.x - 61, b.state.pos.z - 60).length()
+	check(d1 < d0 - 2.0, "a gravity well drags someone 5 m off in (%.1f m -> %.1f m in 1.5 s)" % [d0, d1])
+	for t in 120:
+		net.server_tick += 1
+		net._server_spells()
+		Sim.step(b.state, Sim.PlayerInput.new(200 + t, 0, 0.0))
+	check(b.state.hp < Sim.MAX_HP and net.wells.is_empty(), "it nibbles and then bursts (%d damage)" % (Sim.MAX_HP - b.state.hp))
 	print("%d failed" % bad)
 	quit(bad)

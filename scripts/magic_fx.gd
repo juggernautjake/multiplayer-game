@@ -13,6 +13,10 @@
 ##   frost nova: a ring of ice racing out from the caster, ice shards bursting up along it, a cold flash, frost on the
 ##              ground, and a frosty ring at the feet of everyone it slowed;
 ##   earth spikes: stone spikes stabbing up out of the ground one after another, in dust;
+##   meteor:    a red target ring, a burning rock streaking down from the sky trailing fire and smoke, then a huge
+##              blast, flying rocks, a shockwave ring, a crater, and flames on the ground for 3 s;
+##   gravity well: a dark violet vortex: a black core, spinning rings, motes spiralling in, a violet light pulsing;
+##              then it collapses and bursts outward;
 ##   level up:  a column of golden light round the player and the new spell's name;
 ##   shatter:   a shield that runs out of mana bursts into glowing shards.
 ## Every caster glows while casting (and while holding the shield up): a light in the spell's colour at the staff or
@@ -60,7 +64,7 @@ var cast_lights := {}        # player id -> OmniLight3D at their staff / wand wh
 var frosts := {}             # player id -> the frosty ring at the feet of a slowed player
 const SPELL_COLOR := { "Lightning": Color("cfe6ff"), "Fireball": Color("ff8a2a"), "Shield": Color("7fd0ff"),
 	"Frost Nova": Color("9fe8ff"), "Golem": Color("ffb02e"), "Teleport": Color("c070ff"), "Stun": Color("c070ff"),
-	"Earth Spikes": Color("d8a060") }
+	"Earth Spikes": Color("d8a060"), "Meteor": Color("ff5a1a"), "Gravity Well": Color("8a3cff") }
 var _door_target := 0.0
 
 
@@ -108,6 +112,14 @@ func _on_fx(kind: String, a: Array) -> void:
 			_frost_nova(a[1], float(a[2]))
 		"stun_burst":
 			_stun_burst(a[0], float(a[1]))
+		"meteor_warn":
+			_meteor_fall(a[0], float(a[1]) * Config.DT, float(a[2]))
+		"meteor":
+			_meteor_hit(a[0], float(a[1]), float(a[2]) * Config.DT, float(a[3]))
+		"well":
+			_well(a[0], float(a[1]) * Config.DT, float(a[2]))
+		"well_burst":
+			_well_burst(a[0], float(a[1]))
 		"spike":
 			_spike(a[0])
 		"level_up":
@@ -190,7 +202,7 @@ func _flash_light(at: Vector3, c: Color, energy: float, reach: float, life: floa
 	l.light_color = c
 	l.light_energy = energy
 	l.omni_range = reach
-	l.shadow_enabled = energy >= 5.0   # the big flashes throw shadows
+	l.shadow_enabled = energy >= 8.0   # only the biggest flashes throw shadows (they're costly)
 	main.add_child(l)
 	l.global_position = at
 	var tw := l.create_tween()
@@ -484,7 +496,6 @@ func _cast_glow(delta: float, states: Dictionary) -> void:
 		if on and not cast_lights.has(id):
 			var l := OmniLight3D.new()
 			l.omni_range = 5.0
-			l.shadow_enabled = true
 			main.add_child(l)
 			cast_lights[id] = l
 		if cast_lights.has(id):
@@ -670,4 +681,219 @@ func _stun_burst(at: Vector3, r: float) -> void:
 		at2.tween_property(am, "albedo_color:a", 0.0, 0.3)
 		at2.tween_callback(arc.queue_free)
 	_flash_light(at + Vector3(0, 1, 0), Color("b066ff"), 5.0, r * 3.0, 0.4)
+
+
+func _meteor_fall(at: Vector3, fall: float, r: float) -> void:
+	var ring := MeshInstance3D.new()   # the target: a red ring that tightens as the rock comes down
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.93
+	tm.outer_radius = 1.0
+	ring.mesh = tm
+	var m := _glow_mat(Color("ff3a1a"), 3.0, 0.85)
+	ring.material_override = m
+	main.add_child(ring)
+	ring.global_position = at + Vector3(0, 0.06, 0)
+	ring.scale = Vector3(r * 1.4, 0.2, r * 1.4)
+	var rt := ring.create_tween()
+	rt.tween_property(ring, "scale", Vector3(r, 0.2, r), fall)
+	rt.tween_callback(ring.queue_free)
+	var rock := MeshInstance3D.new()   # the rock: dark, with glowing cracks, trailing fire
+	var sm := SphereMesh.new()
+	sm.radius = 0.9
+	sm.height = 1.6
+	rock.mesh = sm
+	var rm := StandardMaterial3D.new()
+	rm.albedo_color = Color("3a2a22")
+	rm.emission_enabled = true
+	rm.emission = Color("ff5a1a")
+	rm.emission_energy_multiplier = 1.6
+	rock.material_override = rm
+	var trail: Node3D = fireball_node()
+	trail.scale = Vector3.ONE * 3.0
+	rock.add_child(trail)
+	var l := OmniLight3D.new()
+	l.light_color = Color("ff7a2a")
+	l.light_energy = 4.0
+	l.omni_range = 14.0
+	rock.add_child(l)
+	main.add_child(rock)
+	var from := at + Vector3(-14, 42, 10)
+	rock.global_position = from
+	var ft := rock.create_tween()
+	ft.tween_property(rock, "global_position", at, fall).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	ft.parallel().tween_property(rock, "rotation", Vector3(6, 3, 2), fall)
+	ft.tween_callback(rock.queue_free)
+
+
+func _meteor_hit(at: Vector3, r: float, burn: float, burn_r: float) -> void:
+	_explosion(at + Vector3(0, 0.5, 0), r)
+	_flash_light(at + Vector3(0, 3, 0), Color("ff8a3a"), 10.0, r * 6.0, 0.8)
+	var wave := MeshInstance3D.new()   # a shockwave racing out along the ground
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.9
+	tm.outer_radius = 1.0
+	wave.mesh = tm
+	var wm := _glow_mat(Color("ffd0a0"), 2.0, 0.7)
+	wave.material_override = wm
+	main.add_child(wave)
+	wave.global_position = at + Vector3(0, 0.2, 0)
+	wave.scale = Vector3(0.5, 0.6, 0.5)
+	var wt := wave.create_tween().set_parallel(true)
+	wt.tween_property(wave, "scale", Vector3(r * 2.4, 0.6, r * 2.4), 0.5).set_ease(Tween.EASE_OUT)
+	wt.tween_property(wm, "albedo_color:a", 0.0, 0.55)
+	wt.chain().tween_callback(wave.queue_free)
+	for i in 14:   # rocks thrown out
+		var chunk := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3.ONE * randf_range(0.15, 0.4)
+		chunk.mesh = bm
+		var cm := StandardMaterial3D.new()
+		cm.albedo_color = Color("4a3a30")
+		cm.emission_enabled = true
+		cm.emission = Color("ff6a2a")
+		cm.emission_energy_multiplier = 0.8
+		chunk.material_override = cm
+		main.add_child(chunk)
+		chunk.global_position = at + Vector3(0, 0.5, 0)
+		var dir := Vector3(randf_range(-1, 1), randf_range(0.6, 1.4), randf_range(-1, 1)).normalized()
+		var peak := chunk.global_position + dir * randf_range(2, 5)
+		var land := Vector3(peak.x + dir.x * 2.0, at.y + 0.1, peak.z + dir.z * 2.0)
+		var ct := chunk.create_tween()
+		ct.tween_property(chunk, "global_position", peak, 0.35).set_ease(Tween.EASE_OUT)
+		ct.parallel().tween_property(chunk, "rotation", Vector3(randf() * 8, randf() * 8, 0), 0.9)
+		ct.tween_property(chunk, "global_position", land, 0.45).set_ease(Tween.EASE_IN)
+		ct.tween_interval(2.0)
+		ct.tween_property(chunk, "scale", Vector3.ZERO, 0.6)
+		ct.tween_callback(chunk.queue_free)
+	var crater := _disc(at, r * 0.55, Color(0.1, 0.06, 0.04), 0.7)
+	_fade_out(crater, crater.material_override, 4.0, burn + 2.0)
+	# the ground burns: flames dancing in a ring, an orange light flickering
+	var fire := CPUParticles3D.new()
+	fire.amount = 70
+	fire.lifetime = 0.7
+	fire.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	fire.emission_sphere_radius = burn_r
+	fire.direction = Vector3.UP
+	fire.spread = 15.0
+	fire.initial_velocity_min = 1.5
+	fire.initial_velocity_max = 3.5
+	fire.gravity = Vector3(0, 1.0, 0)
+	var pm := SphereMesh.new()
+	pm.radius = 0.16
+	pm.height = 0.32
+	fire.mesh = pm
+	var grad := Gradient.new()
+	grad.set_color(0, Color(1.0, 0.8, 0.3, 1.0))
+	grad.set_color(1, Color(0.6, 0.1, 0.0, 0.0))
+	fire.color_ramp = grad
+	var fm := StandardMaterial3D.new()
+	fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fm.vertex_color_use_as_albedo = true
+	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fire.material_override = fm
+	fire.scale = Vector3(1, 0.05, 1)
+	main.add_child(fire)
+	fire.global_position = at + Vector3(0, 0.1, 0)
+	var fl := OmniLight3D.new()
+	fl.light_color = Color("ff7a2a")
+	fl.light_energy = 2.5
+	fl.omni_range = burn_r * 3.0
+	main.add_child(fl)
+	fl.global_position = at + Vector3(0, 1.0, 0)
+	var ftw := fl.create_tween().set_loops(int(burn / 0.2))
+	ftw.tween_property(fl, "light_energy", 3.2, 0.1)
+	ftw.tween_property(fl, "light_energy", 2.0, 0.1)
+	get_tree().create_timer(burn).timeout.connect(func():
+		fire.emitting = false
+		fl.queue_free()
+		get_tree().create_timer(1.0).timeout.connect(fire.queue_free))
+	_shake_near(at, 0.35)
+
+
+func _well(at: Vector3, life: float, r: float) -> void:
+	var root := Node3D.new()
+	main.add_child(root)
+	root.global_position = at
+	var core := MeshInstance3D.new()   # a black core with a violet rim
+	var sm := SphereMesh.new()
+	sm.radius = 0.55
+	sm.height = 1.1
+	core.mesh = sm
+	var cm := StandardMaterial3D.new()
+	cm.albedo_color = Color(0.03, 0.0, 0.06)
+	cm.rim_enabled = true
+	cm.rim = 1.0
+	cm.emission_enabled = true
+	cm.emission = Color("6a2ad0")
+	cm.emission_energy_multiplier = 0.6
+	core.material_override = cm
+	root.add_child(core)
+	var rings := []
+	for i in 3:   # rings spinning at different tilts
+		var ring := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = 0.9 + i * 0.5
+		tm.outer_radius = 1.0 + i * 0.5
+		ring.mesh = tm
+		ring.material_override = _glow_mat(Color("a060ff"), 2.5, 0.55)
+		ring.rotation = Vector3(randf_range(-0.6, 0.6), 0, randf_range(-0.6, 0.6))
+		root.add_child(ring)
+		rings.append(ring)
+	var motes := CPUParticles3D.new()   # motes spiralling in toward the core
+	motes.amount = 90
+	motes.lifetime = 0.9
+	motes.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	motes.emission_sphere_radius = r * 0.8
+	motes.radial_accel_min = -18.0
+	motes.radial_accel_max = -12.0
+	motes.tangential_accel_min = 8.0
+	motes.tangential_accel_max = 12.0
+	motes.gravity = Vector3.ZERO
+	var mm := SphereMesh.new()
+	mm.radius = 0.05
+	mm.height = 0.1
+	motes.mesh = mm
+	motes.material_override = _glow_mat(Color("c090ff"), 3.0)
+	root.add_child(motes)
+	var l := OmniLight3D.new()
+	l.light_color = Color("8a3cff")
+	l.omni_range = r * 1.8
+	l.light_energy = 3.0
+	root.add_child(l)
+	var floor_ring := _disc(Vector3(at.x, at.y - 1.0, at.z), r, Color("3a1060"), 0.25)
+	var t0 := Time.get_ticks_msec()
+	var spin := func():
+		var t := (Time.get_ticks_msec() - t0) / 1000.0
+		for i in rings.size():
+			(rings[i] as Node3D).rotate_y((3.0 + i * 1.5) * get_process_delta_time())
+		core.scale = Vector3.ONE * (1.0 + 0.12 * sin(t * 9.0))
+		l.light_energy = 2.5 + 1.2 * sin(t * 7.0)
+	var timer := Timer.new()
+	timer.wait_time = 1.0 / 60.0
+	timer.autostart = true
+	timer.timeout.connect(spin)
+	root.add_child(timer)
+	get_tree().create_timer(life).timeout.connect(func():
+		root.queue_free()
+		floor_ring.queue_free())
+
+
+func _well_burst(at: Vector3, r: float) -> void:
+	var ball := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 1.0
+	sm.height = 2.0
+	ball.mesh = sm
+	var m := _glow_mat(Color("b070ff"), 4.0, 0.8)
+	ball.material_override = m
+	main.add_child(ball)
+	ball.global_position = at
+	ball.scale = Vector3.ONE * 0.1
+	var tw := ball.create_tween().set_parallel(true)
+	tw.tween_property(ball, "scale", Vector3.ONE * r, 0.25).set_ease(Tween.EASE_OUT)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.4)
+	tw.chain().tween_callback(ball.queue_free)
+	_flash_light(at, Color("a050ff"), 8.0, r * 4.0, 0.5)
+	Fx.burst(main, at, Vector3.UP, Color("d0a0ff"), 40, 8.0, 0.05)
+	_shake_near(at, 0.25)
 
