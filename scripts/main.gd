@@ -268,10 +268,11 @@ func _make_avatar(id: int, info: Dictionary) -> Node3D:
 	var col: Color = info.get("color", Color.WHITE)
 	var av: Node3D
 	if net.style == "figure":
-		av = FigureAvatar.new(nm, col, id != net.my_id)
+		av = FigureAvatar.new(nm, col, id != net.my_id, int(info.get("outfit", 0)))
 	else:
-		av = Avatar.new(nm, col, id != net.my_id)
+		av = Avatar.new(nm, col, id != net.my_id, int(info.get("outfit", 0)))
 	add_child(av)
+	av.set_pvp(bool(info.get("pvp", false)))
 	return av
 
 
@@ -285,6 +286,8 @@ func _on_roster(r: Dictionary) -> void:
 	for id in r.keys():
 		if not avatars.has(id):
 			avatars[id] = _make_avatar(id, r[id])
+		else:
+			avatars[id].set_pvp(bool(r[id].get("pvp", false)))
 
 
 ## The host changed the look: rebuild everyone's avatar.
@@ -368,6 +371,7 @@ func _process(_delta: float) -> void:
 			net.roster.size(), net.ping_ms(), Engine.get_frames_per_second(),
 			"1st person" if view == View.FIRST else "3rd person", dash, net.corrections,
 			int(net.interp_delay * Config.DT * 1000.0), extrap]
+		hud.text += "\nPvP %s (P)" % ("ON: other PvP players can hurt you" if bool(net.roster.get(net.my_id, {}).get("pvp", false)) else "off: nobody can hurt you")
 		if host_info != "" and multiplayer.multiplayer_peer and multiplayer.is_server():
 			hud.text += "\n\n" + host_info
 
@@ -668,6 +672,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				break
 	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_F2:
 		_switch_character()
+	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_P and menu and not menu.visible:
+		net.request_pvp(not bool(net.roster.get(net.my_id, {}).get("pvp", false)))
 	elif key and key.pressed and not key.echo and key.physical_keycode >= KEY_1 and key.physical_keycode <= KEY_5:
 		var want := key.physical_keycode - KEY_1
 		if net.predicted != null and (net.predicted.owned >> want) & 1:
@@ -764,7 +770,7 @@ func _build_ui() -> void:
 	hud.add_theme_constant_override("outline_size", 6)
 	layer.add_child(hud)
 	var help := Label.new()
-	help.text = "WASD move  Shift sprint  Space jump  Q dash  LMB attack (click again for combos, hold to draw)  RMB aim  E pick up  1-5 / Tab weapons  V view  F2 Pip / 3D figure  Esc menu"
+	help.text = "WASD move  Shift sprint  Space jump  Q dash  LMB attack (click again for combos, hold to draw)  RMB aim  E pick up  1-5 / Tab weapons  V view  P PvP on/off  F2 Pip / 3D figure  Esc menu"
 	help.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	help.position = Vector2(12, -34)
 	help.add_theme_color_override("font_outline_color", Color.BLACK)

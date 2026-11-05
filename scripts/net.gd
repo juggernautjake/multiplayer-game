@@ -51,6 +51,8 @@ class ServerPlayer:
 	var was_dead := false
 	var character := "pip"
 	var interact_prev := false
+	var outfit := 0             # Pip's outfit: the host 0, then 1, 2, 3 by who joined
+	var pvp := false            # player-versus-player on: can hurt and be hurt by other players with it on
 
 
 ## Something lying on the ground to pick up (server). `spawn` >= 0: one of the fixed spawns, which comes back 20 s
@@ -249,8 +251,41 @@ func welcome(tick: int) -> void:
 func roster_update(list: Array) -> void:
 	roster.clear()
 	for e in list:
-		roster[int(e[0])] = { "name": str(e[1]), "color": e[2], "character": str(e[3]) if e.size() > 3 else "pip" }
+		roster[int(e[0])] = { "name": str(e[1]), "color": e[2], "character": str(e[3]) if e.size() > 3 else "pip",
+			"outfit": int(e[4]) if e.size() > 4 else 0, "pvp": bool(e[5]) if e.size() > 5 else false }
 	roster_changed.emit(roster)
+
+
+## PvP on or off for the player who asks (P). Everyone sees it in the roster (crossed swords by the name).
+@rpc("any_peer", "call_remote", "reliable")
+func set_pvp(on: bool) -> void:
+	if not multiplayer.is_server():
+		return
+	_server_set_pvp(multiplayer.get_remote_sender_id(), on)
+
+
+func _server_set_pvp(id: int, on: bool) -> void:
+	if players.has(id) and players[id].pvp != on:
+		players[id].pvp = on
+		print("%s turned PvP %s" % [players[id].name, "on" if on else "off"])
+		_server_send_roster()
+
+
+## Ask for PvP on or off (the host applies it at once; a guest asks the host).
+func request_pvp(on: bool) -> void:
+	if multiplayer.multiplayer_peer == null:
+		return
+	if multiplayer.is_server():
+		_server_set_pvp(my_id if my_id != 0 else 1, on)
+	else:
+		set_pvp.rpc_id(1, on)
+
+
+## Can `from` hurt player `target`? Only when both have PvP on (dummies and the yard can always be hit).
+func can_hurt(from: int, target: int) -> bool:
+	if target < 0 or from == target or not players.has(from) or not players.has(target):
+		return true
+	return players[from].pvp and players[target].pvp
 
 
 ## The yard's events go to everyone, reliably and in order.
@@ -356,6 +391,7 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 	p.name = clean if clean != "" else "Player %d" % (players.size() + 1)
 	p.color = COLORS[players.size() % COLORS.size()]
 	p.slot = players.size() + 1
+	p.outfit = (p.slot - 1) % 4
 	p.state = Sim.spawn_state(p.slot)
 	players[id] = p
 	_server_send_roster()
@@ -364,7 +400,7 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 func _server_send_roster() -> void:
 	var list := []
 	for p: ServerPlayer in players.values():
-		list.append([p.id, p.name, p.color, p.character])
+		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp])
 	roster_update.rpc(list)
 	if is_host_player:
 		roster_update(list)
@@ -546,7 +582,7 @@ func _server_projectiles() -> void:
 		for k in range(1, 5):
 			var pt := prev.lerp(cur, k / 4.0)
 			for q: ServerPlayer in players.values():
-				if q.id == pr.owner or q.state.dead > 0:
+				if q.id == pr.owner or q.state.dead > 0 or not can_hurt(pr.owner, q.id):
 					continue
 				var qp := q.state.pos
 				if Vector2(pt.x - qp.x, pt.z - qp.z).length() < 0.5 and pt.y > qp.y - 0.1 and pt.y < qp.y + 1.9:
@@ -680,6 +716,8 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		var ps: Sim.PlayerState = players[from].state
 		var mv := Weapons.move(ps.weapon, ps.combo)
 		print("hit %d for %d with %s %s" % [target, amount, Weapons.NAMES[ps.weapon], mv.get("name", "shot")])
+	if not can_hurt(from, target):
+		return
 	var killed := false
 	var pos: Vector3
 	if target < 0:

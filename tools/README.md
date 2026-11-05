@@ -1,0 +1,222 @@
+# tools/
+
+Developer tools: automated tests, picture renderers for checking animation, the release script, the generator for
+Pip's weapon frames, and a model of the netcode. None of this ships in the game: `export_presets.cfg` excludes
+`tools/*` from exports.
+
+The `.gd.uid` file next to each GDScript is Godot metadata: the script's unique ID, written by Godot. Commit them;
+don't edit them.
+
+Back to the [project README](../README.md).
+
+In the commands below, `<godot>` is your Godot 4.7 console executable (for example
+`Godot_v4.7.2-stable_win64_console.exe`), run from the repository folder. The GDScript tools all extend `SceneTree`
+and are run with `-s <script>` (or `--script`), which runs the script instead of the game. Arguments after `--` reach
+the script through `OS.get_cmdline_user_args()`.
+
+## At a glance
+
+| File | Kind | Needs a window? | In one line |
+|---|---|---|---|
+| [sim_test.gd](#sim_testgd) | test | no | Checks the shared movement and combat simulation. |
+| [fruit_test.gd](#fruit_testgd) | test | no | Checks fruit physics in the yard. |
+| [eco_test.gd](#eco_testgd) | test | no | Runs the yard for 20 minutes and checks that everything happens. |
+| [invite_test.gd](#invite_testgd) | test | no | Checks that invite codes round-trip. |
+| [figure_poses.gd](#figure_posesgd) | renderer | yes | One pose of the 3D figure, saved as a PNG. |
+| [figure_strip.gd](#figure_stripgd) | renderer | yes | A filmstrip of one move of the 3D figure. |
+| [pip_feet_check.gd](#pip_feet_checkgd) | renderer | yes | Pip at ground level, to check his feet sit on the ground. |
+| [release.sh](#releasesh) | script | no | Builds and publishes a new version on GitHub. |
+| [make_weapon_frames.py](#make_weapon_framespy) | asset generator | no | Makes Pip's sword, bow and slingshot frames from his sheet. |
+| [netcode_model.py](#netcode_modelpy) | model | no | Simulates the netcode over bad connections and counts corrections. |
+
+---
+
+## sim_test.gd
+
+Headless checks of the shared simulation (`Sim`, with the world from `WorldLayout`).
+
+```
+<godot> --headless --path . -s tools/sim_test.gd
+```
+
+It prints `ok` or `FAIL` for each check, then "N failed", and exits with 1 if anything failed. The checks:
+
+1. Walking into the low step near the spawn (at 6, -6) never goes inside it, and stops beside it on the ground.
+2. Jumping while walking into it ends standing on top.
+3. Walking off the far side lands back on the ground.
+4. Dashing into a tall pillar never goes inside it.
+5. Determinism: two runs of the same 600 inputs agree exactly.
+6. For fists, club and sword: attacking with no movement keys stays in place; swinging while walking steps forward.
+7. Walking right turns the body to face right; `FACE_CAM` faces the camera heading.
+8. Holding attack faces the camera heading, not the skewed line to a close crosshair point.
+
+Helper functions: `check(ok, what)`, `run(state, buttons, yaw, ticks)` (steps a state), `inside_any(state)` (is the
+player overlapping a box).
+
+## fruit_test.gd
+
+Headless checks of fruit physics in `Ecology`.
+
+```
+<godot> --headless --path . --script tools/fruit_test.gd
+```
+
+1. Hitting the apple tree three times drops fruit. Each fruit's path ends at rest, it hasn't moved 10 s after landing,
+   its path has no jumps (no step over 0.6 m in a tick), and it rests outside every pillar, trunk and dummy.
+2. A person walking into a fallen fruit kicks it the way they walk; it rolls more than 0.5 m and comes to rest
+   smoothly.
+3. A melee blow (`Ecology.hit_fruit`) launches it: it pops up more than 0.2 m, lands more than 1 m away from the
+   swing, and rests outside everything.
+4. A fruit rolled straight at a pillar bounces off and stops outside it.
+
+Prints "N failed" and exits with the number of failures as its code. Helpers: `check`, `smooth(segs, from, to)` (the
+biggest step along a path), `inside_something(p)`.
+
+## eco_test.gd
+
+Runs the server's yard (`Ecology`) for 20 simulated minutes with no players near, and hits the first fruit tree once
+at 30 s. Then prints how many of each event kind happened and how many of each worm and bird phase.
+
+```
+<godot> --headless --path . -s tools/eco_test.gd
+```
+
+It passes (`ECO OK`, exit code 0) if at least one `fruit_fall`, `worm`, `bird` and `tree_hit` event happened;
+otherwise `ECO FAIL` and exit code 1. (Its header comment also mentions a run with a player standing by a tree; the
+code only runs with no players.)
+
+## invite_test.gd
+
+Checks the invite-code functions in `scripts/main.gd` (`invite_code` and `decode_invite`, loaded with
+`load("res://scripts/main.gd")` because main.gd has no `class_name`).
+
+```
+<godot> --headless --path . -s tools/invite_test.gd
+```
+
+For five address and port pairs (including `0.0.0.0:0` and `255.255.255.255:7777`) it encodes, decodes the code in
+lower case, and checks that the result matches. It also shows that a plain address is not taken for a code. Exits with
+the number of failures.
+
+## figure_poses.gd
+
+Renders a close-up of the 3D figure (`FigureAvatar`) in one pose and saves it as a PNG, with small markers: red for the
+right hand, green for the left hand, yellow for the weapon's grip point (it should sit in the hand). Needs a window
+(no `--headless`), because it renders.
+
+```
+<godot> --path . -s tools/figure_poses.gd -- out.png <pose> [view_degrees] [no-markers]
+```
+
+- `out.png`: where to save (default `user://pose.png`).
+- `pose`: one of `idle`, `sword`, `slash`, `slashwind`, `thrust`, `club`, `bash`, `smash`, `smashhit`, `bow`,
+  `bowdraw`, `bowrelease`, `sling`, `slingdraw`, `jab`, `cross`, `kick` (the `POSES` table: weapon, combo step, how far
+  through the move, how far drawn). Unknown names fall back to `idle`.
+- `view_degrees`: camera angle around the figure (default 30; 0 is straight in front).
+- `no-markers`: hide the markers.
+
+It sets `fig.instant = true` so the pose appears without spring smoothing, renders 12 frames, saves and quits.
+
+## figure_strip.gd
+
+Renders a filmstrip of one whole move of the 3D figure, posed tick by tick at 60 fps (springs and all), saving every
+Nth frame. Needs a window.
+
+```
+<godot> --path . -s tools/figure_strip.gd -- <out_prefix> <weapon> <combo> [view] [every]
+```
+
+- `out_prefix`: file name start; frames are saved as `<out_prefix>_000.png`, `<out_prefix>_004.png`, and so on.
+- `weapon`: 0 fists, 1 club, 2 sword, 3 bow, 4 sling.
+- `combo`: which move of the combo (0, 1, 2); ignored for bow and sling, which draw to full, hold 20 ticks and release.
+- `view`: camera angle in degrees (default 60). `every`: save every Nth tick (default 4).
+
+Set the environment variable `STRIP_DEBUG` to anything to print the attack counter and hand positions every 3 ticks.
+
+## pip_feet_check.gd
+
+A visual check for Pip (`Avatar`): Pip at the origin, a camera level with the ground looking at him, and a thin red bar
+along the ground line. His feet should sit exactly on the screen's middle row. Needs a window.
+
+```
+<godot> --path . -s tools/pip_feet_check.gd -- out.png
+```
+
+Renders 30 frames, saves (default `user://pip_feet.png`) and quits. It does not call `animate()`, so Pip shows the
+first idle frame facing the camera.
+
+## release.sh
+
+Publishes a new version of the game so every player gets it automatically. A Bash script: run it in Git Bash.
+
+```
+tools/release.sh 0.3.0 "What changed, one line"
+```
+
+Step by step:
+
+1. Finds Godot: the `GODOT` environment variable, or by default
+   `/c/Users/Jacob Maddux/dev/tools/godot-export/Godot_v4.7.2-stable_win64_console.exe`. Reads its version (for example
+   `4.7.2`, padded to three parts).
+2. Writes the new version into `version.txt`.
+3. Runs `git add -A` and commits as `Release v0.3.0: <notes>` (no error if there is nothing to commit). Note that
+   this commits **everything** in the working folder, not only `version.txt`.
+4. Deletes the old build, then exports with the "Windows Desktop" preset from `export_presets.cfg`:
+   `export/windows/MultiplayerGame.exe` plus `MultiplayerGame.pck` (`--export-release`), and the update pack
+   `export/game.pck` (`--export-pack`). Stops with "export failed" if any file is missing.
+5. Zips `export/windows/*` into `export/MultiplayerGame-windows.zip` with PowerShell.
+6. Runs `git push`, then `gh release create v0.3.0` with the zip and `game.pck`, titled "Multiplayer Game 0.3.0". The
+   notes are your one line, short instructions for players, and a last line `godot: <version>`.
+
+Needs: Git Bash, the GitHub CLI (`gh`) logged in with rights to the repository, PowerShell, and Godot with the
+Windows export templates installed.
+
+Running games then see the release: `scripts/updater.gd` compares the tag with the running version, checks the
+`godot:` line against its own engine version, downloads `game.pck` and offers **Restart now**; `scripts/boot.gd` loads
+it on the next start. If the Godot versions differ, players are sent to the download page instead.
+
+## make_weapon_frames.py
+
+Builds Pip's weapon animation frames from his own sprite sheet. Python 3 with **NumPy** and **Pillow**
+(`pip install numpy pillow`).
+
+```
+python tools/make_weapon_frames.py
+```
+
+It reads `assets/pip/pip-spritesheet.png` and `pip-spritesheet.json`, and writes `assets/pip/pip-weapons.png` and
+`pip-weapons.json` (same JSON layout as the main sheet). It prints how many rows and frames it made.
+
+- **Sword:** every club animation (`c_swing`, `c_back`, `c_smash`, `wc_swing`, `wc_back`, `rc_swing`, `ac_swing`) is
+  copied with the club recoloured (`swordify`): the club is found exactly by its colours, which appear nowhere else on
+  Pip; the end at the hand becomes a leather grip and a gold guard, the rest a steel blade, and the tip runs on a few
+  pixels. The new animations are named `s_swing`, `s_back`, `s_smash`, `ws_swing`, `ws_back`, `rs_swing`,
+  `as_swing`.
+- **Bow and slingshot:** drawn onto Pip's punch pose. His fist is found per direction (`fist`: the pixels that move out
+  between the guard frame and the punch), and the weapon is drawn there in his outlined pixel style (`draw_bow`,
+  `draw_sling`): three draw frames (`bowDraw`, `slingDraw`) and two release frames (`bowShot`, `slingShot`). Seen from
+  behind, the weapon is drawn behind him.
+
+Only the five drawn directions (S, SE, E, NE, N) are made; the game mirrors the other three. Run it again whenever
+Pip's main sheet changes.
+
+## netcode_model.py
+
+A model of the game's netcode (`scripts/net.gd` and `scripts/sim.gd`) in plain Python 3, no packages. It plays two
+minutes of random movement over a bad connection, with the same basic rules: 60 Hz, unreliable inputs with the last 8
+repeated, the server applying inputs in order (waiting up to 8 ticks for a missing one), snapshots every 2 ticks with
+an ack, float32 rounding, and client-side replay. It counts how often the client's prediction disagreed with the
+server.
+
+```
+python tools/netcode_model.py
+```
+
+It prints one line per connection (30 ms ping / 5 ms jitter / 0% loss, 80 / 20 / 1%, 150 / 40 / 3%, 250 / 80 / 5%):
+the number of corrections in two minutes and the biggest one in centimetres. The expected result is 0 corrections.
+
+What it does not model: combat, collision with pillars, the server's per-player jitter buffer, and the adaptive
+interpolation delay. Its catch-up rule (three inputs per tick when more than four are queued) is also different from
+`net.gd` (two per tick when the queue is three past the buffer target), and its docstring says "inputs resent x4"
+although the code repeats 8. It is a check that prediction and reconciliation agree, not a full copy of the netcode.
+Functions: `step(s, btn, yaw)` (movement on flat ground) and `run(lat_ms, jit_ms, loss, ticks, seed)`.

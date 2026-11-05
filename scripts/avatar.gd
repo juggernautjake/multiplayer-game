@@ -13,6 +13,7 @@ const DIRS := ["S", "SE", "E", "NE", "N", "NW", "W", "SW"]   # clockwise from fa
 const MIRROR := {"SW": "SE", "W": "E", "NW": "NE"}
 
 static var _textures: Array = []
+static var _outfit_tex := {}   # outfit -> [body sheet, weapon sheet] (outfit 0 = _textures)
 static var _anims := {}   # name -> { dir -> { sheet, row, frames, durations (s), loop } }
 static var _cell := Vector2i(64, 64)
 static var _anchor := Vector2(32, 58)
@@ -61,12 +62,27 @@ static func _load_sheets() -> void:
 			_anims[a.name] = by_dir
 
 
-func _init(player_name: String, color: Color, show_name: bool) -> void:
+var _tex: Array = []     # this player's sheets: Pip in their outfit
+var _name := ""
+
+
+## Pip's sheets recoloured for an outfit (tools/make_outfits.py): 0 the original (the host), 1 blue, 2 green, 3 crimson.
+static func outfit_textures(outfit: int) -> Array:
+	if outfit <= 0:
+		return _textures
+	if not _outfit_tex.has(outfit):
+		_outfit_tex[outfit] = [load("res://assets/pip/outfits/pip-spritesheet-%d.png" % outfit), load("res://assets/pip/outfits/pip-weapons-%d.png" % outfit)]
+	return _outfit_tex[outfit]
+
+
+func _init(player_name: String, color: Color, show_name: bool, outfit := 0) -> void:
 	_load_sheets()
+	_tex = outfit_textures(outfit % 4)
+	_name = player_name
 	model = Node3D.new()
 	add_child(model)
 	sprite = Sprite3D.new()
-	sprite.texture = _textures[0]
+	sprite.texture = _tex[0]
 	sprite.region_enabled = true
 	sprite.pixel_size = PIXEL
 	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y   # stays upright, turns to face the camera
@@ -116,6 +132,11 @@ func _init(player_name: String, color: Color, show_name: bool) -> void:
 	hp_bar.visible = show_name
 	add_child(hp_bar)
 	_show()
+
+
+## PvP on: crossed swords by the name, in red.
+func set_pvp(on: bool) -> void:
+	label.text = ("⚔ " if on else "") + _name
 
 
 ## Briefly tint red (hit).
@@ -295,7 +316,7 @@ func _show(cam: Camera3D = null) -> void:
 	var dir := _dir_for(cam)
 	var a := _clip(dir)
 	var f := mini(_frame, a.frames - 1)
-	var tex: Texture2D = _textures[a.sheet]
+	var tex: Texture2D = _tex[a.sheet]
 	if sprite.texture != tex:
 		sprite.texture = tex
 	sprite.region_rect = Rect2(f * _cell.x, a.row * _cell.y, _cell.x, _cell.y)

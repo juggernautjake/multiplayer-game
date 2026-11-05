@@ -99,7 +99,16 @@ var _last_yaw := 0.0
 var _prev_hand_r := Vector3.ZERO
 
 
-func _init(player_name: String, color: Color, show_name: bool) -> void:
+var _name := ""
+
+
+## PvP on: crossed swords by the name.
+func set_pvp(on: bool) -> void:
+	label.text = ("⚔ " if on else "") + _name
+
+
+func _init(player_name: String, color: Color, show_name: bool, _outfit := 0) -> void:
+	_name = player_name
 	model = Node3D.new()
 	add_child(model)
 	var tunic := color
