@@ -55,6 +55,11 @@ const DATA := [
 		{ "name": "Meteor", "level": 3, "cost": 45, "windup": 22, "cast": 40, "cooldown": 60, "range": 35.0, "delay": 60,
 		  "radius": 5.0, "max_damage": 40, "min_damage": 10, "knock": 9.0,
 		  "burn_radius": 3.0, "burn_ticks": 180, "burn_every": 30, "burn_damage": 4 },
+		# level 4, the ultimate (18 kills): a storm gathers over where you aim and rains lightning for `duration` ticks,
+		# a bolt every `every` ticks, each seeking an enemy under the cloud (or striking at random within `area`)
+		{ "name": "Arcane Storm", "level": 4, "cost": 80, "windup": 30, "cast": 50, "cooldown": 120, "range": 35.0,
+		  "duration": 300, "area": 7.0, "every": 20, "warn": 12,
+		  "radius": 2.4, "max_damage": 22, "min_damage": 6, "knock": 4.5 },
 	] },
 	# the wand from the hidden vault: no mana; each spell has its own recharge (ticks) instead (Jacob 2026-11-04)
 	{ "kind": "magic", "slow": 0.6, "uses": "recharge", "spells": [
@@ -71,6 +76,8 @@ const DATA := [
 		{ "name": "Gravity Well", "level": 3, "cost": 0, "windup": 14, "cast": 30, "cooldown": 10, "recharge": 900,
 		  "range": 25.0, "duration": 180, "pull_radius": 7.0, "pull": 14.0, "nibble": 3, "nibble_radius": 2.0,
 		  "radius": 3.5, "max_damage": 18, "min_damage": 8, "knock": 9.0 },
+		# level 4, the ultimate (18 kills): one great stone titan (Golems: TITAN_*), recharging for a minute
+		{ "name": "Stone Titan", "level": 4, "cost": 0, "windup": 36, "cast": 60, "cooldown": 20, "recharge": 3600, "range": 10.0 },
 	] },
 ]
 

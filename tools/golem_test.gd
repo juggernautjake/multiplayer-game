@@ -65,5 +65,22 @@ func _init() -> void:
 		died = gs2.hurt(g2.id, 8, 2, Vector3(1, 0, 0)) or died
 	check(died and g2.state == Golems.State.DIE, "it crumbles when its health runs out")
 	check(not gs2.hurt(g2.id, 8, 1, Vector3.ZERO), "its summoner can't hurt it")
+	# the titan: one per summoner, beside the six small ones; its slam crushes everyone round where it lands
+	var gt := Golems.new()
+	for i in 6:
+		gt.spawn(1, Vector3(40 + i * 2, 0, 80), 0.0, 0)
+	var t1 := gt.spawn(1, Vector3(60, 0, 60), 0.0, 0, true)
+	var t2 := gt.spawn(1, Vector3(62, 0, 60), 0.0, 1, true)
+	var alive_small := gt.list.values().filter(func(g): return not g.titan and g.state != Golems.State.DIE).size()
+	check(t1.state == Golems.State.DIE and t2.state != Golems.State.DIE and alive_small == 6, "one titan at a time (a new one replaces the old), and the six small golems stay")
+	var p2 := Vector3(62, 0, 57.4)
+	var p3 := Vector3(63.2, 0, 57.0)
+	var hit_ids := {}
+	for t in range(2, 260):
+		for h in gt.tick(t, [[1, Vector3(70, 0, 70), true, true], [2, p2, true, true], [3, p3, true, true]]):
+			if h[0] == t2:
+				hit_ids[h[1]] = h[2]
+	check(hit_ids.has(2) and hit_ids.has(3), "its slam crushes both players standing together (%s)" % str(hit_ids))
+	check(int(hit_ids.get(2, 0)) == Golems.TITAN_DAMAGE, "for %d each" % Golems.TITAN_DAMAGE)
 	print("%d failed" % bad)
 	quit(bad)

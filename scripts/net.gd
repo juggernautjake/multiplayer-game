@@ -93,6 +93,7 @@ var golems := Golems.new()   # server only: the wand's stone golems
 var pending_spells: Array = []   # [tick, kind, where, caster]: lightning that strikes after its warning
 var vault_open_until := 0        # tick the vault's door shuts again (0 = shut)
 var wells: Array = []             # gravity wells: [tick it bursts, centre, caster]
+var storms: Array = []            # arcane storms: [tick it ends, centre, caster, tick of the next bolt]
 var projectiles := {}  # id -> Proj (server)
 var LOG := OS.get_cmdline_user_args().has("--log")   # print hits and pick-ups (testing)
 var next_proj := 1
@@ -1075,6 +1076,15 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
 			pending_spells.append([server_tick + int(sp.delay), "meteor", at, p.id])
 			_fx("meteor_warn", [at, int(sp.delay), float(sp.radius)])
+		"Arcane Storm":
+			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
+			storms.append([server_tick + int(sp.duration), at, p.id, server_tick + 10])
+			_fx("storm", [at, int(sp.duration), float(sp.area)])
+		"Stone Titan":
+			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
+			at.y = 0.0
+			var g := golems.spawn(p.id, at, s.yaw, server_tick, true)
+			_fx("titan_rise", [g.id, at])
 		"Gravity Well":
 			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
 			wells.append([server_tick + int(sp.duration), at + Vector3(0, 1.0, 0), p.id])
@@ -1238,11 +1248,15 @@ func _server_spells() -> void:
 					_blast(e[2], sp, owner, Weapons.STAFF)
 					for k in int(sp.burn_ticks) / int(sp.burn_every):
 						pending_spells.append([server_tick + int(sp.burn_every) * (k + 1), "burn", e[2], e[3]])
+				"storm_bolt":
+					_fx("lightning", [e[2]])
+					_blast(e[2], Weapons.spell(Weapons.STAFF, 5), owner, Weapons.STAFF)
 				"burn":
 					var sp := Weapons.spell(Weapons.STAFF, 4)
 					var burn := { "radius": sp.burn_radius, "max_damage": sp.burn_damage, "min_damage": sp.burn_damage, "knock": 0.0 }
 					_blast(e[2], burn, owner, Weapons.STAFF)
 	_server_wells()
+	_server_storms()
 	# golems
 	var people := []
 	for p: ServerPlayer in players.values():
@@ -1254,9 +1268,9 @@ func _server_spells() -> void:
 		if tid <= -1000:
 			_damage(tid, int(h[2]), g.owner, h[3], 0.0)
 		else:
-			_damage(tid, int(h[2]), g.owner, h[3], Golems.KNOCK)
+			_damage(tid, int(h[2]), g.owner, h[3], Golems.TITAN_KNOCK if g.titan else Golems.KNOCK)
 		dmg_src = -1
-		_fx("golem_slam", [g.id, g.pos + Vector3(-sin(g.yaw), 0, -cos(g.yaw)) * 0.7])
+		_fx("golem_slam", [g.id, g.pos + Vector3(-sin(g.yaw), 0, -cos(g.yaw)) * (Golems.TITAN_REACH if g.titan else 0.7), g.titan])
 	if server_tick % 3 == 0 and (not golems.list.is_empty() or _golems_were):
 		_golems_were = not golems.list.is_empty()
 		var data := golems.pack()
@@ -1392,4 +1406,37 @@ func _server_wells() -> void:
 				var d := Vector2(c.x - g.pos.x, c.z - g.pos.z)
 				if d.length() < float(sp.pull_radius) and d.length() > 0.3:
 					golems._move(g, d.normalized() * 3.0 * Config.DT)
+
+
+## Arcane storms: every `every` ticks a bolt is called down: on an enemy under the cloud (a little off, so a moving
+## target can dodge the warning ring) two times in three, else anywhere under it; each bolt warns, then strikes.
+func _server_storms() -> void:
+	var sp := Weapons.spell(Weapons.STAFF, 5)
+	for e in storms.duplicate():
+		if server_tick >= e[0]:
+			storms.erase(e)
+			continue
+		if server_tick < e[3]:
+			continue
+		e[3] = server_tick + int(sp.every)
+		var c: Vector3 = e[1]
+		var owner: int = e[2]
+		var area := float(sp.area)
+		var targets := []
+		for q: ServerPlayer in players.values():
+			if q.id != owner and q.state.dead == 0 and can_hurt(owner, q.id) and Vector2(q.state.pos.x - c.x, q.state.pos.z - c.z).length() <= area:
+				targets.append(q.state.pos)
+		for g: Golems.G in golems.list.values():
+			if g.owner != owner and g.state != Golems.State.DIE and Vector2(g.pos.x - c.x, g.pos.z - c.z).length() <= area:
+				targets.append(g.pos)
+		var at: Vector3
+		if not targets.is_empty() and randf() < 0.67:
+			at = targets[randi() % targets.size()] + Vector3(randf_range(-0.8, 0.8), 0, randf_range(-0.8, 0.8))
+		else:
+			var a := randf() * TAU
+			var r := sqrt(randf()) * area
+			at = c + Vector3(cos(a) * r, 0, sin(a) * r)
+		at.y = WorldLayout.ground_height(at.x, at.z, c.y + 3.0)
+		pending_spells.append([server_tick + int(sp.warn), "storm_bolt", at, owner])
+		_fx("lightning_warn", [at, int(sp.warn), owner])
 

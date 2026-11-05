@@ -220,3 +220,31 @@ interpolation delay. Its catch-up rule (three inputs per tick when more than fou
 `net.gd` (two per tick when the queue is three past the buffer target), and its docstring says "inputs resent x4"
 although the code repeats 8. It is a check that prediction and reconciliation agree, not a full copy of the netcode.
 Functions: `step(s, btn, yaw)` (movement on flat ground) and `run(lat_ms, jit_ms, loss, ticks, seed)`.
+
+## magic_test.gd
+
+`Godot --headless --path . --script tools/magic_test.gd`: the shared simulation's magic. Every step of the wizard's tower
+is reachable with one jump from the step below; the teleport reaches 18 m (five dashes), lands short when you aim at
+nearer ground, lands on tops, goes up into the sky, and never ends inside a pillar; staff spells cost mana; wand spells
+use recharges (golem 10 s, teleport 4 s, stun 5 s); a stun holds you 3 s; the shield stays up while held, costs its
+mana once and stops mana coming back; levels at 3, 8 and 18 kills unlock spells; frost slows to half speed.
+
+## golem_test.gd
+
+`Godot --headless --path . --script tools/golem_test.gd`: golems catch a walking player and hit them on the move, a
+sprinting player gets away, they notice enemies 24 m off but not 27 m, they leave players alone without PvP, they
+crumble at 0 health and their summoner can't hurt them; one titan at a time, whose slam crushes everyone round it.
+
+## net_magic_test.gd
+
+`Godot --headless --path . --script tools/net_magic_test.gd`: the server's magic, run offline (an `OfflineMultiplayerPeer`;
+it prints harmless "not inside tree" RPC errors). PvP; a held shield soaking a slash (12 mana) and a fireball (44),
+then shattering and letting the rest through; kills levelling the staff and wand (sword kills don't count); the stun's
+area; a meteor and its burning ground; a gravity well dragging someone in and bursting; an arcane storm's bolts; your
+own blasts never hurting you; the staff being one of a kind.
+
+## make_outfits.py
+
+`python tools/make_outfits.py`: recolours Pip's two sprite sheets into outfits 1-3 (`assets/pip/outfits/`): the tunic,
+trousers, scarf and hair moved to new colours (blue and gold, green and red, crimson and teal), skin and outline kept.
+The host plays outfit 0 (the original); guests get 1, 2, 3 in the order they join.

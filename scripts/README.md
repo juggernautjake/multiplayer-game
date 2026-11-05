@@ -530,3 +530,61 @@ creates one (not for bots) and shows its messages.
 
 The header comment mentions a `manifest.json` release asset; the code does not use one. The Godot version comes from
 the release notes, which `tools/release.sh` writes.
+
+## magic_fx.gd
+
+`class_name MagicFx`, a Node3D that Main adds to the world. It draws every spell from the server's spell events
+(`Net.magic_fx(kind, args)`) and from players' states:
+
+| Event | What you see |
+|---|---|
+| `lightning_warn`, `lightning` | a pulsing ring where it will land, then a jagged bolt with forks, a flash (with shadows), sparks, a scorch |
+| `explode` | a fireball's burst: growing balls of fire, smoke puffs, sparks, a flash, a scorch |
+| `shield_up`, `shield_hit`, `shield_shatter` | the bubble (a shader with a bright rim and drifting bands; up to six impact ripples running out from where hits land), its pop, and its shattering into glowing shards |
+| `stun_beam`, `stun_burst` | a violet bolt and a crackling ring where it bursts; stars spin over stunned heads |
+| `teleport` | violet puffs at both ends and a fading streak |
+| `golem_rise`, `golem_slam`, `titan_rise` | dust, cracked rings, camera shake |
+| `frost_nova`, `spike`, `meteor_warn`, `meteor`, `well`, `well_burst`, `storm` | the level 2-4 spells (see the table in the main README) |
+| `level_up` | a column of golden light and the new spell's name (a toast on your own screen) |
+| `vault_door` | swings the vault's door open or shut |
+
+Every frame `update(delta, states)` keeps shield bubbles on their players (flickering when mana runs low), puts frost
+at the feet of slowed players, and lights each caster's staff or wand in the spell's colour while they cast or hold
+the shield, with sparks drawn in. `fireball_node()` builds the flying fireball (an emissive orb, a light, trailing
+embers) that Main flies like any projectile. Only the biggest flashes cast shadows, to keep the frame rate up.
+
+## golems.gd
+
+`class_name Golems` (RefCounted, server only): the wand's stone golems and the Stone Titan. `spawn(owner, pos, yaw,
+now, titan)` (six small ones per summoner, one titan), `tick(now, people)` runs their AI each server tick and returns
+the slams that landed, `hurt(id, amount, from, dir)`, `stun(id, ticks)`, `pack()` for the network.
+
+The AI: rise from the ground (0.75 s), pick a target every quarter second (the nearest player both sides have PvP on
+for, or another summoner's golem, within 25 m; else a practice dummy within 14 m; else follow the summoner), steer
+round pillars (the first free direction fanning out from the straight line, keeping to one side, with a detour when
+stuck), start the slam on the run as it closes in and keep chasing while the arms come up. Never targets its own
+summoner, who can't hurt it. The titan is slower and tougher and its slam hits everyone within 2.8 m of where it lands.
+
+## golem_view.gd
+
+`class_name GolemView`: draws the golems from `Net.golems_changed` (a few updates a second), easing each toward where
+the server says it is. Built from stone blocks (moss on the shoulders, glowing amber eyes; the titan darker, with red
+eyes and a molten glow in its chest) and animated in code: rising out of the ground, breathing, walking (legs and arms
+swinging, body rocking), slamming (arms up, lean back, slam, lean in; legs still running when it swings on the move),
+stunned (violet, trembling) and crumbling (the blocks fly apart, tumble and sink).
+
+## Magic in the other scripts
+
+- **weapons.gd**: `STAFF` and `WAND`, their spell tables (cost, timing, range, radius, damage, level), `LEVEL_KILLS`,
+  `level_for`, `unlocked`, `area_damage` (full at the centre, falling to the minimum at the edge), shield mana costs.
+- **sim.gd**: mana, the picked spell, the held shield, stun, slow, the wand's recharges and both weapons' levels are part
+  of the player state; casting, the shield and the teleport (`teleport_target`, a blink with a maximum reach) are in
+  the shared simulation, so they are predicted exactly; `Ev.CAST` tells the server a spell went off.
+- **net.gd**: `_cast` and the spell code (lightning, fireballs as projectile kind 2, `_blast` for area damage, `_stun_target`,
+  gravity wells, storms, golems), `_shield_soak` (hits on a shield cost mana; out of mana it shatters), `_magic_kill`
+  (levels), PvP (`set_pvp`, `can_hurt`), the vault door, the one-of-a-kind staff and wand.
+- **world_layout.gd**: the tower (`TOWER_*`) and the vault (`VAULT_*`) as boxes with a `kind`, the staff and wand spawns.
+- **main.gd**: R picks a spell, the mana bar, the spell and level lines, the aim point sent with every input, the vault's
+  look and door, the tower's beacon, `--give-all`, `--max-level` and `--bot magic` (`--plan2`, `--plan3`) for testing.
+- **avatar.gd** / **figure_avatar.gd**: the staff or wand in hand (Pip holds a small 3D model at his side), cast poses,
+  the staff raised overhead while shielding; outfits per player (`tools/make_outfits.py`).

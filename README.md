@@ -86,6 +86,31 @@ Other rules worth knowing:
   so a hit that looked right on your screen counts.
 - Hitting a fruit tree three times knocks ripe fruit down; swings and walking into fallen fruit send it rolling.
 
+## Magic: the staff and the wand
+
+Two magic weapons, each one of a kind (only one player has each; they go back when that player leaves):
+
+- **The Wizard staff** lies on top of the **wizard's tower**, a spiral of pillar steps 15.6 m up, in sight of the spawn
+  (follow the pale beam of light). Every step is one jump from the last. The staff uses **mana** (the blue bar under
+  your health; it comes back at 12 a second, but not while you cast or hold the shield).
+- **The Magic wand** is hidden in **the vault**, a low stone block far from the spawn: walk round to its far side, open
+  the door (E) and take the wand off its shelf. The wand uses no mana: each spell has its own **recharge** instead.
+
+Pick a weapon (6 staff, 7 wand), pick a spell with **R**, hold the left mouse button to cast where the crosshair is.
+
+| Level | Staff (mana) | Wand (recharge) |
+|---|---|---|
+| 1 | **Lightning** (34): a warning ring, then a bolt from the sky; area damage 28 at the centre down to 8 at 3 m | **Golem** (10 s): a small, fast stone golem (8 m/s, faster than walking, slower than sprinting) that chases your enemies from 25 m and hits on the move; up to 6, loyal to you |
+| 1 | **Fireball** (22): a burning orb that bursts on contact: 24 at the centre down to 6 at 3.4 m | **Teleport** (4 s): blink to what the crosshair is on, up to 18 m (five dashes), onto tops or into the air |
+| 1 | **Shield** (10, held): hold the button to keep the bubble up (the staff raised overhead); hits on it cost mana (1.5 a point from weapons, 2 from spells, 25 for a stun); out of mana, it **shatters** | **Stun** (5 s): a bolt that bursts in a 2.5 m ring where it lands; everyone caught is held for 3 s |
+| 2 (3 kills) | **Frost Nova** (30): a ring of ice from you, 6 m: damage, a shove, and half speed for 2 s | **Earth Spikes** (6 s): stone spikes stab up one after another in a line toward the crosshair |
+| 3 (8 kills) | **Meteor** (45): a flaming rock falls where you aim: 40 at the centre down to 10 at 5 m, then burning ground for 3 s | **Gravity Well** (15 s): a vortex that drags enemies within 7 m into its heart for 3 s, then bursts |
+| 4, ultimate (18 kills) | **Arcane Storm** (80): a storm cloud rains lightning for 5 s, seeking enemies under it | **Stone Titan** (60 s): one giant golem, 150 health, whose slam crushes everyone round it |
+
+Kills with the staff or wand (with **PvP** on: P) level that weapon up: after 3, then 5 more, then 10 more. Area damage
+is always strongest at the centre and falls off toward the edge; you never hurt yourself. Players only hurt each other
+when both have PvP on; dummies and golems can always be hit.
+
 ## Download and play (Windows)
 
 Step-by-step for hosts and guests, with Tailscale and port forwarding: [docs/how-to-host-and-join.pdf](docs/how-to-host-and-join.pdf).

@@ -29,7 +29,7 @@ func _on_states(_tick: int, data: Array) -> void:
 		var id := int(e[0])
 		seen[id] = true
 		if not golems.has(id):
-			golems[id] = _make(int(e[1]))
+			golems[id] = _make(int(e[1]), e.size() > 10 and int(e[10]) == 1)
 			(golems[id].root as Node3D).position = Vector3(e[2], e[3], e[4])
 		var g: Dictionary = golems[id]
 		g.pos = Vector3(e[2], e[3], e[4])
@@ -65,12 +65,12 @@ func _block(parent: Node3D, size: Vector3, at: Vector3, c: Color, mats: Array) -
 	return mi
 
 
-func _make(owner: int) -> Dictionary:
+func _make(owner: int, titan := false) -> Dictionary:
 	var mats := []
 	var root := Node3D.new()
 	add_child(root)
-	var rig := Node3D.new()           # the golem itself, at its small size
-	rig.scale = Vector3.ONE * Golems.SCALE
+	var rig := Node3D.new()           # the golem itself, small (or a titan: huge, darker, with red eyes and a glow)
+	rig.scale = Vector3.ONE * (Golems.TITAN_SCALE if titan else Golems.SCALE)
 	root.add_child(rig)
 	var body := Node3D.new()           # everything above the hips; leans and rocks
 	body.position.y = 0.95
@@ -89,7 +89,7 @@ func _make(owner: int) -> Dictionary:
 		var em := BoxMesh.new()
 		em.size = Vector3(0.09, 0.06, 0.03)
 		eye.mesh = em
-		eye.material_override = MagicFx._glow_mat(Color("ffb02e"), 4.0)
+		eye.material_override = MagicFx._glow_mat(Color("ff3a1a") if titan else Color("ffb02e"), 5.0 if titan else 4.0)
 		eye.position = Vector3(x, 0.14, -0.225)
 		head.add_child(eye)
 	var arms := []
@@ -110,9 +110,18 @@ func _make(owner: int) -> Dictionary:
 		legs.append(hip)
 	var label := Label3D.new()
 	var who: String = net.roster.get(owner, {}).get("name", "?")
-	label.text = "Golem (%s)" % who
+	label.text = ("Stone Titan (%s)" if titan else "Golem (%s)") % who
+	if titan:   # a molten glow in its chest
+		var core := OmniLight3D.new()
+		core.light_color = Color("ff5a1a")
+		core.light_energy = 2.0
+		core.omni_range = 4.0
+		core.position = Vector3(0, 1.4, -0.4)
+		rig.add_child(core)
+		for mc in mats:
+			mc[1] = (mc[1] as Color).darkened(0.25)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.position.y = 1.75
+	label.position.y = 4.2 if titan else 1.75
 	label.font_size = 34
 	label.outline_size = 10
 	label.modulate = Color("d9cfc0")
@@ -126,11 +135,11 @@ func _make(owner: int) -> Dictionary:
 	bar.scale = Vector3(0.6, 0.06, 1)
 	bar.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	bar.no_depth_test = true
-	bar.position.y = 1.58
+	bar.position.y = 3.95 if titan else 1.58
 	root.add_child(bar)
 	return { "root": root, "body": body, "head": head, "arm_l": arms[0], "arm_r": arms[1], "leg_l": legs[0], "leg_r": legs[1],
 		"pos": root.position, "yaw": 0.0, "state": Golems.State.RISE, "t": 0.0, "hp": Golems.HP, "stun": false,
-		"mats": mats, "owner": owner, "label": label, "bar": bar, "phase": 0.0, "flash": 0.0, "pieces": [] }
+		"mats": mats, "owner": owner, "label": label, "bar": bar, "phase": 0.0, "flash": 0.0, "pieces": [], "titan": titan }
 
 
 func _process(delta: float) -> void:
@@ -148,7 +157,7 @@ func _process(delta: float) -> void:
 		root.rotation.y = lerp_angle(root.rotation.y, g.yaw, clampf(delta * 10.0, 0.0, 1.0))
 		var speed := Vector2(root.position.x - before.x, root.position.z - before.z).length() / maxf(delta, 1e-4)
 		_pose(g, speed, delta)
-		var k := float(g.hp) / float(Golems.HP)
+		var k := float(g.hp) / float(Golems.TITAN_HP if g.titan else Golems.HP)
 		(g.bar as Sprite3D).scale.x = maxf(0.6 * k, 0.001)
 		(g.bar as Sprite3D).modulate = Color(0.9, 0.3, 0.2).lerp(Color(0.85, 0.8, 0.6), k)
 		g.flash = maxf(g.flash - delta, 0.0)

@@ -142,5 +142,28 @@ func _initialize() -> void:
 		net._server_spells()
 		Sim.step(b.state, Sim.PlayerInput.new(200 + t, 0, 0.0))
 	check(b.state.hp < Sim.MAX_HP and net.wells.is_empty(), "it nibbles and then bursts (%d damage)" % (Sim.MAX_HP - b.state.hp))
+	# arcane storm: bolts keep raining on someone under it
+	b.state.hp = Sim.MAX_HP
+	b.state.dead = 0
+	b.state.pos = Vector3(60, 0, 50)
+	b.state.vel = Vector3.ZERO
+	a.state.pos = Vector3(60, 0, 62)
+	a.state.weapon = Weapons.STAFF
+	a.state.spell = 5
+	net._cast(a, Sim.PlayerInput.new(5, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 5, Vector3(60, 0, 50)), a.state.pos)
+	var strikes := 0
+	var last_hp := b.state.hp
+	for t in 330:
+		net.server_tick += 1
+		net._server_spells()
+		if b.state.hp < last_hp:
+			strikes += 1
+		last_hp = b.state.hp
+		if b.state.dead > 0:
+			b.state.dead = 0
+			b.state.hp = Sim.MAX_HP
+			last_hp = b.state.hp
+		b.state.vel = Vector3.ZERO
+	check(strikes >= 5 and net.storms.is_empty(), "the storm rains bolts on someone under it (%d hits in 5 s), then clears" % strikes)
 	print("%d failed" % bad)
 	quit(bad)

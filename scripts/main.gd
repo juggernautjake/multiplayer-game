@@ -563,12 +563,15 @@ func _bot_magic() -> Array:
 	if _args().has("plan2"):   # the level-3 spells: a meteor on the dummy, then a gravity well beside it
 		plan = [[90, 4, 3], [330, 4, 3]]
 		weapon_slot = Weapons.STAFF if bot_t < 300 else Weapons.WAND
+	if _args().has("plan3"):   # the ultimates: an arcane storm over the dummies, then a stone titan beside them
+		plan = [[90, 5, 3], [480, 5, 3]]
+		weapon_slot = Weapons.STAFF if bot_t < 450 else Weapons.WAND
 	for p in plan:
 		if bot_t >= p[0] and bot_t < p[0] + p[2]:
 			b |= Sim.Btn.ATTACK
 		if bot_t >= p[0] - 10:
 			spell = p[1]
-	if bot_t >= 470 and bot_t < 560 and not _args().has("plan2"):
+	if bot_t >= 470 and bot_t < 560 and not _args().has("plan2") and not _args().has("plan3"):
 		aim = dummy + Vector3(0, 0, 2.5)
 	elif bot_t >= 640 and bot_t < 720:
 		aim = me + Vector3(7.0, 0, 0)
@@ -576,7 +579,7 @@ func _bot_magic() -> Array:
 		print("[magic] t%d fps %d %s spell %d mana %d shield %d recharge %s golems %d" % [bot_t, Engine.get_frames_per_second(), Weapons.NAMES[weapon_slot], net.predicted.spell,
 			net.predicted.mana / 5, net.predicted.shield, str(net.predicted.recharge), golem_view.golems.size() if golem_view else -1])
 	var shots := str(_args().get("shots", ""))
-	if shots != "" and bot_t in [104, 116, 140, 156, 166, 186, 196, 340, 372, 380, 418, 440, 470, 520, 580, 600, 660, 734, 760, 860]:
+	if shots != "" and bot_t in [104, 116, 140, 156, 166, 186, 196, 250, 340, 372, 380, 418, 440, 470, 520, 580, 600, 660, 700, 734, 760, 860]:
 		get_viewport().get_texture().get_image().save_png(shots.path_join("magic_%d.png" % bot_t))
 	if bot_t > 900:
 		_audit_print()
@@ -906,7 +909,7 @@ func _build_ui() -> void:
 	hud_spells.grow_vertical = Control.GROW_DIRECTION_BEGIN   # grows upward, above the weapons line
 	hud_spells.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	hud_spells.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hud_spells.offset_top = -180
+	hud_spells.offset_top = -210
 	hud_spells.offset_bottom = -110
 	hud_spells.add_theme_font_size_override("font_size", 18)
 	hud_spells.add_theme_color_override("font_color", Color("bcd6ff"))
@@ -1343,7 +1346,10 @@ func _update_combat_hud() -> void:
 			lvl_line += "   kills %d / %d to the next level" % [kn, int(Weapons.LEVEL_KILLS[lv])]
 		else:
 			lvl_line += "   (ultimate unlocked)"
-		hud_spells.text = lvl_line + "\nR spell:  " + "   ".join(parts) + ("\nSTUNNED" if st.stun > 0 else "")
+		var rows := ["   ".join(parts.slice(0, 3))]   # three spells a row, so six fit on screen
+		if parts.size() > 3:
+			rows.append("   ".join(parts.slice(3)))
+		hud_spells.text = lvl_line + "\nR spell:  " + "\n".join(rows) + ("\nSTUNNED" if st.stun > 0 else "")
 	else:
 		hud_spells.text = "STUNNED" if st.stun > 0 else ""
 	if st.dead > 0:

@@ -26,6 +26,16 @@ const ATTACK_SPEED := 0.5       # share of its speed after the slam lands (it ru
 const START_AT := 0.9           # metres beyond its reach where it starts a swing on the run
 const SENSE := 25.0            # metres: how far off it notices someone to chase
 const SCALE := 0.6             # its size next to a person (small and quick)
+## The Stone Titan (the wand's ultimate): one per summoner, not counted among the six; big, slow, tough, and its slam
+## crushes everyone near where it lands, not just its target.
+const TITAN_HP := 150
+const TITAN_SPEED := 5.5
+const TITAN_REACH := 1.9
+const TITAN_DAMAGE := 18
+const TITAN_KNOCK := 8.0
+const TITAN_SLAM := 2.8        # metres round the slam's landing point that it crushes
+const TITAN_SCALE := 1.5
+const TITAN_LIFE := 30 * 60
 enum State { RISE, IDLE, WALK, ATTACK, DIE, STUN }
 
 
@@ -44,15 +54,17 @@ class G:
 	var detour := 0           # ticks left going round something it got stuck on
 	var check_pos := Vector3.ZERO
 	var stun := 0
+	var titan := false
+	var max_hp := HP
 
 
 var list := {}        # id -> G
 var next_id := 1
 
 
-func spawn(owner: int, pos: Vector3, yaw: float, now: int) -> G:
-	var mine := list.values().filter(func(g): return g.owner == owner and g.state != State.DIE)
-	if mine.size() >= MAX_PER_OWNER:   # the oldest crumbles to make room
+func spawn(owner: int, pos: Vector3, yaw: float, now: int, titan := false) -> G:
+	var mine := list.values().filter(func(g): return g.owner == owner and g.state != State.DIE and g.titan == titan)
+	if mine.size() >= (1 if titan else MAX_PER_OWNER):   # the oldest crumbles to make room
 		mine.sort_custom(func(a, b): return a.born < b.born)
 		_to_state(mine[0], State.DIE)
 	var g := G.new()
@@ -64,6 +76,9 @@ func spawn(owner: int, pos: Vector3, yaw: float, now: int) -> G:
 	g.born = now
 	g.check_pos = pos
 	g.side = 1.0 if g.id % 2 == 0 else -1.0
+	g.titan = titan
+	g.max_hp = TITAN_HP if titan else HP
+	g.hp = g.max_hp
 	list[g.id] = g
 	return g
 
@@ -114,7 +129,7 @@ func tick(now: int, people: Array) -> Array:
 			if g.t >= DIE:
 				list.erase(g.id)
 			continue
-		if now - g.born > LIFE:
+		if now - g.born > (TITAN_LIFE if g.titan else LIFE):
 			_to_state(g, State.DIE)
 			continue
 		if g.state == State.RISE:
@@ -129,16 +144,29 @@ func tick(now: int, people: Array) -> Array:
 				var cd := Vector2(chase.x - g.pos.x, chase.z - g.pos.z)
 				if cd.length() > 0.05:
 					g.yaw = lerp_angle(g.yaw, atan2(-cd.x, -cd.y), 0.25)
-				if cd.length() > REACH * 0.6 and g.t < WINDUP + 6:
+				if cd.length() > _reach(g) * 0.6 and g.t < WINDUP + 6:
 					var cdir := _steer(g, cd)
 					if cdir != Vector2.ZERO:
-						_move(g, cdir * SPEED * (1.0 if g.t < WINDUP else ATTACK_SPEED) * Config.DT)
+						_move(g, cdir * _speed(g) * (1.0 if g.t < WINDUP else ATTACK_SPEED) * Config.DT)
 			if g.t == WINDUP:
 				var tp = _target_pos(g, where)
 				if tp != null:
 					var d := Vector2(tp.x - g.pos.x, tp.z - g.pos.z)
 					var face := Vector2(-sin(g.yaw), -cos(g.yaw))
-					if d.length() <= REACH + 0.6 and (d.length() < 0.4 or absf(face.angle_to(d)) < deg_to_rad(75.0)):
+					if g.titan:   # the titan's slam crushes everyone near where it lands
+						var at := g.pos + Vector3(face.x, 0, face.y) * TITAN_REACH
+						for id in where.keys():
+							if id != g.owner and pvp.get(id, false) and pvp.get(g.owner, false):
+								var off: Vector3 = where[id] - at
+								if Vector2(off.x, off.z).length() <= TITAN_SLAM:
+									hits.append([g, id, TITAN_DAMAGE, Vector3(off.x, 0, off.z)])
+						for o: G in list.values():
+							if o.owner != g.owner and o.state != State.DIE and Vector2(o.pos.x - at.x, o.pos.z - at.z).length() <= TITAN_SLAM:
+								hits.append([g, -1000 - o.id, TITAN_DAMAGE, o.pos - at])
+						for i in WorldLayout.DUMMIES.size():
+							if Vector2(WorldLayout.DUMMIES[i].x - at.x, WorldLayout.DUMMIES[i].z - at.z).length() <= TITAN_SLAM:
+								hits.append([g, -(i + 1), TITAN_DAMAGE, WorldLayout.DUMMIES[i] - at])
+					elif d.length() <= _reach(g) + 0.6 and (d.length() < 0.4 or absf(face.angle_to(d)) < deg_to_rad(75.0)):
 						hits.append([g, g.target, DAMAGE, Vector3(d.x, 0, d.y)])
 			if g.t >= ATTACK:
 				g.atk_cd = COOLDOWN
@@ -156,10 +184,10 @@ func tick(now: int, people: Array) -> Array:
 				_to_state(g, State.IDLE)
 			continue
 		var to := Vector2(goal.x - g.pos.x, goal.z - g.pos.z)
-		if g.target != 0 and to.length() <= REACH + 0.35 and g.atk_cd > 0:
+		if g.target != 0 and to.length() <= _reach(g) + 0.35 and g.atk_cd > 0:
 			g.yaw = atan2(-to.x, -to.y)   # in reach, waiting to swing again
 			continue
-		if g.target != 0 and g.atk_cd == 0 and to.length() <= REACH + START_AT:
+		if g.target != 0 and g.atk_cd == 0 and to.length() <= _reach(g) + START_AT:
 			_to_state(g, State.ATTACK)   # starts the swing on the run; it closes in while the arms come up
 			continue
 		if to.length() <= keep:
@@ -171,7 +199,7 @@ func tick(now: int, people: Array) -> Array:
 			continue
 		if g.state != State.WALK:
 			_to_state(g, State.WALK)
-		_move(g, dir * SPEED * Config.DT)
+		_move(g, dir * _speed(g) * Config.DT)
 		g.yaw = lerp_angle(g.yaw, atan2(-dir.x, -dir.y), 0.18)
 		if g.t % 40 == 0:   # stuck: barely moved in 2/3 s: go the other way round for a while
 			if g.pos.distance_to(g.check_pos) < 0.4:
@@ -179,6 +207,14 @@ func tick(now: int, people: Array) -> Array:
 				g.detour = 50
 			g.check_pos = g.pos
 	return hits
+
+
+func _speed(g: G) -> float:
+	return TITAN_SPEED if g.titan else SPEED
+
+
+func _reach(g: G) -> float:
+	return TITAN_REACH if g.titan else REACH
 
 
 func _target_pos(g: G, where: Dictionary):
@@ -236,8 +272,9 @@ func _steer(g: G, to: Vector2) -> Vector2:
 
 
 func _free(g: G, p: Vector3) -> bool:
+	var rad := RADIUS * (TITAN_SCALE / SCALE if g.titan else 1.0)
 	for b: WorldLayout.Box in WorldLayout.boxes():
-		if b.h > 0.5 and absf(p.x - b.cx) < b.hx + RADIUS and absf(p.z - b.cz) < b.hz + RADIUS:
+		if b.h > 0.5 and absf(p.x - b.cx) < b.hx + rad and absf(p.z - b.cz) < b.hz + rad:
 			return false
 	for d: Vector3 in WorldLayout.DUMMIES:
 		if Vector2(p.x - d.x, p.z - d.z).length() < Sim.DUMMY_RADIUS + RADIUS:
@@ -255,9 +292,9 @@ func _move(g: G, step: Vector2) -> void:
 	g.pos.y = 0.0
 
 
-## Every golem, flat for the network: [id, owner, x, y, z, yaw, state, t, hp, stunned].
+## Every golem, flat for the network: [id, owner, x, y, z, yaw, state, t, hp, stunned, titan].
 func pack() -> Array:
 	var out := []
 	for g: G in list.values():
-		out.append([g.id, g.owner, g.pos.x, g.pos.y, g.pos.z, g.yaw, g.state, g.t, g.hp, 1 if g.stun > 0 else 0])
+		out.append([g.id, g.owner, g.pos.x, g.pos.y, g.pos.z, g.yaw, g.state, g.t, g.hp, 1 if g.stun > 0 else 0, 1 if g.titan else 0])
 	return out

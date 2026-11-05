@@ -17,6 +17,9 @@
 ##              blast, flying rocks, a shockwave ring, a crater, and flames on the ground for 3 s;
 ##   gravity well: a dark violet vortex: a black core, spinning rings, motes spiralling in, a violet light pulsing;
 ##              then it collapses and bursts outward;
+##   arcane storm: a dark churning cloud gathers high over the area, lit from inside by flickering violet-blue
+##              flashes, and bolts rain down from it (each with its warning ring);
+##   stone titan: it heaves up out of the ground in a great cloud of dust; its slams shake the ground;
 ##   level up:  a column of golden light round the player and the new spell's name;
 ##   shatter:   a shield that runs out of mana bursts into glowing shards.
 ## Every caster glows while casting (and while holding the shield up): a light in the spell's colour at the staff or
@@ -64,7 +67,8 @@ var cast_lights := {}        # player id -> OmniLight3D at their staff / wand wh
 var frosts := {}             # player id -> the frosty ring at the feet of a slowed player
 const SPELL_COLOR := { "Lightning": Color("cfe6ff"), "Fireball": Color("ff8a2a"), "Shield": Color("7fd0ff"),
 	"Frost Nova": Color("9fe8ff"), "Golem": Color("ffb02e"), "Teleport": Color("c070ff"), "Stun": Color("c070ff"),
-	"Earth Spikes": Color("d8a060"), "Meteor": Color("ff5a1a"), "Gravity Well": Color("8a3cff") }
+	"Earth Spikes": Color("d8a060"), "Meteor": Color("ff5a1a"), "Gravity Well": Color("8a3cff"),
+	"Arcane Storm": Color("9fc4ff"), "Stone Titan": Color("ff5a1a") }
 var _door_target := 0.0
 
 
@@ -104,8 +108,11 @@ func _on_fx(kind: String, a: Array) -> void:
 		"golem_rise":
 			_golem_dust(a[1], 0.9)
 		"golem_slam":
-			_golem_dust(a[1], 0.9)
-			_shake_near(a[1], 0.12)
+			var big: bool = a.size() > 2 and a[2]
+			_golem_dust(a[1], 2.8 if big else 0.9)
+			_shake_near(a[1], 0.35 if big else 0.12)
+			if big:
+				_flash_light(a[1] + Vector3(0, 0.5, 0), Color("ffb060"), 3.0, 6.0, 0.3)
 		"vault_door":
 			_door_target = -1.7 if a[0] else 0.0
 		"frost_nova":
@@ -120,6 +127,12 @@ func _on_fx(kind: String, a: Array) -> void:
 			_well(a[0], float(a[1]) * Config.DT, float(a[2]))
 		"well_burst":
 			_well_burst(a[0], float(a[1]))
+		"storm":
+			_storm(a[0], float(a[1]) * Config.DT, float(a[2]))
+		"titan_rise":
+			_golem_dust(a[1], 2.6)
+			_flash_light(a[1] + Vector3(0, 1, 0), Color("ff5a1a"), 6.0, 10.0, 0.8)
+			_shake_near(a[1], 0.3)
 		"spike":
 			_spike(a[0])
 		"level_up":
@@ -896,4 +909,58 @@ func _well_burst(at: Vector3, r: float) -> void:
 	_flash_light(at, Color("a050ff"), 8.0, r * 4.0, 0.5)
 	Fx.burst(main, at, Vector3.UP, Color("d0a0ff"), 40, 8.0, 0.05)
 	_shake_near(at, 0.25)
+
+
+func _storm(at: Vector3, life: float, area: float) -> void:
+	var root := Node3D.new()
+	main.add_child(root)
+	root.global_position = at + Vector3(0, 12.0, 0)
+	var puffs := []
+	for i in 26:   # the cloud: dark puffs in a churning disc
+		var p := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		var r := randf_range(1.8, 3.4)
+		sm.radius = r
+		sm.height = r * 1.2
+		p.mesh = sm
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.16, 0.15, 0.22, 0.0)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.emission_enabled = true
+		m.emission = Color("4a3a8a")
+		m.emission_energy_multiplier = 0.0
+		p.material_override = m
+		var a := randf() * TAU
+		var d := sqrt(randf()) * (area + 2.0)
+		p.position = Vector3(cos(a) * d, randf_range(-0.8, 0.8), sin(a) * d)
+		root.add_child(p)
+		puffs.append([p, m])
+		var tw := p.create_tween()
+		tw.tween_property(m, "albedo_color:a", 0.88, 1.0)
+	var l := OmniLight3D.new()
+	l.light_color = Color("8fa8ff")
+	l.omni_range = area * 3.5
+	l.light_energy = 0.0
+	root.add_child(l)
+	l.position.y = -2.0
+	var t0 := Time.get_ticks_msec()
+	var timer := Timer.new()
+	timer.wait_time = 1.0 / 30.0
+	timer.autostart = true
+	timer.timeout.connect(func():
+		root.rotate_y(0.25 / 30.0)
+		var flick := randf() < 0.12
+		l.light_energy = randf_range(2.5, 5.0) if flick else maxf(l.light_energy - 0.6, 0.3)
+		for pm in puffs:
+			(pm[1] as StandardMaterial3D).emission_energy_multiplier = 1.4 if flick and randf() < 0.5 else 0.15)
+	root.add_child(timer)
+	var shade := _disc(at, area, Color(0.05, 0.04, 0.1), 0.0)   # the storm's shadow on the ground
+	shade.create_tween().tween_property(shade.material_override, "albedo_color:a", 0.35, 1.0)
+	get_tree().create_timer(life).timeout.connect(func():
+		for pm in puffs:
+			(pm[0] as Node3D).create_tween().tween_property(pm[1], "albedo_color:a", 0.0, 1.2)
+		shade.create_tween().tween_property(shade.material_override, "albedo_color:a", 0.0, 1.2)
+		get_tree().create_timer(1.3).timeout.connect(func():
+			root.queue_free()
+			shade.queue_free()))
 
