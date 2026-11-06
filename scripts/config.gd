@@ -3,7 +3,7 @@ class_name Config
 
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 32
-const MAX_NAME := 16
+const MAX_NAME := 24   # v0.12.6: was 16 (spawned units' names may run to 40)
 
 ## Fixed simulation rate (also set in project.godot: physics/common/physics_ticks_per_second).
 ## Every input is one step of exactly 1 / TICK_RATE seconds, on the server and on the client.

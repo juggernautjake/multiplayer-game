@@ -32,6 +32,7 @@ signal item_removed(id: int, taker: int)
 signal magic_fx(kind: String, args: Array)        # spells: see MagicFx
 signal golems_changed(tick: int, data: Array)   # golems' state from the server: see GolemView
 signal golem_order_changed(owner: int, mode: int, point: Vector3, target: int)   # v0.12.2: a summoner's order (Golems.Order)
+signal dev_output(text: String)   # v0.12.6: the dev console's reply (DevCmd)
 
 const COLORS := [Color("e6194b"), Color("3cb44b"), Color("ffe119"), Color("4363d8"), Color("f58231"), Color("911eb4"),
 	Color("46f0f0"), Color("f032e6"), Color("bcf60c"), Color("fabebe"), Color("008080"), Color("e6beff")]
@@ -69,6 +70,10 @@ class ServerPlayer:
 	var heal_t0 := 0            # v0.12.0: the tick this heal-aura channel's pulses count from
 	var heal_last := -100       # the last tick it was channelling
 	var minion := false         # v0.12.3: one of the six corrupted minions the Duel Stone raises in the cutscene (npc too)
+	var side := -1              # v0.12.6 (dev console): Side.ALLY / HOSTILE / NEUTRAL; -1: players ALLY, NPCs HOSTILE
+	var size := 1.0             # v0.12.6: drawn this much bigger, and its reach and hitbox with it (0.3-4)
+	var god := false            # v0.12.6 (dev console): takes no damage
+	var dev := false            # v0.12.6: spawned from the dev console (beating it doesn't raise duel tiers)
 
 
 ## Something lying on the ground to pick up (server). `spawn` >= 0: one of the fixed spawns, which comes back 20 s
@@ -111,6 +116,7 @@ var boss_fighters := []       # the players in the fight (defeat: all of them do
 var defeated := false         # the defeat screen is up: waiting for a key to start again
 var defeat_t := 0
 var next_npc := 1000000       # NPC ids (they're players without a network peer)
+var dev_cheats := false       # v0.12.6: the host let guests use dev commands (`cheats on`)
 const DUEL_REACH := 2.4
 const ALTAR_R := 2.6
 var pending_spells: Array = []   # [tick, kind, where, caster]: lightning that strikes after its warning
@@ -373,7 +379,9 @@ func roster_update(list: Array) -> void:
 		roster[int(e[0])] = { "name": str(e[1]), "color": e[2], "character": str(e[3]) if e.size() > 3 else "pip",
 			"outfit": int(e[4]) if e.size() > 4 else 0, "pvp": bool(e[5]) if e.size() > 5 else false,
 			"kills": e[6] if e.size() > 6 else [0, 0], "kind": int(e[7]) if e.size() > 7 else 0,   # kind: 0 player, 1 challenger, 2 minion
-			"arms": e[8] if e.size() > 8 else [0, 0, 0, 0, 0] }   # v0.12.5: kills with fists, club, sword, bow, slingshot
+			"arms": e[8] if e.size() > 8 else [0, 0, 0, 0, 0],   # v0.12.5: kills with fists, club, sword, bow, slingshot
+			"side": int(e[9]) if e.size() > 9 else 0, "size": float(e[10]) if e.size() > 10 else 1.0,   # v0.12.6
+			"god": bool(e[11]) if e.size() > 11 else false }
 	roster_changed.emit(roster)
 
 
@@ -451,19 +459,78 @@ func golem_order_sync(owner: int, mode: int, point: Vector3, target: int) -> voi
 func _golem_people() -> Array:
 	var people := []
 	for p: ServerPlayer in players.values():
-		people.append([p.id, p.state.pos, p.pvp or p.npc, p.state.dead == 0, Golems.Who.NPC if p.npc else Golems.Who.PLAYER])
+		# v0.12.6: a friendly unit counts as one of the players' side with PvP off (golems leave it alone; its own golems
+		# fight the hostile ones); a neutral one only once it has hurt their summoner
+		var who := Golems.Who.PLAYER
+		var pvp := p.pvp
+		if p.npc:
+			match side_of(p):
+				Side.HOSTILE:
+					who = Golems.Who.NPC
+					pvp = true
+				Side.NEUTRAL:
+					who = Golems.Who.NEUTRAL
+					pvp = true
+				_:
+					pvp = false
+		people.append([p.id, p.state.pos, pvp, p.state.dead == 0 and not p.god, who])
 	if boss != null and boss.state != Boss.S.ENTER and boss.state != Boss.S.DEATH:
 		people.append([Boss.ID, boss.pos, true, true, Golems.Who.BOSS])   # everyone's golems fight him
 	return people
 
 
-## Can `from` hurt player `target`? Only when both have PvP on (dummies and the yard can always be hit).
+## v0.12.6 whose side a fighter is on. ALLY: the players' side (players, friendly units); HOSTILE: the Duel Stone's
+## challengers, minions and hostile units (they fight the players' side, never each other); NEUTRAL: fights nobody until
+## someone hurts it, then that one (a GRUDGE like the golems'), and anyone may hit it.
+enum Side { ALLY, HOSTILE, NEUTRAL }
+const SIDE_NAMES := ["friendly", "hostile", "neutral"]
+
+
+static func side_of(p: ServerPlayer) -> int:
+	if p.side >= 0:
+		return p.side
+	return Side.HOSTILE if p.npc else Side.ALLY
+
+
+## Would NPC `me` go after `q` (a player or another NPC)? Hostile: the players' side, and a neutral that hurt it.
+## Friendly: hostile ones, and a neutral that hurt it or its summoner. Neutral: only whoever hurt it lately.
+func npc_foe(me: ServerPlayer, q: ServerPlayer) -> bool:
+	if q.state.dead > 0 or q.god:
+		return false
+	return foe_side(me, q)
+
+
+## npc_foe without the "still standing" part (for a fighter's golems).
+func foe_side(me: ServerPlayer, q: ServerPlayer) -> bool:
+	if q.id == me.id:
+		return false
+	var a := side_of(me)
+	var b := side_of(q)
+	var grudge := golems.harmed(me.id, q.id, Golems.GRUDGE)
+	if a == Side.NEUTRAL:
+		return grudge
+	if b == Side.NEUTRAL:
+		return grudge or (a == Side.ALLY and me.ai != null and golems.harmed(me.ai.owner, q.id, Golems.GRUDGE))
+	return a != b
+
+
+## Can `from` hurt player `target`? Players: only when both have PvP on (dummies and the yard can always be hit).
+## v0.12.6: with NPCs, by sides: never your own side (hostile units never hurt each other, friendly units and players
+## never hurt each other), anyone can hurt a neutral one and it can hurt anyone. God mode takes nothing.
 func can_hurt(from: int, target: int) -> bool:
+	if target > 0 and players.has(target) and players[target].god:
+		return false
 	if target < 0 or from == target or not players.has(from) or not players.has(target):
 		return true
-	if players[from].npc or players[target].npc:   # challengers: always fair game, but never each other
-		return not (players[from].npc and players[target].npc)
-	return players[from].pvp and players[target].pvp
+	var f: ServerPlayer = players[from]
+	var t: ServerPlayer = players[target]
+	if f.npc or t.npc:
+		var a := side_of(f)
+		var b := side_of(t)
+		if a == Side.NEUTRAL or b == Side.NEUTRAL:
+			return true
+		return a != b
+	return f.pvp and t.pvp
 
 
 ## The yard's events go to everyone, reliably and in order.
@@ -591,7 +658,8 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 func _server_send_roster() -> void:
 	var list := []
 	for p: ServerPlayer in players.values():
-		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp, p.kills, 2 if p.minion else (1 if p.npc else 0), p.arms])
+		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp, p.kills, 2 if p.minion else (1 if p.npc else 0), p.arms,
+			side_of(p), p.size, p.god])
 	roster_update.rpc(list)
 	if is_host_player:
 		roster_update(list)
@@ -761,7 +829,9 @@ func _melee(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
 	for t in targets:
 		var d: Vector3 = t[1] - me
 		var flat := Vector2(d.x, d.z)
-		var in_reach := flat.length() <= float(w.range) + Sim.RADIUS and absf(d.y) <= 1.8 \
+		# v0.12.6: a bigger fighter reaches further, and a bigger target is easier to reach
+		var tsz: float = players[t[0]].size if int(t[0]) > 0 and players.has(t[0]) else 1.0
+		var in_reach := flat.length() <= float(w.range) * p.size + Sim.RADIUS * tsz and absf(d.y) <= 1.8 * maxf(p.size, tsz) \
 			and (flat.length() <= 0.6 or absf(face.angle_to(flat)) <= deg_to_rad(float(w.arc) / 2.0))
 		if in_reach:
 			_damage(t[0], dmg, p.id, Vector3(flat.x, 0, flat.y), float(w.knock))
@@ -834,7 +904,7 @@ func _server_projectiles() -> void:
 				if q.id == pr.owner or q.id == pr.immune or q.state.dead > 0 or not can_hurt(pr.owner, q.id):
 					continue
 				var qp := q.state.pos
-				if Vector2(pt.x - qp.x, pt.z - qp.z).length() < 0.5 and pt.y > qp.y - 0.1 and pt.y < qp.y + 1.9:
+				if Vector2(pt.x - qp.x, pt.z - qp.z).length() < 0.5 * q.size and pt.y > qp.y - 0.1 and pt.y < qp.y + 1.9 * q.size:
 					if pr.kind == 2:
 						_burst(pr, pt)
 					else:
@@ -1117,7 +1187,7 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		if push.length_squared() > 1e-6 and knock > 0.0:
 			q.state.vel += push.normalized() * knock + Vector3(0, knock * 0.35, 0)
 			q.state.grounded = false
-		if q.state.hp == 0 and q.npc and q.ai != null and players.has(q.ai.owner) and q.state.dead == 0:
+		if q.state.hp == 0 and q.npc and not q.dev and q.ai != null and players.has(q.ai.owner) and q.state.dead == 0:
 			players[q.ai.owner].duel_wins += 1   # v0.12.0: a challenger beaten counts for whoever called it
 		if q.state.hp == 0:
 			q.state.dead = Sim.RESPAWN_TICKS
@@ -2162,7 +2232,7 @@ func spawn_npc(presser: ServerPlayer, weapon := -1, difficulty := 1) -> ServerPl
 	q.id = next_npc
 	next_npc += 1
 	q.npc = true
-	q.name = "Challenger %s (tier %d)" % [NPC_NAMES[randi() % NPC_NAMES.size()], clampi(difficulty, 0, 2) + 1]
+	q.name = "%s (tier %d)" % [Names.npc(), clampi(difficulty, 0, 2) + 1]   # v0.12.6: funnier names
 	q.color = Color("d23a2a")
 	q.character = presser.character
 	q.outfit = 3
@@ -2212,6 +2282,29 @@ func _server_npcs() -> void:
 		var inp := q.ai.think(self, q)
 		inp.seq = q.last_applied + 1
 		q.queue[inp.seq] = inp
+
+
+## v0.12.6 a line typed in the dev console: run here on the host, or sent to the host from a guest.
+func send_dev(line: String) -> void:
+	if multiplayer.multiplayer_peer == null:
+		dev_output.emit("Not in a game")
+	elif multiplayer.is_server():
+		dev_output.emit(DevCmd.run(self, my_id, line))
+	else:
+		dev_command.rpc_id(1, line)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func dev_command(line: String) -> void:
+	if not multiplayer.is_server():
+		return
+	var from := multiplayer.get_remote_sender_id()
+	dev_reply.rpc_id(from, DevCmd.run(self, from, line.left(400)))
+
+
+@rpc("authority", "call_remote", "reliable")
+func dev_reply(text: String) -> void:
+	dev_output.emit(text)
 
 
 @rpc("authority", "call_remote", "reliable")

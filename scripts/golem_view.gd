@@ -196,7 +196,7 @@ func _on_states(tick: int, data: Array) -> void:
 		var id := int(e[0])
 		seen[id] = true
 		if not golems.has(id):
-			golems[id] = _make(int(e[1]), e.size() > 10 and int(e[10]) == 1)
+			golems[id] = _make(int(e[1]), e.size() > 10 and int(e[10]) == 1, id)
 			(golems[id].root as Node3D).position = Vector3(e[2], e[3], e[4])
 		var g: Dictionary = golems[id]
 		g.pos = Vector3(e[2], e[3], e[4])
@@ -241,7 +241,7 @@ func _block(parent: Node3D, size: Vector3, at: Vector3, c: Color, mats: Array) -
 	return mi
 
 
-func _make(owner: int, titan := false) -> Dictionary:
+func _make(owner: int, titan := false, gid := -1) -> Dictionary:
 	var mats := []
 	var root := Node3D.new()
 	add_child(root)
@@ -288,7 +288,9 @@ func _make(owner: int, titan := false) -> Dictionary:
 		legs.append(hip)
 	var label := Label3D.new()
 	var who: String = net.roster.get(owner, {}).get("name", "?")
-	label.text = ("Stone Titan (%s)" if titan else "Golem (%s)") % who
+	# v0.12.6: each golem has its own (silly) name, then whose it is
+	label.text = "%s (%s's %s)" % [Names.golem(gid, titan), who, "titan" if titan else "golem"] if gid >= 0 \
+		else (("Stone Titan (%s)" if titan else "Golem (%s)") % who)
 	if titan:   # a molten glow in its chest
 		var core := OmniLight3D.new()
 		core.light_color = Color("ff5a1a")

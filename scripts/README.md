@@ -350,7 +350,7 @@ Variant overhead.
 |---|---|---|
 | `DEFAULT_PORT` | 7777 | UDP port. |
 | `MAX_PLAYERS` | 32 | Server capacity. |
-| `MAX_NAME` | 16 | Longest player name. |
+| `MAX_NAME` | 24 | Longest player name (spawned units' names may run to 40). |
 | `TICK_RATE`, `DT` | 60, 1/60 | Fixed simulation rate. |
 | `SNAPSHOT_EVERY` | 2 | A snapshot every 2 ticks (30 per second). |
 | `INTERP_DELAY_TICKS` | 6 | Starting delay for drawing other players (100 ms); Net then adapts it. |

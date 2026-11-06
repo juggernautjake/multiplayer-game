@@ -843,3 +843,33 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
   the bow upright, forearms up for the rest. Demo: `--bot show --guard`.
 - **Controls**: the mouse wheel picks spells while the staff or wand is in hand (weapons otherwise); 1-7 pick weapons;
   the bow and slingshot zoom in on their own while drawn (right mouse blocks now).
+
+## What's new in 0.12.6: the dev console, names
+
+- **Dev console** (`` ` ``, the key left of 1; `scripts/dev_console.gd` for the window, `scripts/dev_cmd.gd` for the
+  commands, run on the host). The host can always use it; guests only after the host types `cheats on`. `help` lists
+  every command, `help <command>` explains one; Tab completes; Up / Down for history; Esc or `` ` `` closes it.
+
+  | Command | What it does |
+  |---|---|
+  | `max [target]` (or `maxall`) | top out everything: every weapon, every level 4, full ammo, health and mana |
+  | `give <weapon\|all> [target]`, `take ...` | hand over / take away weapons |
+  | `level <weapon\|all\|magic\|arms> <1-4\|max> [target]` | set weapon levels (staff / wand: spells; others: damage) |
+  | `spawn <weapon\|random\|mix> [count] [tier 1-3] [friendly\|neutral\|hostile] [size N] [level 1-4] [name "..."]` | spawn fighters in front of you |
+  | `side <target> <friendly\|neutral\|hostile>`, `size <target> <0.3-4>`, `tier <target> <1-3>` | change units |
+  | `heal`, `ammo`, `god [on\|off]`, `kill`, `tp`, `bring`, `rename`, `clear [side]`, `list`, `boss` | the rest |
+  | `name <new name>` | change your own name (anyone) |
+
+  Targets: `me`, `all`, `players`, `units`, `friendly` / `hostile` / `neutral`, a name or its start, `"a name with
+  spaces"`, or `#id` from `list`.
+- **Sides** (`Net.Side`, `Net.side_of`, `npc_foe`, `can_hurt`): friendly units fight hostile ones (and Thunderhorn),
+  follow whoever spawned them, and can't hurt players or be hurt by them; hostile ones (and the Duel Stone's challengers
+  and minions) fight the players' side, never each other; neutral ones fight nobody until someone hurts them (a 12 s
+  grudge, like the golems'), and anyone may hit them; a friendly unit also turns on a neutral one that hurt its
+  summoner. Golems follow the same sides (`Golems.Who.NEUTRAL`). Name tags: green friendly, red hostile, gold neutral.
+- **Size** (`ServerPlayer.size`, in the roster): drawn that much bigger, and a melee reach and hitbox (melee and
+  projectiles) to match.
+- **Names**: your character's name is asked for when you host or join and remembered (`user://profile.cfg`; up to 24
+  letters). Challengers and spawned units get funny names ("Sir Reginald the Moist", "Baron von Shin Who Forgot Why"),
+  and every golem has its own ("Pebbles McGee (Jacob's golem)"; titans: "Mount Kevin") (`scripts/names.gd`).
+  Test: `tools/dev_test.gd`; demo bot: `--bot console`.

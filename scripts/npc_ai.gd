@@ -158,6 +158,14 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 	var aim_point := s.pos + Vector3(-sin(s.yaw), 1.0, -cos(s.yaw)) * 6.0
 	var pitch := 0.0
 	var spell := s.spell
+	if s.dead == 0 and tgt == null and Net.side_of(me) == Net.Side.ALLY and net.players.has(owner):
+		# v0.12.6 a friendly unit with nobody to fight keeps near whoever spawned it (sprinting if far behind)
+		var op: Vector3 = net.players[owner].state.pos
+		var off := Vector2(op.x - s.pos.x, op.z - s.pos.z)
+		if off.length() > 4.5:
+			var fy := atan2(-off.x, -off.y)
+			var bt := Sim.Btn.FORWARD | (Sim.Btn.SPRINT if off.length() > 12.0 else 0)
+			return Sim.PlayerInput.new(seq, bt, fy, 0.0, s.weapon, net.server_tick, fy, fy, s.spell, op)
 	if s.dead > 0 or tgt == null:
 		return Sim.PlayerInput.new(seq, 0, s.yaw, 0.0, s.weapon, net.server_tick, s.yaw, s.yaw, s.spell, aim_point)
 	var tp: Vector3 = tgt.state.pos
@@ -398,7 +406,7 @@ func _pick_target(net: Net, me: Net.ServerPlayer):
 	var fogged := not net.fogs.is_empty()
 	var pvp := net.fog_pvp() if fogged else {}
 	for q: Net.ServerPlayer in net.players.values():
-		if q.npc or q.state.dead > 0:
+		if not net.npc_foe(me, q):   # v0.12.6: by sides (hostile, friendly, neutral), not just "every player"
 			continue
 		if fogged and not Fog.can_see(id, me.state.pos, q.id, q.state.pos, net.fogs, net.server_tick, pvp):
 			continue
@@ -410,7 +418,9 @@ func _pick_target(net: Net, me: Net.ServerPlayer):
 	var gbest: Golems.G = null
 	var gd := best_d if best != null else reach
 	for g: Golems.G in net.golems.list.values():
-		if g.state == Golems.State.DIE or g.state == Golems.State.RISE or (net.players.has(g.owner) and net.players[g.owner].npc):
+		if g.state == Golems.State.DIE or g.state == Golems.State.RISE or g.owner == me.id:
+			continue
+		if net.players.has(g.owner) and not net.foe_side(me, net.players[g.owner]):
 			continue
 		if fogged and not Fog.can_see(id, me.state.pos, g.owner, g.pos, net.fogs, net.server_tick, pvp):
 			continue
@@ -427,7 +437,22 @@ func _pick_target(net: Net, me: Net.ServerPlayer):
 		_golem_proxy.state.pos = gbest.pos
 		_golem_proxy.state.vel = Vector3.ZERO
 		return _golem_proxy
+	# v0.12.6: a friendly unit fights Thunderhorn too (at his flank), when nothing nearer needs it
+	if net.boss != null and Net.side_of(me) == Net.Side.ALLY and net.boss.state != Boss.S.ENTER and net.boss.state != Boss.S.DEATH:
+		var bp: Vector3 = net.boss.pos
+		var bd := bp.distance_to(me.state.pos) - 2.0
+		if bd < reach and (best == null or bd < best_d):
+			if _boss_proxy == null:
+				_boss_proxy = Net.ServerPlayer.new()
+				_boss_proxy.state = Sim.PlayerState.new()
+			_boss_proxy.id = Boss.ID
+			_boss_proxy.state.pos = bp + (me.state.pos - bp).normalized() * 2.2
+			_boss_proxy.state.vel = Vector3.ZERO
+			return _boss_proxy
 	return best
+
+
+var _boss_proxy: Net.ServerPlayer = null
 
 
 var _golem_proxy: Net.ServerPlayer = null   # a golem it fights, dressed as a player for the rest of its brain

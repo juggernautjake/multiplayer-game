@@ -74,7 +74,7 @@ var prize: PrizeScreen     # victory (the prize) and defeat screens
 var audit := {}   # --log: counts of every replicated event this client received (network audit)
 # v0.12.2 selection and orders (see "controls"): the spell hotbar, the radial wheels, taps and holds
 const HOLD_MS := 220         # a key held this long opens its wheel; let go sooner: a tap
-const HELP_LINE := "WASD move  Shift sprint  Space jump  Q dash  LMB attack / cast  RMB block  E use  V view  P PvP  Esc menu  F1 all controls\nWeapons: 1-7, mouse wheel, tap Tab last, hold Tab wheel     Spells (staff / wand): mouse wheel, R next, Shift+R back, hold R wheel, Ctrl+1-8     Golems: tap G follow / stay, hold G orders, middle mouse attack / go"
+const HELP_LINE := "WASD move  Shift sprint  Space jump  Q dash  LMB attack / cast  RMB block  E use  V view  P PvP  Esc menu  F1 all controls  ` console\nWeapons: 1-7, mouse wheel, tap Tab last, hold Tab wheel     Spells (staff / wand): mouse wheel, R next, Shift+R back, hold R wheel, Ctrl+1-8     Golems: tap G follow / stay, hold G orders, middle mouse attack / go"
 ## Every control, for the F1 panel (and the Esc menu's Controls button). Keep in step with README "Controls".
 const CONTROLS := [
 	["Move", "WASD (relative to the camera); Shift sprint, Space jump, Q dash"],
@@ -93,8 +93,10 @@ const CONTROLS := [
 	["", "Hold G: the order wheel: Follow me, Stay here, Go there, Attack that, Regroup"],
 	["Camera", "V first / third person     Ctrl + mouse wheel: camera distance"],
 	["Game", "P PvP on / off     F2 Pip / 3D figure (host)     F1 this list     Esc menu"],
+	["Dev console", "` (left of 1): type commands (host; help lists them): max, level staff max, give all, spawn sword 3 friendly"],
 ]
 var spell_bar: SpellBar
+var console: DevConsole   # v0.12.6 the dev console
 var radial: RadialMenu
 var wheel_kind := ""         # the wheel that's open: "weapon", "spell", "golem" or ""
 var wheel_target := []       # the golem wheel: [id, position, name] of the enemy under the crosshair when it opened
@@ -356,6 +358,9 @@ func _mat(c: Color, rough := 0.8) -> StandardMaterial3D:
 	return m
 
 
+var _shown_names := {}   # v0.12.6: id -> the name its avatar was built with
+
+
 ## Each player is drawn as the look they chose: Pip (sprite) or the 3D figure. Both take the same inputs.
 func _make_avatar(id: int, info: Dictionary) -> Node3D:
 	var nm := str(info.get("name", "?"))
@@ -379,10 +384,16 @@ func _on_roster(r: Dictionary) -> void:
 			avatars[id].queue_free()
 			avatars.erase(id)
 	for id in r.keys():
+		# v0.12.6: renamed (the dev console, or a player changing their name): build it again with the new name tag
+		if avatars.has(id) and str(_shown_names.get(id, "")) != str(r[id].get("name", "?")):
+			avatars[id].queue_free()
+			avatars.erase(id)
 		if not avatars.has(id):
 			avatars[id] = _make_avatar(id, r[id])
-		else:
-			avatars[id].set_pvp(bool(r[id].get("pvp", false)))
+			_shown_names[id] = str(r[id].get("name", "?"))
+		avatars[id].set_pvp(bool(r[id].get("pvp", false)))
+		var sz := clampf(float(r[id].get("size", 1.0)), 0.2, 5.0)   # v0.12.6: the dev console's size
+		(avatars[id] as Node3D).scale = Vector3.ONE * sz
 
 
 ## The host changed the look: rebuild everyone's avatar.
@@ -508,7 +519,7 @@ func _sample_input() -> Array:
 		return _bot_input()
 	_update_aim()
 	var b := 0
-	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not (console and console.visible):   # (typing in the console: no moving)
 		if Input.is_physical_key_pressed(KEY_W): b |= Sim.Btn.FORWARD
 		if Input.is_physical_key_pressed(KEY_S): b |= Sim.Btn.BACK
 		if Input.is_physical_key_pressed(KEY_A): b |= Sim.Btn.LEFT
@@ -633,6 +644,8 @@ func _bot_input() -> Array:
 		return _bot_ui()
 	if bot_mode == "archery":
 		return _bot_archery()
+	if bot_mode == "console":
+		return _bot_console()
 	if bot_mode == "fog":
 		return _bot_fog()
 	bot_t += 1
@@ -806,6 +819,39 @@ func _bot_show() -> Array:
 		get_viewport().get_texture().get_image().save_png(shots.path_join("show_%03d.png" % t))
 	spell_sel[weapon_slot] = spell
 	return [b, cam_yaw, 0.0, weapon_slot, face, face, spell, aim]
+
+
+## v0.12.6 console bot (--host --bot console --shots <dir> [--style figure]): opens the dev console, types commands
+## (max, levels, spawns on every side, a giant, a tiny one, rename), then closes it and watches the friendly and
+## hostile units fight while the neutral one stands by. Pictures along the way.
+func _bot_console() -> Array:
+	bot_t += 1
+	if net.predicted == null:
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var lines := { 60: "help", 75: "max", 90: "level sword 2", 105: "spawn sword 2 friendly tier 3 level 4",
+		120: "spawn club 2 hostile tier 2", 135: "spawn bow neutral name \"Steve the Bystander\"",
+		150: "spawn mix 1 hostile size 2.5 name \"Big Bertha\"", 165: "size \"Steve\" 0.5", 180: "list" }
+	if bot_t == 55:
+		console.toggle()
+	if lines.has(bot_t):
+		console.edit.text = lines[bot_t]
+		console._submit(lines[bot_t])
+	if bot_t == 240:
+		console.toggle()
+	cam_yaw = PI + 0.4
+	cam_dist = 9.0
+	cam_pitch = -0.35
+	var shots := str(_args().get("shots", ""))
+	if shots != "" and bot_t in [100, 200, 236, 300, 400, 500, 600, 700]:
+		get_viewport().get_texture().get_image().save_png(shots.path_join("console_%d.png" % bot_t))
+	if bot_t > 720:
+		var n := 0
+		for p in net.players.values():
+			if p.npc:
+				print("[console] %s side %s size %.1f hp %d dead %d" % [p.name, Net.SIDE_NAMES[Net.side_of(p)], p.size, p.state.hp, p.state.dead])
+				n += 1
+		get_tree().quit()
+	return [0, cam_yaw, 0.0, weapon_slot]
 
 
 ## Fog bot (v0.12.0; --host --give-all --max-level --bot fog --shots <dir> [--style figure]): a challenger's fog
@@ -1503,7 +1549,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			if k is int:
 				_key_up(k)
 				break
-	elif mb and mb.pressed and menu and not menu.visible and not pause_menu.visible and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+	elif mb and mb.pressed and menu and not menu.visible and not pause_menu.visible and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED \
+			and not (console and console.visible):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		attack_block_until = Time.get_ticks_msec() + 250
 	elif event.is_action_pressed("ui_cancel") and menu and not menu.visible:
@@ -2088,6 +2135,8 @@ func _build_ui() -> void:
 	layer.add_child(cross)
 
 	_build_pause_menu(layer)
+	console = DevConsole.new(net)   # v0.12.6: ` opens it
+	add_child(console)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(380, 0)
 	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -2103,7 +2152,9 @@ func _build_ui() -> void:
 	title.add_theme_font_size_override("font_size", 28)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
-	name_edit = _field(box, "Your name", "Player")
+	name_edit = _field(box, "Your character's name", _saved_name())
+	name_edit.placeholder_text = "Type a name (you can change it later: ` then name ...)"
+	name_edit.max_length = Config.MAX_NAME
 	addr_edit = _field(box, "Invite code or address (to join)", "127.0.0.1")
 	port_edit = _field(box, "Port (UDP)", str(Config.DEFAULT_PORT))
 	var cl := Label.new()
@@ -2177,7 +2228,37 @@ func _leave_game() -> void:
 	get_tree().reload_current_scene()
 
 
+## v0.12.6 (Jacob): you name your character going in. The name is remembered for next time (user://profile.cfg); the
+## Host and Join buttons ask for one if the box is empty. In the game, the console's `name <new name>` changes it.
+const PROFILE := "user://profile.cfg"
+
+
+func _saved_name() -> String:
+	var c := ConfigFile.new()
+	if c.load(PROFILE) == OK:
+		return str(c.get_value("player", "name", ""))
+	return ""
+
+
+## -> false (and asks for a name) if the box is empty when a person pressed Host or Join.
+func _name_ready() -> bool:
+	var nm := name_edit.text.strip_edges()
+	if nm == "":
+		if bot or _args().has("host") or _args().has("join"):
+			return true   # tests and command-line starts: the server names them "Player N"
+		status_label.text = "Type a name for your character first"
+		name_edit.grab_focus()
+		return false
+	var c := ConfigFile.new()
+	c.load(PROFILE)
+	c.set_value("player", "name", nm)
+	c.save(PROFILE)
+	return true
+
+
 func _start_host() -> void:
+	if not _name_ready():
+		return
 	net.style = "figure" if char_pick.selected == 1 else "pip"
 	var port := int(port_edit.text)
 	var err := net.host(port, name_edit.text)
@@ -2193,6 +2274,8 @@ func _start_host() -> void:
 ## Join: the menu stays up ("Connecting...") until the host answers; after 6 s with no answer, give up with a clear
 ## message instead of leaving you in an empty world.
 func _start_join() -> void:
+	if not _name_ready():
+		return
 	var addr := addr_edit.text.strip_edges()
 	var inv := decode_invite(addr)
 	if inv.size() == 2:   # an invite code: it carries the address and the port

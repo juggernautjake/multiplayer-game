@@ -58,7 +58,7 @@ const GUARD_R := 2.2           # the guard ring round the summoner
 const LEASH := 18.0
 const GRUDGE := 12 * 60
 const ATTACKING := 4 * 60      # ticks a hit on the summoner keeps that attacker first in line
-enum Who { PLAYER, NPC, BOSS }
+enum Who { PLAYER, NPC, BOSS, NEUTRAL }   # v0.12.6 NEUTRAL: a dev-console unit that fights only whoever hurt it
 ## v0.12.2 orders (G, the golem wheel, middle mouse): one standing order per summoner, for all their golems and the
 ## titan. FOLLOW (the default): the guard ring round the summoner, fighting within LEASH of them. STAY / GOTO: hold
 ## a point (where the summoner stood / the crosshair's spot on the ground): the guard ring round it, fighting only
@@ -518,7 +518,9 @@ func foe(owner: int, other: int, pvp: Dictionary) -> bool:
 	var me: int = _who.get(owner, Who.PLAYER)
 	var it: int = _who.get(other, Who.PLAYER)
 	if me == Who.NPC:   # a challenger's golems: against players (and their golems) and nothing else
-		return it == Who.PLAYER
+		return it == Who.PLAYER or (it == Who.NEUTRAL and harmed(owner, other, GRUDGE))
+	if me == Who.NEUTRAL or it == Who.NEUTRAL:   # v0.12.6: neutrals and their golems: only after a hurt
+		return harmed(owner, other, GRUDGE)
 	if it == Who.BOSS or it == Who.NPC:
 		return true
 	return pvp.get(owner, false) and pvp.get(other, false) and harmed(owner, other, GRUDGE)
