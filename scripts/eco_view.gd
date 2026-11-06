@@ -543,7 +543,7 @@ var _sounds := {}
 
 
 func _crunch(at: Vector3) -> void:
-	_play("eat", at, 0.0)
+	_play("eat", at, -9.0)   # v0.12.9: a nicer crunch, and quieter (Jacob)
 
 
 func _crack_sound(at: Vector3) -> void:

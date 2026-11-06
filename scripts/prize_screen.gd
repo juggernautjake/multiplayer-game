@@ -249,9 +249,11 @@ func setup(n: Net) -> void:
 	credit.text = CREDIT
 	hint = _label(20, Color(1, 1, 1, 0.75), 6)
 	music = AudioStreamPlayer.new()
+	music.bus = "Music" if AudioServer.get_bus_index("Music") >= 0 else "Master"   # v0.12.9: the sound menu's buses
 	add_child(music)
 	shakers = AudioStreamPlayer.new()
 	shakers.volume_db = -8.0
+	shakers.bus = "Music" if AudioServer.get_bus_index("Music") >= 0 else "Master"
 	add_child(shakers)
 	for k in ["taco", "chili", "maracas", "sombrero_cactus"]:
 		tex[k] = load("res://assets/prize/%s.png" % k)
@@ -296,6 +298,7 @@ func _say(pitch: float, vol: float) -> void:
 	p.stream = precious
 	p.pitch_scale = pitch
 	p.volume_db = vol
+	p.bus = "Voice" if AudioServer.get_bus_index("Voice") >= 0 else "Master"
 	add_child(p)
 	p.play()
 	p.finished.connect(p.queue_free)

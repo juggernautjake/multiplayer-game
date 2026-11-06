@@ -110,6 +110,7 @@ var controls_panel: Control  # F1: every control
 
 
 func _ready() -> void:
+	SoundSettings.setup()   # v0.12.9: the Effects / Music / Voice buses and the saved volumes
 	net = Net.new()
 	net.name = "Net"
 	add_child(net)
@@ -2016,10 +2017,33 @@ func _build_pause_menu(layer: CanvasLayer) -> void:
 	ctl.text = "Controls (F1)"
 	ctl.pressed.connect(func(): controls_panel.visible = not controls_panel.visible)
 	box.add_child(ctl)
+	var snd := Button.new()   # v0.12.9: volumes (master, effects, music, voices)
+	snd.text = "Sound"
+	snd.pressed.connect(func(): _open_sound(pause_menu))
+	box.add_child(snd)
 	var leave := Button.new()
 	leave.text = "Leave game"
 	leave.pressed.connect(_leave_game)
 	box.add_child(leave)
+
+
+var sound_panel: PanelContainer
+
+
+## v0.12.9 the sound settings (SoundSettings.panel), opened from the pause menu or the main menu; Back returns there.
+func _open_sound(from: Control) -> void:
+	if sound_panel == null:
+		sound_panel = SoundSettings.panel(func():
+			sound_panel.visible = false
+			if is_instance_valid(sound_from):
+				sound_from.visible = true)
+		pause_menu.get_parent().add_child(sound_panel)
+	sound_from = from
+	from.visible = false
+	sound_panel.visible = true
+
+
+var sound_from: Control
 
 
 ## v0.12.2 F1: every control in one panel (the game keeps running under it).
@@ -2233,6 +2257,10 @@ func _build_ui() -> void:
 	status_label.text = "Play / Host starts a game (alone, or friends join you). To join a friend's game, paste their invite code (or address) and click Join a friend."
 	box.add_child(status_label)
 	# updates: the version, what the update check found, and a restart / download button when there is one
+	var msnd := Button.new()   # v0.12.9: the sound settings from the main menu too
+	msnd.text = "Sound settings"
+	msnd.pressed.connect(func(): _open_sound(menu))
+	box.add_child(msnd)
 	var urow := HBoxContainer.new()
 	box.add_child(urow)
 	update_label = Label.new()

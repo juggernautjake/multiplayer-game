@@ -22,10 +22,12 @@ static func _wav(data: PackedFloat32Array, loop := false) -> AudioStreamWAV:
 	return w
 
 
-static func play(parent: Node, stream: AudioStream, volume_db := 0.0) -> void:
+## bus (v0.12.9): "Effects" (default), "Music" or "Voice" (SoundSettings: their volumes are in the sound menu).
+static func play(parent: Node, stream: AudioStream, volume_db := 0.0, bus := "Effects") -> void:
 	var p := AudioStreamPlayer.new()
 	p.stream = stream
 	p.volume_db = volume_db
+	p.bus = bus if AudioServer.get_bus_index(bus) >= 0 else "Master"
 	parent.add_child(p)
 	p.play()
 	p.finished.connect(p.queue_free)
@@ -72,7 +74,7 @@ static func roar(kind := 0) -> AudioStreamWAV:
 ## warble, rising in the attack and dying away), "pop" (the orb collapsing).
 static func fx(kind: String) -> AudioStreamWAV:
 	var dur: float = {"snort": 0.45, "hoof": 0.35, "scrape": 0.5, "crackle": 1.0, "charge": 1.6, "whoosh": 0.7,
-		"zap": 0.25, "slam": 1.4, "chirp": 0.18, "stun": 0.9, "pant": 1.4, "eat": 0.35, "buzz": 0.6, "heal": 0.55,
+		"zap": 0.25, "slam": 1.4, "chirp": 0.18, "stun": 0.9, "pant": 1.4, "eat": 0.82, "buzz": 0.6, "heal": 0.55,
 		"beam_hum": 1.05, "beam": 1.6, "beam_long": 2.75, "pop": 0.35, "clang": 0.6, "thock": 0.22}.get(kind, 0.5)
 	var n := int(RATE * dur)
 	var d := PackedFloat32Array()
@@ -154,9 +156,23 @@ static func fx(kind: String) -> AudioStreamWAV:
 				var env := minf(t / 0.04, 1.0) * exp(-t * 4.5)
 				var trem := 0.75 + 0.25 * sin(t * TAU * 11.0)
 				v = (sin(t * TAU * 523.0 * (1.0 + 0.03 * u)) + 0.7 * sin(t * TAU * 659.0) + 0.5 * sin(t * TAU * 784.0 * (1.0 + 0.03 * u))) * 0.22 * env * trem
-			"eat":
-				var bite := fposmod(t, 0.12)
-				v = (noise - lp) * exp(-bite * 40.0) * 0.9
+			"eat":   # v0.12.9 a crisp bite into an apple, a wet juicy crackle, then two softer chews (was 3 harsh hisses)
+				v = 0.0
+				# [start, strength, how crisp] for the bite and the chews
+				for b in [[0.0, 1.0, 1.0], [0.36, 0.45, 0.6], [0.58, 0.32, 0.5]]:
+					var bt: float = t - float(b[0])
+					if bt >= 0.0 and bt < 0.22:
+						# crunch: a quick run of tiny cracks (sparse clicks of bright noise), thickest at the start
+						var dens: float = 0.35 * float(b[2]) * exp(-bt * 14.0)
+						var crack: float = (noise - lp) * (1.0 if rng.randf() < dens else 0.12)
+						# the flesh giving way: a soft thud under it
+						var thud: float = sin(bt * TAU * (180.0 - 300.0 * bt)) * exp(-bt * 45.0) * 0.5
+						v += (crack * exp(-bt * 16.0) + thud) * float(b[1])
+				# juice: a wet, bubbly squelch after the bite
+				var jt := t - 0.07
+				if jt > 0.0 and jt < 0.3:
+					v += (lp - lp2) * 2.4 * sin(jt / 0.3 * PI) * (0.55 + 0.45 * sin(t * TAU * 37.0)) * 0.5
+				v *= 0.8
 		d[i] = clampf(v, -1.0, 1.0)
 	return _wav(d)
 

@@ -28,6 +28,8 @@ candy, the lucha libre mask, the giant sombrero, the tortilla, the fireworks, th
 drawn by the game itself, and its sounds (air horn, "ay ay ay" siren, whooshes, the piñata's whacks and burst, the
 slide whistle, the boing, the ring's ting, fireworks) are made in scripts/synth.gd.
 
-"My precious" (precious.wav / precious_custom.wav): no film or TV audio is used. The line is an original recording
-or generated voice supplied separately; record its source here when it is added. A precious_custom.wav (or .ogg) here,
+"My precious" (precious.wav / precious_custom.wav): no film or TV audio is used. precious.wav (added 2026-11-06,
+Jacob's pick of three takes, "A raspy") is an original generated line: Windows' built-in speech voice (System.Speech,
+Microsoft David) saying "My precious. My preciousssss.", pitched up, with vibrato, tremolo, a soft overdrive and a
+pink-noise hiss tail added with ffmpeg. A precious_custom.wav (or .ogg) here,
 or in the prize folder next to the game's exe, replaces it; with neither, that beat is silent.
