@@ -134,6 +134,7 @@ func _ready() -> void:
 	var args := _args()
 	if args.has("server"):
 		var port := int(args.get("port", Config.DEFAULT_PORT))
+		net.persist = not args.has("no-save")   # v0.12.7: a dedicated server keeps everyone's progress too
 		var err := net.host(port, "", false)
 		net.style = "figure" if str(args.get("style", "pip")) == "figure" else "pip"
 		print("Dedicated server v%s on UDP port %d: %s (look: %s)" % [Updater.running_version(), port, "ok" if err == OK else error_string(err), net.style])
@@ -175,6 +176,12 @@ func _on_status(text: String) -> void:
 			updater.check()
 	if status_label:
 		status_label.text = text
+	if text.begins_with("Disconnected") and menu and not menu.visible and not last_join.is_empty() and not bot:
+		# v0.12.7 the host went away mid-game (most likely restarting for an update): keep trying to rejoin for 90 s;
+		# your progress is kept on the host's side and given back when you're in again
+		reconnect_until = Time.get_ticks_msec() + 90000
+		joining_until = Time.get_ticks_msec() + 2000
+		toast("The host went away (restarting for an update?): reconnecting...")
 	if menu and net.my_id == 0:  # the connection failed or dropped: back to the menu
 		menu.visible = true
 		host_info = ""
@@ -917,6 +924,9 @@ func _bot_golems() -> Array:
 	weapon_slot = Weapons.WAND
 	var spell := Weapons.idx(Weapons.WAND, "Golem") if bot_t < 600 else Weapons.idx(Weapons.WAND, "Stone Titan")
 	var aim := dummy + Vector3(-2.0, 0, 3.0)
+	if bot_t == 150 and _args().has("rival"):   # v0.12.7: a hostile wand wizard too, so golems of two colours meet
+		net.send_dev("god")
+		net.send_dev("spawn wand hostile tier 3")
 	if (bot_t >= 200 and bot_t < 203) or (bot_t >= 700 and bot_t < 703):
 		b |= Sim.Btn.ATTACK
 	var shots := str(_args().get("shots", ""))
@@ -1046,13 +1056,19 @@ func _bot_ui_keys() -> void:
 		912:
 			say.call(weapon_slot == Weapons.WAND and int(spell_sel.get(Weapons.WAND, -1)) == 2, "Ctrl+3 picks the wand's third spell (%d)" % int(spell_sel.get(Weapons.WAND, -1)))
 			_ui_check["w"] = weapon_slot
-			var e := InputEventMouseButton.new()
-			e.button_index = MOUSE_BUTTON_WHEEL_UP
-			e.pressed = true
-			Input.parse_input_event(e)
+			# a notch up, then (v0.12.7) a busy scroll: 4 down and 4 up, each with its release; net: one up
+			var dn := MOUSE_BUTTON_WHEEL_DOWN
+			var up := MOUSE_BUTTON_WHEEL_UP
+			for bi in [up, dn, dn, dn, dn, up, up, up, up]:
+				for down_e in [true, false]:
+					var e := InputEventMouseButton.new()
+					e.button_index = bi
+					e.pressed = down_e
+					Input.parse_input_event(e)
 		920:
 			# v0.12.5: with the staff or wand in hand the wheel steps the spell, not the weapon
-			say.call(weapon_slot == Weapons.WAND and int(spell_sel.get(Weapons.WAND, -1)) == 1, "the mouse wheel steps the wand's spell back (%d), the wand stays in hand" % int(spell_sel.get(Weapons.WAND, -1)))
+			say.call(weapon_slot == Weapons.WAND and net.predicted.weapon == Weapons.WAND and int(spell_sel.get(Weapons.WAND, -1)) == 1,
+				"9 notches of the mouse wheel step only the wand's spells (now %d), the wand stays in hand" % int(spell_sel.get(Weapons.WAND, -1)))
 			key.call(KEY_TAB, true)
 		924:
 			key.call(KEY_TAB, false)
@@ -1515,6 +1531,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			controls_panel.visible = not controls_panel.visible
 	elif down and code == KEY_F2:
 		_switch_character()
+	elif down and code == KEY_F9 and update_ready:   # v0.12.7: restart into the downloaded update, straight back in
+		_restart_for_update()
 	elif down and code == KEY_P and menu and not menu.visible:
 		net.request_pvp(not bool(net.roster.get(net.my_id, {}).get("pvp", false)))
 	elif down and key.ctrl_pressed and code >= KEY_1 and code <= KEY_9 and _playing():   # Ctrl+number: that spell
@@ -1537,8 +1555,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			pass
 		elif mb.ctrl_pressed or not _playing():   # Ctrl + wheel: camera distance
 			cam_dist = clampf(cam_dist + 0.6 * step, 2.5, 14.0)
-		elif Weapons.is_magic(weapon_slot):   # v0.12.5: staff or wand in hand: the wheel picks the spell
-			_step_spell(step)
+		elif _magic_in_hand() >= 0:   # v0.12.5: staff or wand in hand: the wheel picks the spell, never the weapon
+			_step_spell(step, _magic_in_hand())
 		else:
 			_cycle_weapon(step)
 	elif mb and mb.pressed and mb.button_index == MOUSE_BUTTON_MIDDLE and _playing() and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -1661,15 +1679,34 @@ func _pick_spell(i: int) -> void:
 	_flash_msg(str(sp.name), Color("bcd6ff"))
 
 
-## The next (+1) or previous (-1) unlocked spell, round the end.
-func _step_spell(step: int) -> void:
-	var n: int = (Weapons.get_data(weapon_slot).spells as Array).size()
-	var cur := int(spell_sel.get(weapon_slot, 0))
+## v0.12.7 the staff or wand you're holding or switching to (-1: neither). Mid-cast a switch waits until the cast
+## ends, so the staff can still be in hand after you pressed another number: the wheel goes by either, so it only ever
+## steps spells while a magic weapon is involved, and never turns into a weapon switch by accident.
+func _magic_in_hand() -> int:
+	if Weapons.is_magic(weapon_slot):
+		return weapon_slot
+	if net.predicted != null and Weapons.is_magic(net.predicted.weapon):
+		return net.predicted.weapon
+	return -1
+
+
+## The next (+1) or previous (-1) unlocked spell of weapon w (the one in hand), round the end.
+func _step_spell(step: int, w := -1) -> void:
+	if w < 0:
+		w = weapon_slot
+	if not Weapons.is_magic(w):
+		return
+	var n: int = (Weapons.get_data(w).spells as Array).size()
+	var cur := int(spell_sel.get(w, 0))
+	var lv := 1
+	if net.predicted != null:
+		lv = net.predicted.staff_lvl if w == Weapons.STAFF else net.predicted.wand_lvl
 	for k in range(1, n + 1):
 		var i := posmod(cur + step * k, n)
-		if Weapons.unlocked(weapon_slot, i, _spell_level()):
+		if Weapons.unlocked(w, i, lv):
 			if i != cur:
-				_pick_spell(i)
+				spell_sel[w] = i
+				_flash_msg(str(Weapons.spell(w, i).name), Color("bcd6ff"))
 			return
 
 
@@ -2192,11 +2229,19 @@ func _build_ui() -> void:
 		if update_page != "":
 			OS.shell_open(update_page)
 		else:
-			Updater.restart())
+			_restart_for_update())
 	if not bot:
 		updater = Updater.new()
 		updater.changed.connect(_on_update)
 		add_child(updater)
+		var every := Timer.new()   # v0.12.7: look for updates every 10 minutes while playing, not only at start
+		every.wait_time = 600.0
+		every.autostart = true
+		every.timeout.connect(func():
+			if updater and not update_ready:
+				updater.check())
+		add_child(every)
+	_resume_after_update()
 
 
 var updater: Updater
@@ -2204,11 +2249,18 @@ var update_label: Label
 var update_btn: Button
 var update_page := ""
 
+var update_ready := false   # v0.12.7: a downloaded update waits; F9 in the game restarts into it
+
+
 func _on_update(text: String, can_restart: bool, page_url: String) -> void:
 	update_label.text = text
 	update_page = page_url
 	update_btn.visible = can_restart or page_url != ""
 	update_btn.text = "Restart now" if can_restart else "Download page"
+	if can_restart and not update_ready:
+		update_ready = true
+		if menu and not menu.visible:
+			toast("%s  Press F9 to restart into it: you'll come straight back with all your progress." % text)
 
 
 func _field(box: VBoxContainer, label: String, value: String) -> LineEdit:
@@ -2256,9 +2308,62 @@ func _name_ready() -> bool:
 	return true
 
 
+## v0.12.7 real play keeps progress on disk (Net.persist); tests, bots and the testing flags never touch it.
+func _real_play() -> bool:
+	if bot:
+		return false
+	for a in ["give-all", "give-staff", "give-wand", "max-level", "screenshot", "no-save"]:
+		if _args().has(a):
+			return false
+	return true
+
+
+# ---- v0.12.7 restarting for an update drops you straight back into the same game
+const RESUME := "user://resume.json"
+var reconnect_until := 0      # a guest whose host went away (restarting for an update?): keep trying to rejoin until then
+var last_join := []           # [address, port] of the last game joined
+
+
+## Restart into the downloaded update, coming straight back to this game: the host hosts again on the same port (and
+## everyone's progress comes back with them, Net.save_progress), a guest rejoins the same address.
+func _restart_for_update() -> void:
+	var r := {}
+	if net.my_id == 1 and net.multiplayer.multiplayer_peer != null and not menu.visible:
+		r = { "mode": "host", "port": int(port_edit.text), "name": name_edit.text, "style": net.style }
+	elif net.my_id != 1 and not last_join.is_empty():   # in a friend's game, or just turned away for an old version
+		r = { "mode": "join", "addr": str(last_join[0]), "port": int(last_join[1]), "name": name_edit.text }
+	if not r.is_empty():
+		r["t"] = int(Time.get_unix_time_from_system())
+		var f := FileAccess.open(RESUME, FileAccess.WRITE)
+		f.store_string(JSON.stringify(r))
+		f.close()
+	net.shutdown()   # (the host saves everyone's progress here)
+	Updater.restart()
+
+
+## At start: just restarted for an update? Back into the game it came from.
+func _resume_after_update() -> void:
+	if bot or _args().has("host") or _args().has("join") or not FileAccess.file_exists(RESUME):
+		return
+	var r = JSON.parse_string(FileAccess.get_file_as_string(RESUME))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(RESUME))
+	if typeof(r) != TYPE_DICTIONARY or int(Time.get_unix_time_from_system()) - int(r.get("t", 0)) > 300:
+		return
+	name_edit.text = str(r.get("name", name_edit.text))
+	port_edit.text = str(int(r.get("port", Config.DEFAULT_PORT)))
+	if str(r.get("mode", "")) == "host":
+		char_pick.select(1 if str(r.get("style", "pip")) == "figure" else 0)
+		_start_host.call_deferred()
+	elif str(r.get("mode", "")) == "join":
+		addr_edit.text = str(r.get("addr", ""))
+		reconnect_until = Time.get_ticks_msec() + 90000   # the host may still be restarting too
+		_start_join.call_deferred()
+
+
 func _start_host() -> void:
 	if not _name_ready():
 		return
+	net.persist = _real_play()   # v0.12.7
 	net.style = "figure" if char_pick.selected == 1 else "pip"
 	var port := int(port_edit.text)
 	var err := net.host(port, name_edit.text)
@@ -2285,6 +2390,7 @@ func _start_join() -> void:
 	if err != OK:
 		status_label.text = "Could not start: %s" % error_string(err)
 		return
+	last_join = [addr, int(port_edit.text)]
 	status_label.text = "Connecting to %s:%s ..." % [addr, port_edit.text]
 	joining_until = Time.get_ticks_msec() + 6000
 	if bot:
@@ -2297,6 +2403,11 @@ func _process_joining() -> void:
 	if net.my_id != 0 and net.predicted != null:   # in: the host knows us and our player exists
 		joining_until = 0
 		_enter_game()
+	elif Time.get_ticks_msec() > joining_until and Time.get_ticks_msec() < reconnect_until and not last_join.is_empty():
+		# v0.12.7 the host is restarting (an update?): try again every few seconds for a while
+		status_label.text = "Waiting for the host to come back (restarting for an update?)... trying again"
+		net.join(str(last_join[0]), int(last_join[1]), name_edit.text)
+		joining_until = Time.get_ticks_msec() + 5000
 	elif Time.get_ticks_msec() > joining_until:
 		joining_until = 0
 		net._reset()
@@ -2569,6 +2680,8 @@ func _update_combat_hud() -> void:
 				nm += " (%d)" % st.rocks
 			names.append(("[%d %s]" if i == st.weapon else " %d %s ") % [i + 1, nm])
 	hud_weapons.text = "   ".join(names)
+	if not (st.owned >> weapon_slot) & 1:   # v0.12.7: the weapon picked isn't yours any more: what's in hand is
+		weapon_slot = st.weapon
 	if st.owned != owned_seen:   # just picked up a weapon: take it in hand
 		var gained := st.owned & ~owned_seen
 		for i in range(Weapons.NAMES.size() - 1, 0, -1):

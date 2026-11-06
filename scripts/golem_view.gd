@@ -286,6 +286,40 @@ func _make(owner: int, titan := false, gid := -1) -> Dictionary:
 		_block(hip, Vector3(0.36, 0.7, 0.4), Vector3(0, -0.4, 0), STONE_DARK, mats)
 		_block(hip, Vector3(0.42, 0.22, 0.52), Vector3(0, -0.84, -0.05), STONE, mats)  # foot
 		legs.append(hip)
+	# v0.12.7 (Jacob): whose golem it is, at a glance, in the summoner's colour: a glowing rune carved in its chest,
+	# bands round both wrists, a soft ring on the ground under it, and its name tag
+	var oc := _owner_color(owner)
+	var rune := MeshInstance3D.new()
+	var rm := BoxMesh.new()
+	rm.size = Vector3(0.34, 0.34, 0.03)
+	rune.mesh = rm
+	rune.material_override = MagicFx._glow_mat(oc, 3.0)
+	rune.position = Vector3(0, 0.5, -0.31)
+	rune.rotation.z = PI / 4.0   # a diamond
+	body.add_child(rune)
+	# its dark centre, so it reads as a carved mark
+	_block(body, Vector3(0.18, 0.18, 0.035), Vector3(0, 0.5, -0.315), STONE_DARK, mats).rotation.z = PI / 4.0
+	for sh: Node3D in arms:
+		var band := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.44, 0.09, 0.44)
+		band.mesh = bm
+		band.material_override = MagicFx._glow_mat(oc, 1.6)
+		band.position = Vector3(0, -0.56, -0.02)
+		sh.add_child(band)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.55
+	tm.outer_radius = 0.64
+	ring.mesh = tm
+	var ringm := StandardMaterial3D.new()
+	ringm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ringm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ringm.albedo_color = Color(oc.r, oc.g, oc.b, 0.55)
+	ring.material_override = ringm
+	ring.scale = Vector3(1, 0.25, 1) * (Golems.TITAN_SCALE / Golems.SCALE if titan else 1.0)
+	ring.position.y = 0.04
+	root.add_child(ring)
 	var label := Label3D.new()
 	var who: String = net.roster.get(owner, {}).get("name", "?")
 	# v0.12.6: each golem has its own (silly) name, then whose it is
@@ -304,7 +338,7 @@ func _make(owner: int, titan := false, gid := -1) -> Dictionary:
 	label.position.y = 4.2 if titan else 1.75
 	label.font_size = 34
 	label.outline_size = 10
-	label.modulate = Color("d9cfc0")
+	label.modulate = oc.lerp(Color.WHITE, 0.35)   # v0.12.7: its summoner's colour
 	label.no_depth_test = true
 	root.add_child(label)
 	var bar := Sprite3D.new()

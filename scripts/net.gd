@@ -196,6 +196,7 @@ func host(port: int, player_name: String, with_player := true) -> Error:
 	dedicated = not with_player
 	is_host_player = with_player
 	my_id = 1
+	_load_progress()   # v0.12.7
 	for i in WorldLayout.ITEM_SPAWNS.size():
 		_spawn_item_at(i)
 	ecology = Ecology.new()
@@ -236,11 +237,108 @@ func join(address: String, port: int, player_name: String) -> Error:
 	return OK
 
 
+# ================================================================ v0.12.7 progress that survives restarts
+## Jacob: "update the game while playing and it will not remove our stats". The host keeps every player's progress by
+## name in user://progress.json: weapons, ammo, staff/wand levels and kills, the other weapons' kills, challengers
+## beaten, PvP, the weapon in hand and where they were. It's saved every 5 s and when someone leaves or the game
+## closes, and given back when a player of that name joins (or the host starts again), so restarting for an update,
+## or dropping and rejoining, keeps everything. The staff and the wand stay one of a kind: one given back is taken
+## off its tower / vault spot, or not given back if someone else has it now. Off for tests and bots (persist = false).
+const PROGRESS := "user://progress.json"
+const POS_KEEP := 15 * 60   # seconds: where you were is only kept this long (after that you start at the spawn)
+var persist := false
+var progress := {}
+var progress_path := PROGRESS   # (tests point it somewhere else)
+
+
+func _load_progress() -> void:
+	progress = {}
+	if not persist or not FileAccess.file_exists(progress_path):
+		return
+	var d = JSON.parse_string(FileAccess.get_file_as_string(progress_path))
+	if typeof(d) == TYPE_DICTIONARY:
+		progress = d
+
+
+static func _key(nm: String) -> String:
+	return nm.strip_edges().to_lower()
+
+
+func _pack_progress(p: ServerPlayer) -> Dictionary:
+	var s := p.state
+	return { "name": p.name, "owned": s.owned, "arrows": s.arrows, "rocks": s.rocks, "staff_lvl": s.staff_lvl,
+		"wand_lvl": s.wand_lvl, "kills": p.kills.duplicate(), "arms": p.arms.duplicate(), "duel_wins": p.duel_wins,
+		"pvp": p.pvp, "weapon": s.weapon, "pos": [s.pos.x, s.pos.y, s.pos.z], "hp": s.hp,
+		"t": int(Time.get_unix_time_from_system()) }
+
+
+func save_progress() -> void:
+	if not persist or (is_inside_tree() and multiplayer != null and multiplayer.multiplayer_peer != null and not multiplayer.is_server()):
+		return   # (only the host keeps progress)
+	for p: ServerPlayer in players.values():
+		if not p.npc:
+			progress[_key(p.name)] = _pack_progress(p)
+	var f := FileAccess.open(progress_path, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(progress))
+		f.close()
+
+
+## Give a player joining as `p.name` what they had. -> true if there was something to give back.
+func _restore_progress(p: ServerPlayer) -> bool:
+	if not persist or not progress.has(_key(p.name)):
+		return false
+	var d: Dictionary = progress[_key(p.name)]
+	var s := p.state
+	var owned := int(d.get("owned", 1)) | 1
+	for kind in UNIQUE:   # the staff and the wand: one of each in the world
+		var w: int = Weapons.ITEM_WEAPON[kind]
+		if not (owned >> w) & 1:
+			continue
+		var taken := false
+		for q: ServerPlayer in players.values():
+			if q.id != p.id and (q.state.owned >> w) & 1:
+				taken = true
+		if taken:
+			owned &= ~(1 << w)
+			continue
+		for it: Item in items.values().duplicate():   # off its spot (and not coming back while they have it)
+			if it.kind == kind:
+				items.erase(it.id)
+				item_remove.rpc(it.id, p.id)
+				if is_host_player:
+					item_remove(it.id, p.id)
+		respawns = respawns.filter(func(r): return int(WorldLayout.ITEM_SPAWNS[int(r[1])][0]) != kind)
+	s.owned = owned
+	s.arrows = int(d.get("arrows", 0))
+	s.rocks = int(d.get("rocks", 0))
+	s.staff_lvl = clampi(int(d.get("staff_lvl", 1)), 1, Weapons.MAX_LEVEL)
+	s.wand_lvl = clampi(int(d.get("wand_lvl", 1)), 1, Weapons.MAX_LEVEL)
+	var k: Array = d.get("kills", [0, 0])
+	p.kills = [int(k[0]), int(k[1])] if k.size() >= 2 else [0, 0]
+	var ar: Array = d.get("arms", [])
+	for i in mini(ar.size(), p.arms.size()):
+		p.arms[i] = int(ar[i])
+	p.duel_wins = int(d.get("duel_wins", 0))
+	p.pvp = bool(d.get("pvp", false))
+	var w := int(d.get("weapon", 0))
+	s.weapon = w if (owned >> w) & 1 else Weapons.FISTS
+	var pos: Array = d.get("pos", [])
+	if pos.size() == 3 and int(Time.get_unix_time_from_system()) - int(d.get("t", 0)) < POS_KEEP:
+		s.pos = Vector3(float(pos[0]), float(pos[1]) + 0.05, float(pos[2]))
+		s.hp = clampi(int(d.get("hp", Sim.MAX_HP)), 1, Sim.MAX_HP)
+	Sim.quantize(s)
+	print("welcome back %s: progress restored" % p.name)
+	return true
+
+
 ## Leave the game completely (v0.8.1): close the connection so its UDP port is free again (hosting again in the same
 ## session used to fail with "port 7777 is being used", because leaving only reloaded the scene and the old
 ## connection stayed open), and forget the whole world this side was running: players, items, shots, spells, golems.
 ## Safe to call any time; Main calls it on "Leave game", and it runs when Net leaves the scene tree.
 func shutdown() -> void:
+	if persist and not players.is_empty():
+		save_progress()   # v0.12.7: closing (or restarting for an update) keeps everyone's progress (host only)
 	if peer:
 		peer.close()
 		peer = null
@@ -315,6 +413,7 @@ const UNIQUE := [Weapons.Item.STAFF, Weapons.Item.WAND]
 func _on_peer_disconnected(id: int) -> void:
 	if multiplayer.is_server() and players.has(id):
 		print("- %s left" % players[id].name)
+		save_progress()   # v0.12.7: what they had, for when they come back
 		_return_unique(players[id])
 		for g: Golems.G in golems.list.values():   # their golems crumble
 			if g.owner == id:
@@ -646,6 +745,7 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 	p.outfit = (p.slot - 1) % 4
 	p.state = Sim.spawn_state(p.slot)
 	players[id] = p
+	_restore_progress(p)   # v0.12.7: back with everything they had (by name)
 	if boss != null and boss.state != Boss.S.DEATH and not boss_fighters.has(id):   # joining mid-fight: he grows
 		boss_fighters.append(id)
 		boss.add_fighter()
@@ -690,6 +790,8 @@ func _server_tick() -> void:
 	_server_projectiles()
 	_server_items()
 	_server_spells()
+	if persist and server_tick % 300 == 0:   # v0.12.7: progress on disk every 5 s
+		save_progress()
 	if ecology:
 		var people := []
 		for p: ServerPlayer in players.values():
@@ -1722,6 +1824,8 @@ func fog_pvp() -> Dictionary:
 	var d := {}
 	for q: ServerPlayer in players.values():
 		d[q.id] = q.pvp
+		if q.npc:   # v0.12.7: its side (Fog.enemies), so friendly units see through the players' fog
+			d["s%d" % q.id] = side_of(q)
 	return d
 
 

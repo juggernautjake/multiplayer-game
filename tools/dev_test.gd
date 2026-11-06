@@ -92,6 +92,20 @@ func _initialize() -> void:
 	var ft = f0.ai._pick_target(net, f0)
 	check(ft != null and ft.id != 1 and Net.side_of(ft) != Net.Side.ALLY, "a friendly unit's brain picks an enemy, not you (%s)" % (ft.name if ft else "nobody"))
 
+	# v0.12.7 fog by sides: players are allies (PvP off), friendly units see through your fog, hostile ones don't
+	var fg := Fog.make(1, a.state.pos, 1, net.server_tick, { "duration": 6000 })
+	var pv := net.fog_pvp()
+	b.pvp = false
+	pv = net.fog_pvp()
+	check(Fog.friend(fg, 2, pv), "another player (PvP off) sees through your fog")
+	check(Fog.friend(fg, f0.id, pv), "so does your friendly unit")
+	check(not Fog.friend(fg, h.id, pv) and not Fog.friend(fg, n.id, pv), "hostile and neutral units are blind in it")
+	a.pvp = true
+	b.pvp = true
+	check(not Fog.friend(fg, 2, net.fog_pvp()), "with PvP on for both, the other player is blind in it")
+	a.pvp = false
+	b.pvp = false
+
 	# size: reach and hitbox
 	run.call("size me 3")
 	check(is_equal_approx(a.size, 3.0), "size me 3")

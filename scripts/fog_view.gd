@@ -135,6 +135,8 @@ func pvp_map() -> Dictionary:
 	var d := {}
 	for id in net.roster.keys():
 		d[id] = bool(net.roster[id].get("pvp", false))
+		if int(id) >= Fog.NPC_ID0:   # v0.12.7: NPC sides, as the server's Net.fog_pvp
+			d["s%d" % int(id)] = int(net.roster[id].get("side", 1))
 	return d
 
 

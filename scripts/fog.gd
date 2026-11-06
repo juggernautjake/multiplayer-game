@@ -92,14 +92,21 @@ static func covers(f: Dictionary, pos: Vector3, tick: float) -> bool:
 	return absf(pos.x - c.x) <= h and absf(pos.z - c.z) <= h and pos.y < c.y + TOP and pos.y > c.y - 3.0
 
 
-## Enemies, like Net.can_hurt (a golem passes its summoner's id). pvp: id -> PvP on.
+## Enemies, like Net.can_hurt (a golem passes its summoner's id). pvp: id -> PvP on; v0.12.7 also "s<id>" -> the
+## side (Net.Side: 0 the players' side, 1 hostile, 2 neutral) of each NPC, so a friendly dev-console unit counts with
+## the players (it sees through their fog and is blind in a hostile wizard's). Players are always allies of each other
+## unless both have PvP on.
 static func enemies(a: int, b: int, pvp: Dictionary) -> bool:
 	if a == b or a == 0 or b == 0:
 		return false
 	var na := a >= NPC_ID0
 	var nb := b >= NPC_ID0
 	if na or nb:
-		return not (na and nb)
+		var sa := int(pvp.get("s%d" % a, 1 if na else 0))
+		var sb := int(pvp.get("s%d" % b, 1 if nb else 0))
+		if sa == 2 or sb == 2:   # a neutral unit: nobody's ally
+			return true
+		return sa != sb
 	return bool(pvp.get(a, false)) and bool(pvp.get(b, false))
 
 

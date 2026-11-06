@@ -902,3 +902,23 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
   arrows** (a short wait between each; `WorldLayout.gather_at`, `GATHER_*`, `Net._gather`), with a prompt when you can.
 - **Weapons on the ground** turn round their own middle, and the bow lies flat (it used to stand up on its curve and
   swing round its grip). Test: `tools/ammo_test.gd`.
+
+## What's new in 0.12.8
+
+- **Updates without losing anything**: the host keeps everyone's progress by name in `user://progress.json` (weapons,
+  ammo, staff / wand levels and kills, the other weapons' kills, challengers beaten, PvP, the weapon in hand, and where
+  you were for 15 minutes), saved every 5 s and on leaving, and gives it back when that name joins again (the staff and
+  wand stay one of a kind) (`Net.save_progress`, `_restore_progress`; off for tests and bots: `Net.persist`). The game
+  looks for updates every 10 minutes while you play; when one is downloaded, **F9** restarts into it and drops you
+  straight back into the same game (`main.gd _restart_for_update`, `user://resume.json`): the host hosts again on the
+  same port, guests rejoin, and a guest whose host went away keeps trying to reconnect for 90 s. Test:
+  `tools/progress_test.gd`.
+- **Golems wear their summoner's colour**: a glowing diamond rune on the chest, wrist bands, a ring on the ground and
+  the name tag.
+- **Fog by sides**: players are allies unless both have PvP on (they see through each other's fog, with enemy
+  outlines); friendly dev-console units count with the players, hostile and neutral ones are blind in it (`Fog.enemies`
+  reads the NPC sides from `Net.fog_pvp` / `FogView.pvp_map`).
+- **The mouse wheel never switches weapons while a staff or wand is involved** (even mid-cast after pressing another
+  number); a weapon picked that you no longer have falls back to what's in hand.
+- **The Smiguel ending goes wild** (see "The fiesta"): screen warps, party lights, meme moments, the One Ring with
+  Sméagol's eyes tracking it, and the chancla.
