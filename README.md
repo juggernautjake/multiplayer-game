@@ -706,11 +706,15 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
 - **The Storm Altar's button is solid**: land on top of it to summon him. It stays pressed for the fight.
 - The level-up light now follows you for a few seconds.
 
-## What's new since 0.12.0 (not released yet)
+## What's new in 0.12.1
 
 - **Thunderhorn's stun meter**: every wand Stun that catches him fills a gold bar under his health bar; at 7 he is
   **dazed for 7 seconds** (he collapses, then struggles up). It interrupts anything and is the only way to stop his
   charge or the rush. Every one of his attacks now has a clear tell, and a dash dodges any of his hits.
+- **A new horn beam**: two thin beams shoot from his curved horns into a spinning orb of light ahead of his nose
+  spike; it grows and whines as it charges (that's your warning), then a crackling beam blasts out of it and sweeps
+  the ground, scorching a glowing trail. What you see is exactly what hits you: duck under it near him, jump it near
+  its far end, get out of its reach or dash through it. His stomp rings now come at a steady beat you can jump.
 - **New wand spells**: Earth Spikes are gone. **Spark Beam** (level 1, 1 s): an instant zap, spam it. **Fog**
   (level 2): a 25 x 25 m cloud that blinds enemies inside while your side sees them glowing red (Thunderhorn doesn't
   care). **Life Drain** (level 3): steals health from an enemy, or heals the ally you point it at.
