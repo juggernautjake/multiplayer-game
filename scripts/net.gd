@@ -74,6 +74,7 @@ class ServerPlayer:
 	var size := 1.0             # v0.12.6: drawn this much bigger, and its reach and hitbox with it (0.3-4)
 	var god := false            # v0.12.6 (dev console): takes no damage
 	var dev := false            # v0.12.6: spawned from the dev console (beating it doesn't raise duel tiers)
+	var gather_t := 0           # v0.12.7: the tick it can gather ammo with E again
 
 
 ## Something lying on the ground to pick up (server). `spawn` >= 0: one of the fixed spawns, which comes back 20 s
@@ -779,10 +780,12 @@ func _server_step_player(p: ServerPlayer) -> void:
 		p.was_dead = p.state.dead > 0
 		var interact := inp.buttons & Sim.Btn.INTERACT != 0
 		if interact and not p.interact_prev and p.state.dead == 0 and not frozen:
-			if not _stone_interact(p) and not _vault_interact(p) and not _pick_up(p, 2.2, true) and ecology:
-				var gain := ecology.try_eat(p.state.pos, server_tick)
+			if not _stone_interact(p) and not _vault_interact(p) and not _pick_up(p, 2.2, true):
+				var gain := ecology.try_eat(p.state.pos, server_tick) if ecology else 0
 				if gain > 0:
 					p.state.hp = mini(p.state.hp + gain, Sim.MAX_HP)
+				else:
+					_gather(p)
 		p.interact_prev = interact
 
 
@@ -1067,6 +1070,36 @@ func _remove_item(it: Item, taker: int) -> void:
 		item_remove(it.id, taker)
 
 
+## v0.12.7 E beside a pillar (or the tower): dig out a few stones; beside a tree: whittle a couple of arrows. A short
+## wait between each (WorldLayout.GATHER_*). -> true if it gave something.
+func _gather(p: ServerPlayer) -> bool:
+	var what := WorldLayout.gather_at(p.state.pos)
+	if what == "" or server_tick < p.gather_t:
+		return false
+	var s := p.state
+	if what == "stones":
+		if s.rocks >= Weapons.MAX_AMMO:
+			_toast(p.id, "You can't carry any more stones")
+			return false
+		var got := mini(WorldLayout.GATHER_STONES, Weapons.MAX_AMMO - s.rocks)
+		s.rocks += got
+		p.gather_t = server_tick + WorldLayout.GATHER_STONE_CD
+		_fx("gather", [p.id, s.pos, 0, got])
+	else:
+		if s.arrows >= Weapons.MAX_AMMO:
+			_toast(p.id, "You can't carry any more arrows")
+			return false
+		var got := mini(WorldLayout.GATHER_ARROWS, Weapons.MAX_AMMO - s.arrows)
+		s.arrows += got
+		p.gather_t = server_tick + WorldLayout.GATHER_ARROW_CD
+		_fx("gather", [p.id, s.pos, 1, got])
+	return true
+
+
+## v0.12.7 a beaten archer or slinger drops a bundle of its ammo where it fell.
+const NPC_AMMO_DROP := 6
+
+
 ## Ammo is picked up by walking over it; a weapon by pressing the interact key (E) next to it.
 func _server_items() -> void:
 	for r in respawns.duplicate():
@@ -1194,6 +1227,9 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 			q.state.charge = 0
 			q.state.shield = 0
 			killed = true
+			if q.npc and Weapons.is_ranged(q.state.weapon):   # v0.12.7: an archer's / slinger's ammo, to pick up
+				var drop_at := Vector3(q.state.pos.x, maxf(WorldLayout.ground_height(q.state.pos.x, q.state.pos.z, q.state.pos.y + 0.1), 0.0), q.state.pos.z)
+				_add_item(Weapons.Item.ARROWS if q.state.weapon == Weapons.BOW else Weapons.Item.ROCKS, drop_at, NPC_AMMO_DROP, -1)
 			if dmg_src >= 0 and players.has(from) and from != target:
 				_magic_kill(players[from], dmg_src)
 			elif hit_weapon >= 0 and players.has(from) and from != target:

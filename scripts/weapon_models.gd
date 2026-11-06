@@ -13,16 +13,64 @@ const BAND := Color("b83434")
 const STONE := Color("8d8d95")
 
 
-static func make(kind: int) -> Node3D:
+## count (v0.12.7): ammo looks like what it is: 1-2 arrows or stones lie loose, 3-6 a small bundle / a few stones, more
+## a quiver / a pile (it used to be a full quiver or pile even for one spent arrow).
+static func make(kind: int, count := 99) -> Node3D:
 	match kind:
 		Weapons.Item.CLUB: return club()
 		Weapons.Item.SWORD: return sword()
 		Weapons.Item.BOW: return bow()
 		Weapons.Item.SLING: return sling()
-		Weapons.Item.ARROWS: return quiver()
+		Weapons.Item.ARROWS: return quiver() if count >= 7 else loose_arrows(count)
 		Weapons.Item.STAFF: return staff()
 		Weapons.Item.WAND: return wand()
-		_: return rocks()
+		_: return rocks() if count >= 7 else loose_stones(count)
+
+
+## v0.12.7: n arrows lying on the ground, crossed a little (a bundle tied with a band from 3).
+static func loose_arrows(n: int) -> Node3D:
+	var root := Node3D.new()
+	n = clampi(n, 1, 6)
+	for i in n:
+		var a := Node3D.new()
+		root.add_child(a)
+		_box(a, Vector3(0.016, 0.016, 0.72), Vector3.ZERO, WOOD, 0.8)                     # shaft along Z
+		var head := _box(a, Vector3(0.035, 0.012, 0.07), Vector3(0, 0, -0.38), STEEL, 0.3, 0.7)
+		head.rotation.y = PI / 4.0
+		_box(a, Vector3(0.05, 0.004, 0.1), Vector3(0, 0.006, 0.32), BAND, 0.8)            # fletching
+		a.position = Vector3((i - (n - 1) / 2.0) * 0.03, 0.012 + 0.012 * (i % 2), 0)
+		a.rotation.y = (i - (n - 1) / 2.0) * 0.12 + 0.4
+	if n >= 3:
+		_cyl(root, 0.045, 0.04, Vector3(0, 0.02, 0.05), LEATHER).rotation.x = PI / 2.0
+	return root
+
+
+## v0.12.7: n stones lying loose.
+static func loose_stones(n: int) -> Node3D:
+	var root := Node3D.new()
+	n = clampi(n, 1, 6)
+	var spots := [Vector3(0, 0.05, 0), Vector3(0.1, 0.045, 0.04), Vector3(-0.08, 0.045, 0.07), Vector3(0.03, 0.045, -0.1),
+		Vector3(-0.06, 0.045, -0.07), Vector3(0.02, 0.12, 0.01)]
+	for i in n:
+		_sphere(root, 0.05 if i else 0.055, spots[i], STONE.darkened(0.04 * float(i % 3)))
+	return root
+
+
+## v0.12.7 the middle of a model's meshes, in its own space (to turn it round its centre).
+static func middle(m: Node3D) -> Vector3:
+	var box := AABB()
+	var first := true
+	for c in m.find_children("*", "MeshInstance3D", true, false):
+		var mi := c as MeshInstance3D
+		var t := Transform3D.IDENTITY
+		var n: Node = mi
+		while n != null and n != m:   # its transform relative to the model's root
+			t = (n as Node3D).transform * t
+			n = n.get_parent()
+		var b := t * mi.get_aabb()
+		box = b if first else box.merge(b)
+		first = false
+	return box.get_center()
 
 
 ## The model for a weapon slot (Weapons.FISTS has none).

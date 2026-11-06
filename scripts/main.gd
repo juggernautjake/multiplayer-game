@@ -2640,11 +2640,16 @@ func _on_item_added(id: int, kind: int, pos: Vector3, count: int) -> void:
 	if cam == null or items.has(id):
 		return
 	var holder := Node3D.new()
-	var m := WeaponModels.make(kind)
-	holder.add_child(m)
+	var m := WeaponModels.make(kind, count)   # v0.12.7: one spent arrow / stone looks like one, not a quiver / pile
+	var spin := Node3D.new()   # v0.12.7: weapons turn round their own middle (they used to swing round the grip)
+	holder.add_child(spin)
+	spin.add_child(m)
 	if Weapons.ITEM_WEAPON[kind] >= 0:
-		m.rotation = Vector3(PI / 2.0, 0, 0.3)   # lying on the ground
-		m.position.y = 0.12
+		# lying flat: rolled onto its side (the bow flat on the ground, not standing up on its curve like an arch)
+		m.rotation = Vector3(0, 0, PI / 2.0) if kind == Weapons.Item.BOW else Vector3(PI / 2.0, 0, 0.3)
+		var mid := WeaponModels.middle(m)
+		m.position = -(m.basis * mid)
+		spin.position.y = 0.16
 		var ring := MeshInstance3D.new()        # a soft glow ring, so weapons are easy to spot
 		var tm := TorusMesh.new()
 		tm.inner_radius = 0.45
@@ -2660,7 +2665,7 @@ func _on_item_added(id: int, kind: int, pos: Vector3, count: int) -> void:
 		holder.add_child(ring)
 	add_child(holder)
 	holder.global_position = pos
-	items[id] = { "node": holder, "model": m, "kind": kind, "pos": pos, "t": randf() * 6.0 }
+	items[id] = { "node": holder, "model": m, "spin": spin, "kind": kind, "pos": pos, "t": randf() * 6.0 }
 
 
 func _on_item_removed(id: int, taker: int) -> void:
@@ -2691,9 +2696,9 @@ func _update_items(delta: float) -> void:
 		if e.kind == Weapons.Item.WAND and magic_fx and magic_fx._door_target == 0.0:
 			continue
 		if Weapons.ITEM_WEAPON[e.kind] >= 0:
-			var m: Node3D = e.model
-			m.position.y = 0.16 + sin(e.t * 2.2) * 0.05
-			m.rotation.y = e.t * 0.8
+			var sp: Node3D = e.spin
+			sp.position.y = 0.2 + sin(e.t * 2.2) * 0.05
+			sp.rotation.y = e.t * 0.8
 			var d := Vector2(e.pos.x - me.x, e.pos.z - me.z).length()
 			if d < best_d:
 				best_d = d
@@ -2710,6 +2715,13 @@ func _update_items(delta: float) -> void:
 			prompt.visible = true
 			prompt.text = ap[0]
 			prompt.global_position = ap[1]
+			return
+	if best < 0 and net.predicted != null and net.predicted.dead == 0:   # v0.12.7: gathering ammo
+		var g := WorldLayout.gather_at(me)
+		if g != "":
+			prompt.visible = true
+			prompt.text = "E  gather stones" if g == "stones" else "E  whittle arrows"
+			prompt.global_position = me + Vector3(0, 2.3, 0)
 			return
 	prompt.visible = best >= 0
 	if best >= 0:

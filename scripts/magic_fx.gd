@@ -132,6 +132,11 @@ func _on_fx(kind: String, a: Array) -> void:
 			_shield_hit(int(a[0]), a[1], float(a[2]) if a.size() > 2 else 8.0)
 		"block":
 			_block(int(a[0]), a[1], int(a[2]), int(a[3]))
+		"gather":   # v0.12.7 stones dug out / arrows whittled: chips or shavings, and "+3 stones" over them
+			var at: Vector3 = a[1]
+			var stones := int(a[2]) == 0
+			Fx.burst(main, at + Vector3(0, 0.4, 0), Vector3.UP, Color("9a9aa2") if stones else Color("c8955a"), 10, 2.5, 0.04)
+			Fx.word(main, at + Vector3(0, 2.0, 0), "+%d %s" % [int(a[3]), "stones" if stones else "arrows"], Color("fff2a8"))
 		"stun_beam":
 			_stun_beam(a[1], a[2], int(a[3]) != 0)
 		"teleport":

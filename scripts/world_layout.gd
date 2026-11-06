@@ -82,7 +82,34 @@ const ITEM_SPAWNS := [
 	[4, Vector3(-2.0, 0.0, -14.0), 8], [5, Vector3(2.0, 0.0, -14.0), 10],
 	[6, Vector3(-26.0, 15.6, -34.0), 1],    # the wizard's staff, on top of the tower
 	[7, Vector3(55.35, 0.55, 38.0), 1],     # the magic wand, in the vault (only reachable with its door open)
+	# v0.12.7 more ammo round the map (each comes back 20 s after it's taken): by the Duel Stone, the arena's edge,
+	# the tower, the vault and the oaks
+	[4, Vector3(21.0, 0.0, -7.0), 10], [5, Vector3(13.0, 0.0, -7.5), 12],
+	[4, Vector3(15.0, 0.0, 30.0), 12], [5, Vector3(-15.0, 0.0, 30.0), 12],
+	[4, Vector3(-21.5, 0.0, -29.5), 10], [5, Vector3(48.0, 0.0, 31.0), 12],
+	[4, Vector3(-9.5, 0.0, 13.5), 8], [5, Vector3(-24.0, 0.0, -2.0), 10],
 ]
+## v0.12.7 gathering ammo with E: stones from the foot of a pillar or the tower (GATHER_STONES, every GATHER_STONE_CD
+## ticks), arrows whittled from a tree's branches (GATHER_ARROWS, every GATHER_ARROW_CD ticks).
+const GATHER_STONES := 3
+const GATHER_STONE_CD := 90
+const GATHER_ARROWS := 2
+const GATHER_ARROW_CD := 150
+const GATHER_REACH := 1.2
+
+
+## v0.12.7 what can be gathered at p: "stones" (beside a pillar or the tower), "arrows" (beside a tree trunk) or "".
+static func gather_at(p: Vector3) -> String:
+	if tree_at(Vector3(p.x, 1.0, p.z), GATHER_REACH) >= 0:   # first: tree trunks are boxes too
+		return "arrows"
+	for b: Box in boxes():
+		var dx := maxf(absf(p.x - b.cx) - b.hx, 0.0)
+		var dz := maxf(absf(p.z - b.cz) - b.hz, 0.0)
+		if Vector2(dx, dz).length() < GATHER_REACH and p.y < 0.5:
+			return "stones"
+	if Vector2(p.x - TOWER_C.x, p.z - TOWER_C.y).length() < TOWER_HALF + GATHER_REACH + 0.6 and p.y < 0.5:
+		return "stones"
+	return ""
 
 
 static func boxes() -> Array:

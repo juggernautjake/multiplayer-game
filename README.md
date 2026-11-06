@@ -873,3 +873,15 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
   letters). Challengers and spawned units get funny names ("Sir Reginald the Moist", "Baron von Shin Who Forgot Why"),
   and every golem has its own ("Pebbles McGee (Jacob's golem)"; titans: "Mount Kevin") (`scripts/names.gd`).
   Test: `tools/dev_test.gd`; demo bot: `--bot console`.
+
+## What's new in 0.12.7: ammo
+
+- **A spent arrow or stone is one arrow or stone** on the ground, and now looks like one (`WeaponModels.make(kind,
+  count)`: 1-2 loose, 3-6 a small bundle or a few stones, 7+ a quiver or a pile). It used to show a full quiver or
+  pile for every single spent shot.
+- **More ways to get ammo**: eight more ammo spots round the map (by the Duel Stone, the arena's edge, the tower, the
+  vault and the oaks; each comes back 20 s after it's taken); a beaten archer or slinger drops a bundle of 6
+  (`Net.NPC_AMMO_DROP`); and **E beside a pillar or the tower digs out 3 stones**, **E beside a tree whittles 2
+  arrows** (a short wait between each; `WorldLayout.gather_at`, `GATHER_*`, `Net._gather`), with a prompt when you can.
+- **Weapons on the ground** turn round their own middle, and the bow lies flat (it used to stand up on its curve and
+  swing round its grip). Test: `tools/ammo_test.gd`.
