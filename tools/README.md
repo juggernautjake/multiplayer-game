@@ -22,7 +22,9 @@ the script through `OS.get_cmdline_user_args()`.
 | [fruit_test.gd](#fruit_testgd) | test | no | Checks fruit physics in the yard. |
 | [eco_test.gd](#eco_testgd) | test | no | Runs the yard for 20 minutes and checks that everything happens. |
 | [invite_test.gd](#invite_testgd) | test | no | Checks that invite codes round-trip. |
-| [cloth_test.gd](#cloth_testgd) | test | no | Dashes a robed body and checks the cloth keeps up without stretching. |
+| [cloth_test.gd](#cloth_testgd) | test | no | Dashes a robed body and checks the cloth keeps up without stretching; every costume through every move, no cloth inside the body. |
+| [cloth_rig.gd](#cloth_riggd) | helper | no | v0.12.8 a 3D figure driven through every move by the real simulation (for the cloth test and pictures). |
+| [cloth_shots.gd](#cloth_shotsgd) | renderer | yes | v0.12.8 pictures of the cloth from five sides through every move; a film; an eight-figure frame rate. |
 | [cutscene_test.gd](#cutscene_testgd) | test | no | v0.12.3 the Duel Stone's corruption cutscene and its minions. |
 | [order_test.gd](#order_testgd) | test | no | v0.12.2 golem orders: follow, stay, go there, attack that, regroup, PvP rules, synced. |
 | [figure_poses.gd](#figure_posesgd) | renderer | yes | One pose of the 3D figure, saved as a PNG. |
@@ -351,6 +353,30 @@ level credit.
 then dashes it (24 m/s for 0.15 s), snaps it 1.5 m sideways (a net correction) and dashes again, at 60 and 30 fps. Every
 cloth point must stay within its rest length of the point above it, and the hem must trail the body by under 0.7 m
 (without the v0.12 carry it trailed over a metre and whipped back).
+
+v0.12.8: then every costume (all seven weapons) goes through every move with `cloth_rig.gd`, drawn at 60 and at 30 fps:
+no cloth point more than 2 cm inside the torso, hips, legs or head as drawn (8 cm for an arm or hand), no bad numbers,
+every point within its own length (+0.25 m; robe +0.5 m) of its anchor; while thrown and cartwheeling, looser (8 cm,
++0.4 m, robe +0.85 m), all scaled for a 1.6x knight and wizard. Prints the worst of each and where. Then each costume's cloth cost, and eight figures together
+(the cloth must stay under 2.5 ms a figure a frame, headless).
+
+## cloth_rig.gd
+
+v0.12.8, a helper (`load` it): `Rig.new(parent, weapon)` makes a FigureAvatar and drives it with `Sim.step` through a
+script of moves: standing, walking, sprinting, strafing, backpedalling, a snap turn, a running jump and its landing, a
+dash, every move of the weapon's combo stepping into it (or a bow / slingshot draw and release, or a spell), a block, a
+guarded walk, being thrown (tumbling, lying, getting up) and running again. `step()` advances a tick and sets `label` at
+the moments worth a picture; `measure()` returns how deep the cloth is in the body (`FigureAvatar.body_depth`), in the
+arms, and past its reach (`WizardGarb.cloth_points` / `cloth_reach`).
+
+## cloth_shots.gd
+
+`<godot> --path . -s tools/cloth_shots.gd -- <dir> <prefix> [weapons|all] [movie|fps]` (v0.12.8, windowed): for each
+weapon, every labelled moment of `cloth_rig.gd` from five cameras at once (front, back, right, left, three-quarters),
+saved as `<prefix>_<Weapon>_<moment>_<view>.png`, with red dots on cloth points inside the body and a line per moment
+with the deepest point. `movie`: every frame of the first weapon's run from a camera turning round it
+(`<prefix>_movie_NNNNN.png`, for ffmpeg). `fps`: eight figures in different costumes on screen, the frame rate and the
+cloth's share printed.
 
 ## boss_beam_shots.gd
 

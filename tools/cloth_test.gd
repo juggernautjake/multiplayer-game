@@ -3,6 +3,13 @@ extends SceneTree
 ## it (24 m/s for 0.15 s, Sim.DASH_SPEED), teleports it 1.5 m (a net correction) and dashes again, at 60 and at 30 fps.
 ## Every free point must stay within its rest length of the point above it (no stretching) and the robe's hem within
 ## a short trailing distance of where it hangs at rest (it used to be left far behind and whip back).
+## v0.12.8: then every costume (all seven weapons) is put through every move by the real simulation (tools/cloth_rig.gd:
+## standing, walking, sprinting, strafing, backpedalling, a snap turn, a running jump and landing, a dash, every move of
+## the combo stepping into it, a bow / slingshot draw and release, a spell, a block, thrown, lying and getting up), drawn
+## at 60 and at 30 fps: no cloth point may end up inside the body as drawn (the torso, hips, legs, head; a little more
+## leeway for the arms, which the body always wins against), none may be a bad number, and none may get further from
+## its anchor than its own length (plus a little: a robe pushed out by a raised knee). Then eight figures together,
+## for the cost of their cloth.
 ##   Godot --headless --path . --script tools/cloth_test.gd
 
 var bad := 0
@@ -84,5 +91,98 @@ func _initialize() -> void:
 		check(r[1] < 1.03, "after a dash and a snap, every cloth point stays within its rest length of the one above (%d fps)" % fps)
 		check(r[0] < 0.7, "the hem trails the body by under 0.7 m through a dash (%d fps)" % fps)
 		check(r[0] < old[0] * 0.75 or old[0] < 0.7, "and clearly less than the cloth left behind before (%d fps)" % fps)
+
+
+const BODY_TOL := 0.02     # m inside the torso, hips, legs or head
+const ARM_TOL := 0.08      # m inside an arm or hand (a hand pressed against the body, inside the cloth's reach)
+const REACH_TOL := 0.25    # m past its length from its anchor: tabard, cloak, tails
+const ROBE_REACH_TOL := 0.5   # the robe and kilt (a knee pulled up pushes them out)
+# thrown by a charge the body cartwheels head over heels at up to 16 turns a second: there the cloth only has to stay
+# near the body and in one piece
+const THROWN_BODY_TOL := 0.08
+const THROWN_REACH_TOL := 0.4
+const THROWN_ROBE_REACH_TOL := 0.85
+var _done := false
+
+
+func _process(_d: float) -> bool:
+	if _done:
+		return true
+	_done = true
+	var Rig = load("res://tools/cloth_rig.gd")
+	var all := [Weapons.FISTS, Weapons.SWORD, Weapons.CLUB, Weapons.BOW, Weapons.SLING, Weapons.STAFF, Weapons.WAND]
+	# at 60 and 30 fps, and a big (1.6x) knight and wizard (the dev console's sizes)
+	var runs := []
+	for tpf in [1, 2]:
+		for w in all:
+			runs.append([tpf, w, 1.0])
+	runs.append([1, Weapons.SWORD, 1.6])
+	runs.append([1, Weapons.STAFF, 1.6])
+	for run in runs:
+		var tpf: int = run[0]
+		var w: int = run[1]
+		var rig = Rig.new(root, w)
+		rig.ticks_per_frame = tpf
+		rig.fig.scale = Vector3.ONE * float(run[2])
+		var worst := { "depth": 0.0, "arm": 0.0, "reach": 0.0, "reach_robe": 0.0 }
+		var thrown := { "depth": 0.0, "arm": 0.0, "reach": 0.0, "reach_robe": 0.0 }
+		var where := {}
+		var nan := false
+		var n := 0
+		while not rig.done():
+			rig.step()
+			n += 1
+			if not rig.drawn or n % 2 == 1:
+				continue
+			var m: Dictionary = rig.measure()
+			nan = nan or m.nan
+			if rig.phase == "thrown":
+				for key in thrown:
+					thrown[key] = maxf(float(thrown[key]), float(m[key]))
+				continue
+			for key in worst:
+				if float(m[key]) > float(worst[key]):
+					worst[key] = m[key]
+					where[key] = "%s, %s" % [rig.phase, m.get("piece", "") + "/" + str(m.part) if key == "depth" else (m.arm_part if key == "arm" else "")]
+		var wn: String = "%s at %d fps%s" % [Weapons.NAMES[w], 60 / tpf, "" if run[2] == 1.0 else ", %.1fx size" % run[2]]
+		print("%s: deepest in the body %.3f m (%s), in an arm %.3f m (%s), past its reach %.2f m (%s), robe %.2f m" % [wn,
+			worst.depth, where.get("depth", "-"), worst.arm, where.get("arm", "-"), worst.reach, where.get("reach", "-"), worst.reach_robe])
+		var k := float(run[2])   # (a bigger body: every distance bigger)
+		check(not nan, "%s: no bad numbers in the cloth" % wn)
+		check(float(worst.depth) <= BODY_TOL * k, "%s: no cloth inside the body (%.3f <= %.2f m)" % [wn, worst.depth, BODY_TOL * k])
+		check(float(worst.arm) <= ARM_TOL * k, "%s: none deep in an arm (%.3f <= %.2f m)" % [wn, worst.arm, ARM_TOL * k])
+		check(float(worst.reach) <= REACH_TOL * k and float(worst.reach_robe) <= ROBE_REACH_TOL * k,
+			"%s: every point within its length of its anchor (%.2f, robe %.2f)" % [wn, worst.reach, worst.reach_robe])
+		print("%s, thrown and tumbling: in the body %.3f m, in an arm %.3f m, past its reach %.2f m, robe %.2f m" % [wn,
+			thrown.depth, thrown.arm, thrown.reach, thrown.reach_robe])
+		check(float(thrown.depth) <= THROWN_BODY_TOL * k and float(thrown.reach) <= THROWN_REACH_TOL * k and float(thrown.reach_robe) <= THROWN_ROBE_REACH_TOL * k,
+			"%s: thrown and tumbling, the cloth stays round the body and in one piece" % wn)
+		rig.fig.queue_free()
+	# the cost: each costume on its own, then eight figures in different costumes running through their moves together
+	var costs := []
+	for w in all:
+		var rig = Rig.new(root, w)
+		WizardGarb.busy_usec = 0
+		for i in 400:
+			rig.step()
+		costs.append("%s %.2f" % [Weapons.NAMES[w], WizardGarb.busy_usec / 1000.0 / 400.0])
+		rig.fig.queue_free()
+	print("cloth ms a frame, one figure: ", ", ".join(costs))
+	var rigs := []
+	for i in 8:
+		rigs.append(Rig.new(root, all[i % all.size()]))
+	var frames := 0
+	WizardGarb.busy_usec = 0
+	var t0 := Time.get_ticks_usec()
+	while frames < 600:
+		for r in rigs:
+			r.step()
+		frames += 1
+	var total := float(Time.get_ticks_usec() - t0) / 1000.0
+	var cloth := float(WizardGarb.busy_usec) / 1000.0
+	print("8 figures, %d frames: %.3f ms a frame for everything (simulation, animation, cloth), %.3f ms of it cloth (%.3f ms a figure)" % [
+		frames, total / frames, cloth / frames, cloth / frames / 8.0])
+	check(cloth / frames / 8.0 < 2.5, "the cloth costs under 2.5 ms a figure a frame (headless, robes the most)")
 	print("cloth_test: ", "ALL OK" if bad == 0 else "%d FAILED" % bad)
 	quit(1 if bad else 0)
+	return true
