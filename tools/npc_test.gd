@@ -116,7 +116,7 @@ func _initialize() -> void:
 	t1.state = Boss.S.CHARGE
 	h = t1.hp
 	t1.hurt(16, 1, "Earth Spikes")
-	check(t1.state == Boss.S.STAGGER and h - t1.hp == 24, "earth spikes do half again and stop his charge dead")
+	check(t1.state == Boss.S.CHARGE and h - t1.hp == 16, "v0.12.0: earth spikes are gone: no weakness, no charge stop (a stray name does plain damage)")
 	t1.state = Boss.S.IDLE
 	t1.frosted()
 	check(t1.slow > 0 and t1.speed_k() < 0.5, "a frost nova slows him a lot")

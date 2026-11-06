@@ -96,7 +96,7 @@ class PlayerState:
 	var spell := 0          # the spell picked for the staff / wand
 	var shield := 0         # ticks the shield bubble has left
 	var stun := 0           # ticks left held in place by a stun (no moving, attacking or casting)
-	var recharge := [0, 0, 0, 0, 0, 0]   # the wand's spells: ticks until each can be cast again
+	var recharge := [0, 0, 0, 0, 0, 0, 0, 0]   # the wand's spells (v0.12.0: 8): ticks until each can be cast again
 	var slow := 0           # ticks left slowed (frost): moving at SLOW_FACTOR
 	var staff_lvl := 1      # the staff's level (kills unlock spells: Weapons.LEVEL_KILLS)
 	var wand_lvl := 1

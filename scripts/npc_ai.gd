@@ -11,7 +11,7 @@
 ##                         the drop under gravity);
 ##   staff (wizard):       keep its distance; raise the shield when shots are coming; frost nova anyone too close;
 ##                         lightning, fireballs (led) and, at higher levels, meteors and the arcane storm;
-##   wand (wizard):        summon golems, stun then follow up (earth spikes, the gravity well), teleport away when
+##   wand (wizard):        summon golems, spark, stun then follow up (life drain, the gravity well), teleport away when
 ##                         someone gets into melee range.
 ## Everyone dodges: a dash sideways when a shot is about to hit or a big swing is winding up in reach, after a human
 ## reaction time (with some randomness; tiers: 0 easy, 1 medium, 2 hard).
@@ -49,6 +49,16 @@ var _shot_err_p := 0.0
 var _plan_spell := -1
 var _cast_t := 0
 var _retreat := 0
+# v0.12.0 the wand's Fog: lost inside an enemy's fog it's confused: "thrash" (attacks random spots round it) or
+# "stumble" (wanders, the heading jerking about, until it's out), picked again every FOG_ROLL ticks, still confused
+# FOG_RECOVER ticks after getting out. Outside, it can't target anyone hidden in one and steers round the cloud.
+const FOG_ROLL := 120
+const FOG_RECOVER := 60
+var fog_mode := ""
+var _fog_t := 0
+var _fog_roll := 0
+var _wander := 0.0
+var _thrash_at := Vector3.ZERO
 
 
 func _init(npc_id: int, presser: int, w: int, diff := 1, seed_v := 0) -> void:
@@ -84,6 +94,14 @@ func ideal_range() -> float:
 func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 	seq += 1
 	var s := me.state
+	if not net.fogs.is_empty() or _fog_t > 0:
+		if Fog.lost(id, s.pos, net.fogs, net.server_tick, net.fog_pvp()):
+			_fog_t = FOG_RECOVER
+		elif _fog_t > 0:
+			_fog_t -= 1
+		if _fog_t > 0 and s.dead == 0:
+			return _confused(net, me)
+	fog_mode = ""
 	var tgt: Net.ServerPlayer = _pick_target(net, me)
 	var face := s.yaw
 	var move := Vector2.ZERO
@@ -220,6 +238,8 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 			if str(sp.name) == "Teleport":   # away from them, out of their reach
 				aim_point = s.pos + Vector3(-dir.x, 0, -dir.y) * 10.0 + Vector3(side.x, 0, side.y) * 4.0 * _strafe
 			face = atan2(-(aim_point.x - s.pos.x), -(aim_point.z - s.pos.z))
+	if not net.fogs.is_empty() and move.length() > 0.2:   # v0.12.0: round an enemy's fog, never into it
+		move = Fog.steer(id, s.pos, move.normalized(), net.fogs, net.server_tick, net.fog_pvp())
 	# the buttons for moving that way while facing the target (a person strafing with the mouse on them)
 	if move.length() > 0.2:
 		move = move.normalized()
@@ -240,12 +260,54 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 	return Sim.PlayerInput.new(seq, buttons, face, pitch, s.weapon, net.server_tick, face + err, face, spell, aim_point)
 
 
+## v0.12.0 lost in an enemy's fog: thrash or stumble (see FOG_ROLL). No target: it can't see anyone.
+func _confused(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
+	var s := me.state
+	_fog_roll -= 1
+	if _fog_roll <= 0 or fog_mode == "":
+		fog_mode = "thrash" if rng.randf() < 0.5 else "stumble"
+		_fog_roll = FOG_ROLL
+		_wander = rng.randf() * TAU
+		_thrash_at = s.pos
+	var buttons := Sim.Btn.FACE_CAM
+	var face := s.yaw
+	var aim := s.pos + Vector3(-sin(face), 1.0, -cos(face)) * 4.0
+	var spell := s.spell
+	if fog_mode == "thrash":
+		if seq % 30 == 0:   # a new random spot round it to swing, shoot or cast at
+			var a := rng.randf() * TAU
+			_thrash_at = s.pos + Vector3(cos(a), 0, sin(a)) * rng.randf_range(1.0, 4.0)
+		var to := _thrash_at - s.pos
+		face = atan2(-to.x, -to.z) if Vector2(to.x, to.z).length() > 0.1 else s.yaw
+		aim = _thrash_at + Vector3(0, 1.0, 0)
+		if seq % 30 < 22:
+			buttons |= Sim.Btn.ATTACK   # (a bow draws, then lets go when the button comes up)
+		if Weapons.is_magic(s.weapon):
+			spell = _basic_spell(s.weapon)
+	else:
+		if rng.randf() < 0.05:
+			_wander += rng.randf_range(-1.6, 1.6)
+		face = _wander
+		buttons |= Sim.Btn.FORWARD
+	return Sim.PlayerInput.new(seq, buttons, face, 0.0, s.weapon, net.server_tick, face, face, spell, aim)
+
+
+## The spell a wizard falls back on: the wand's Spark Beam, the staff's Fireball.
+static func _basic_spell(w: int) -> int:
+	return Weapons.idx(w, "Spark Beam") if w == Weapons.WAND else Weapons.idx(w, "Fireball")
+
+
 ## The one it fights: whoever pressed the stone, while they're alive and near; else the nearest living player.
+## v0.12.0: never anyone hidden from it in a fog.
 func _pick_target(net: Net, me: Net.ServerPlayer):
 	var best = null
 	var best_d := 45.0
+	var fogged := not net.fogs.is_empty()
+	var pvp := net.fog_pvp() if fogged else {}
 	for q: Net.ServerPlayer in net.players.values():
 		if q.npc or q.state.dead > 0:
+			continue
+		if fogged and not Fog.can_see(id, me.state.pos, q.id, q.state.pos, net.fogs, net.server_tick, pvp):
 			continue
 		var d := q.state.pos.distance_to(me.state.pos) - (6.0 if q.id == owner else 0.0)
 		if d < best_d:
@@ -256,6 +318,8 @@ func _pick_target(net: Net, me: Net.ServerPlayer):
 	var gd := best_d if best != null else 45.0
 	for g: Golems.G in net.golems.list.values():
 		if g.state == Golems.State.DIE or g.state == Golems.State.RISE or (net.players.has(g.owner) and net.players[g.owner].npc):
+			continue
+		if fogged and not Fog.can_see(id, me.state.pos, g.owner, g.pos, net.fogs, net.server_tick, pvp):
 			continue
 		var d := g.pos.distance_to(me.state.pos)
 		var hit_me := net.golems.harmed(me.id, g.owner, 120) and d < 8.0
@@ -335,18 +399,12 @@ func _pick_spell(s: Sim.PlayerState, kind: String, lv: int, dist: float) -> int:
 		if Weapons.unlocked(w, 5, lv) and s.mana > 400:
 			opts.append([5, 0.5])           # arcane storm
 	else:
-		if s.recharge[0] == 0 and dist < 22.0:
-			opts.append([0, 2.0])           # a golem
-		if s.recharge[1] == 0 and dist < 3.5:
-			opts.append([1, 6.0])           # teleport out of melee
-		if s.recharge[2] == 0 and dist < 15.0:
-			opts.append([2, 2.0])           # stun
-		if Weapons.unlocked(w, 3, lv) and s.recharge[3] == 0:
-			opts.append([3, 1.8])           # earth spikes
-		if Weapons.unlocked(w, 4, lv) and s.recharge[4] == 0:
-			opts.append([4, 1.2])           # gravity well
-		if Weapons.unlocked(w, 5, lv) and s.recharge[5] == 0:
-			opts.append([5, 1.0])           # the titan
+		var ix := func(n: String) -> int: return Weapons.idx(w, n)
+		for o in [["Spark Beam", 2.5, 28.0], ["Golem", 2.0, 22.0], ["Teleport", 6.0, 3.5], ["Stun", 2.0, 15.0],
+				["Life Drain", 1.6, 17.0], ["Gravity Well", 1.2, 25.0], ["Stone Titan", 1.0, 30.0]]:
+			var i: int = ix.call(o[0])
+			if i >= 0 and Weapons.unlocked(w, i, lv) and s.recharge[i] == 0 and dist < float(o[2]):
+				opts.append([i, float(o[1])])
 	var total := 0.0
 	for o in opts:
 		total += float(o[1])

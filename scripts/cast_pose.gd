@@ -1,19 +1,19 @@
 ## How the staff and the wand move while a spell is cast (v0.8.0), shared by Pip (his 3D staff / wand prop) and the 3D
 ## figure (its hands): every spell has its own gesture, each with anticipation (a pull back or a raise before it goes
 ## off), a fast release with overshoot, and a follow-through that settles back:
-##   thrust  (Fireball, Stun, Teleport): pull back and low, then drive forward past the arm's length, recoil, settle;
+##   thrust  (Fireball, Stun, Teleport, Spark Beam, Life Drain): pull back and low, then drive forward past the arm's length, recoil, settle;
 ##   sky     (Lightning, Meteor, Arcane Storm): raise it high over the head with a slow twirl, then bring it down to
 ##            point at the target;
-##   slam    (Frost Nova, Earth Spikes): raise it, then drive it into the ground (a crouch and a jolt);
+##   slam    (Frost Nova): raise it, then drive it into the ground (a crouch and a jolt);
 ##   summon  (Golem, Stone Titan): circle the tip over the ground in front, then point down hard;
-##   vortex  (Gravity Well): the tip circles faster and faster, then thrusts.
+##   vortex  (Gravity Well, Fog): the tip circles faster and faster, then thrusts.
 ## The wand adds a flourish (the tip traces small loops) while the spell builds. Purely visual: worked out from the
 ## player's state on every client.
 class_name CastPose
 
 const STYLE := { "Fireball": "thrust", "Stun": "thrust", "Teleport": "thrust", "Lightning": "sky", "Meteor": "sky",
-	"Arcane Storm": "sky", "Frost Nova": "slam", "Earth Spikes": "slam", "Golem": "summon", "Stone Titan": "summon",
-	"Gravity Well": "vortex" }
+	"Arcane Storm": "sky", "Frost Nova": "slam", "Golem": "summon", "Stone Titan": "summon",
+	"Gravity Well": "vortex", "Fog": "vortex", "Spark Beam": "thrust", "Life Drain": "thrust" }
 
 
 static func _ease_out(x: float) -> float:

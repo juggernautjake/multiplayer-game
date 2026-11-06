@@ -76,9 +76,10 @@
 ## his attention is kept: whoever has had more than their share is marked down, and after ~6 s on one target the
 ## pull to switch grows, so nobody is hunted forever. A golem right in his face counts too.
 ##
-## Weaknesses (hurt()): Lightning x1/4 (he's made of it), Earth Spikes and Meteor x1.5 (spikes stop a charge or the rush
-## dead), Fireball burns 3 s, Frost Nova slows a lot for 4 s, stuns only stagger (shorter each time), gravity wells
-## can't move him. The Storm Leap is armoured against staggers except the rush (spikes stop it). Health: hp_for()
+## Weaknesses (hurt()): Lightning x1/4 (he's made of it), Meteor x1.5, Fireball burns 3 s, Frost Nova slows a lot for
+## 4 s (not a charge or the rush), wand Stuns fill the stun meter (stunned(): the only way to stop a charge or the
+## rush), gravity wells can't move him. Earth Spikes are gone from the game (their charge-stopping weakness with them);
+## the wand's Fog doesn't touch him at all. Health: hp_for()
 ## (x1.7 for two), shorter wind-ups with two or more.
 class_name Boss
 extends RefCounted
@@ -87,8 +88,8 @@ const ID := -5000                # its id as a damage target
 const NAME := "Thunderhorn"
 ## Health (v0.11.0): BASE_HP x (1 + 0.7 per extra player): 7000 alone, 11 900 for two (the old x1.7), 16 800 for three.
 ## The math: a level-3 wizard's sustained damage on him, dodging half the time, is about 15 a second (mana comes back
-## at 12 a second: meteors 60 for 45 mana, fireballs ~20 for 22 plus 8 a second of burning, earth spikes 24 a spike
-## from the wand's recharge, sword cuts 8 at most every 0.6 s up close; lightning only 7). 7000 / 15 = ~7.8 minutes.
+## at 12 a second: meteors 60 for 45 mana, fireballs ~20 for 22 plus 8 a second of burning, the wand's spark
+## beam 7 a second and life drain 18 every 3 s, sword cuts 8 at most every 0.6 s up close; lightning only 7). 7000 / 15 = ~7.8 minutes.
 const BASE_HP := 7000
 const HP_PER_EXTRA := 0.7
 const RADIUS := 2.8              # his body, for hits (v0.11.0: about 3.5x a player)
@@ -277,12 +278,6 @@ func hurt(amount: int, from: int, spell: String) -> int:
 	match spell:
 		"Lightning":
 			k = 0.25
-		"Earth Spikes":
-			k = 1.5
-			if state in [S.CHARGE, S.CHARGE_WIND, S.RUSH, S.PAW]:
-				rep = 0
-				_go(S.STAGGER)   # the spikes stop a charge dead
-				fx.append(["boss_stagger", [pos]])
 		"Meteor":
 			k = 1.5
 		"Fireball":

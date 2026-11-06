@@ -616,9 +616,9 @@ centre, size, up and facing, hat sizes).
 ### cast_pose.gd
 
 `class_name CastPose`, static: `at(weapon, spell, into, windup, cast)` gives the staff or wand's reach, lift, sideways
-offset, angle, crouch, lean, flare and whether the free hand joins, through each spell's gesture: `thrust` (Fireball,
-Stun, Teleport), `sky` (Lightning, Meteor, Arcane Storm), `slam` (Frost Nova, Earth Spikes), `summon` (Golem, Stone
-Titan), `vortex` (Gravity Well). Each gesture has anticipation, a fast release with overshoot and a follow-through; the
+offset, angle, crouch, lean, flare and whether the free hand joins, through each spell's gesture: `thrust` (Fireball, Spark Beam, Life Drain,
+Stun, Teleport), `sky` (Lightning, Meteor, Arcane Storm), `slam` (Frost Nova), `summon` (Golem, Stone
+Titan), `vortex` (Gravity Well, Fog). Each gesture has anticipation, a fast release with overshoot and a follow-through; the
 wand adds a looping flourish while the spell builds. Pip's prop and the figure's hands both use it.
 
 ### motion_fx.gd
@@ -711,7 +711,7 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   wizards shield, cast area spells, blink, summon golems and follow stuns up.
 - `boss.gd` (`Boss`): Thunderhorn on the server (a `RefCounted` like the golems). States `S`, `tick(now, people,
   golems)` fills `hits`, `slows`, `strikes` and `fx` for Net to apply; `hurt(amount, from, spell)` applies his
-  weaknesses (Earth Spikes, Meteor x1.5, Lightning x0.25, Fireball burns), `stunned` (diminishing staggers),
+  weaknesses (Meteor x1.5, Lightning x0.25, Fireball burns), `stunned` (a point on the stun meter; 7 = dazed),
   `frosted`; enrage below 1/2, storm below 1/4; `pack()` for clients. Target id `Boss.ID` (-5000).
 - `boss_view.gd` (`BossView`): draws him from `Net.boss_changed` and the `boss_*` events: the cloud body, the lightning
   skeleton, horns, eyes, gait, every state's pose, the beam, stomp rings, ball lightning, the static field, sounds,
@@ -942,3 +942,45 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   | roar | 0.75 s | back off past 12 m (or shield) | 100% | 100% |
   | leap landing + ring | 1.5 s marker | leave the marker, jump the ring | 100% | 100% |
   | homing orbs (per orb) | 0.5 s launch | keep moving across them, dash late | 95% | 100% |
+
+## Wand spells: Spark Beam, Fog, Life Drain (after v0.12.0)
+
+- Wand spell set. Earth Spikes are gone everywhere (weapons, `CastPose`, `MagicFx`, `Net._cast` / the
+  "spike" pending spell, NpcAI, Thunderhorn's weakness and charge stop, docs, tests). The wand is now (slot: name,
+  level, recharge): 0 **Spark Beam** L1 1 s; 1 Golem L1 10 s; 2 Teleport L1 4 s; 3 Stun L1 5 s; 4 **Fog** L2 18 s;
+  5 **Life Drain** L3 3 s; 6 Gravity Well L3 15 s; 7 Stone Titan L4 60 s. R cycles the unlocked ones (the HUD shows four a
+  row). `Sim.PlayerState.recharge` has 8 slots and `Codec.RECHARGES` (8) sends them all (83 bytes a player). Code
+  names spells instead of slots: `Weapons.idx(w, name)`, `spell_named`, `spells_at(w, level)` (the level-up banner
+  names every spell of the level, "A & B"); Net, Main's bots and the tests use names.
+  - **Spark Beam:** windup 5, cast 14, damage 7, knock 1, range 30. `Net._beam_target(p, from, aim, reach)`: the first
+    enemy player, other summoner's golem (via `_stun_target`), practice dummy or Thunderhorn along the line, walls stop
+    it. Event `spark` [id, hand, end, hit]: `MagicFx._spark` (a thin white-blue jagged line gone in ~0.14 s, sparks, two
+    small lights).
+  - **Life Drain:** windup 12, cast 30, damage 18, `drain` 0.45, range 18. `Net.last_dealt` (set by `_damage`: what the
+    target really lost, 0 if a shield soaked it all) -> `Net.drain_heal(dealt, k)` back to the caster. Event `drain`
+    [id, hand, target point, heal]: `MagicFx._drain` (a crimson jagged stream, nine red/green motes flying from the
+    victim into the caster's wand, following them, "+N" in green).
+  - **Fog** (`fog.gd`, `Fog`, pure statics; `fog_view.gd`, `FogView`): `Net.fogs` holds records (`Fog.make`: id,
+    centre, caster, t0, `duration` 600, `fade` 120, `half` 12.5, a drift direction from the id); the `fog` event
+    (`Fog.to_args`) gives every client the same record; pruned when over. `covers` (the 25 x 25 m square, -3..+7 m
+    high, while density >= 0.12), `density` (1, then down over the last 2 s), `centre` (drifts 1.5 m/s while fading),
+    `half_now` (spreads 15%). Sides like `Net.can_hurt` (`enemies(a, b, pvp)`; ids from `Fog.NPC_ID0` are challengers
+    / minions; golems pass their summoner): `friend(f, who)` = the caster or anyone they can't hurt. `impair`,
+    `view_for(viewer, pos, fogs, tick, pvp)` -> {impair, see_through, inside}, `look_for(viewer, vpos, side, pos, ...,
+    is_self)` -> `Look.NORMAL / OUTLINED / HIDDEN`, `can_see` (NPC brains, golems), `lost`, `steer` (walk round a
+    cloud's edge, a steady side choice), `overlap_at(pos, fogs, tick, pvp)`: clouds from OPPOSING casters overlapping
+    there (Jacob): everyone inside that overlap is blind, both sides, and no outlines there (none on anyone in it, none
+    seen from it); same-side overlaps change nothing. Thunderhorn has no fog code. Net: `fog_pvp()`; NpcAI:
+    `_confused` (`fog_mode` "thrash": swing / shoot / spark at a random spot 1-4 m off every 0.5 s; "stumble": walk on
+    a jerking heading), re-picked every `FOG_ROLL` 120 ticks, `FOG_RECOVER` 60 ticks after getting out; `_pick_target`
+    skips anyone it can't see; moves pass through `Fog.steer`. Golems: `fogs` / `fog_pvp` set by Net each tick,
+    `_confused` (thrash = a slam at the air, stumble), `_pick` skips hidden targets, walking is steered round.
+    FogView (Main calls `update(delta, avatars, golem_view, cam)` after placing the avatars): 108 billboard puffs per
+    cloud (3 layers of 6 x 6, a generated noise texture), alpha 0.8 x density for those it hides from, 0.12 for the
+    caster's side, billowing out over 0.5 s; avatars and golems that are HIDDEN are made invisible (names and bars with
+    them); OUTLINED gets a rim-light `material_overlay` (red on enemies, cyan on yourself; depth test off, so it shows
+    through everything) on every mesh of the figure or golem, or for Pip a twin Sprite3D with a shader that grows his
+    sprite's alpha by ~2.5 px in flat glowing colour, drawn just behind him; blind (impair > 0): a full-screen quad on
+    the camera reading the depth buffer, fogging by distance from the player's body (1.6 -> 3.2 m), washing colours
+    out and darkening the edges, easing in fast and out over `Fog.CLEAR` (0.5 s); the crosshair is UI and stays.
+    Demo bot: `--bot fog` (Main `_bot_fog`). Tests: `tools/fog_test.gd`, magic_test additions.

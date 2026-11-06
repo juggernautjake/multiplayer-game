@@ -110,6 +110,9 @@ var pending_spells: Array = []   # [tick, kind, where, caster]: lightning that s
 var vault_open_until := 0        # tick the vault's door shuts again (0 = shut)
 var wells: Array = []             # gravity wells: [tick it bursts, centre, caster]
 var storms: Array = []            # arcane storms: [tick it ends, centre, caster, tick of the next bolt]
+var fogs: Array = []              # v0.12.0 the wand's fog clouds: Fog records (Fog.make), sent with the "fog" event
+var next_fog := 1
+var last_dealt := 0               # v0.12.0: what the last _damage really took (Life Drain gives some of it back)
 var projectiles := {}  # id -> Proj (server)
 var LOG := OS.get_cmdline_user_args().has("--log")   # print hits and pick-ups (testing)
 var next_proj := 1
@@ -806,7 +809,7 @@ func _burst(pr: Proj, pos: Vector3) -> void:
 	proj_end.rpc(pr.id, server_tick, pos, false)
 	if is_host_player:
 		proj_end(pr.id, server_tick, pos, false)
-	var sp := Weapons.spell(Weapons.STAFF, 1)
+	var sp := Weapons.spell_named(Weapons.STAFF, "Fireball")
 	_fx("explode", [pos, float(sp.radius)])
 	_blast(pos, sp, pr.owner, Weapons.STAFF)
 
@@ -962,7 +965,8 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		var ps: Sim.PlayerState = players[from].state
 		var mv := Weapons.move(ps.weapon, ps.combo)
 		print("hit %d for %d with %s %s" % [target, amount, Weapons.NAMES[ps.weapon], mv.get("name", "shot")])
-	if from > 0 and from == target:   # nobody hurts themselves (their own blasts, spikes, golems)
+	last_dealt = 0
+	if from > 0 and from == target:   # nobody hurts themselves (their own blasts, golems)
 		return
 	if not can_hurt(from, target):
 		return
@@ -977,6 +981,7 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		if boss == null:
 			return
 		var took := boss.hurt(amount, from, dmg_spell)
+		last_dealt = took
 		pos = boss.pos + Vector3(0, 2.4, 0)
 		hit_fx.rpc(target, took, pos, dir, boss.hp == 0, from)
 		if is_host_player:
@@ -986,7 +991,9 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		var gid := -1000 - target
 		if not golems.list.has(gid) or golems.list[gid].owner == from:
 			return
+		var ghp: int = golems.list[gid].hp
 		killed = golems.hurt(gid, amount, from, dir)
+		last_dealt = mini(amount, ghp)
 		pos = golems.list[gid].pos + Vector3(0, 0.9, 0)
 		hit_fx.rpc(target, amount, pos, dir, killed, from)
 		if is_host_player:
@@ -1005,10 +1012,12 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		amount = maxi(int(ceil(float(left) / (rate * 5.0))), 1)   # it shattered: the rest gets through
 	if target < 0:
 		pos = WorldLayout.DUMMIES[-target - 1] + Vector3(0, 1.3, 0)
+		last_dealt = amount
 	else:
 		if not players.has(target):
 			return
 		var q: ServerPlayer = players[target]
+		last_dealt = mini(amount, q.state.hp)
 		q.state.hp = maxi(q.state.hp - amount, 0)
 		var push := Vector3(dir.x, 0, dir.z)
 		if push.length_squared() > 1e-6 and knock > 0.0:
@@ -1348,18 +1357,6 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 					q.state.slow = int(sp.slow)
 			if boss != null and _dist_to_body(s.pos + Vector3(0, 0.5, 0), boss_surface(s.pos)) <= float(sp.radius):
 				boss.frosted()
-		"Earth Spikes":
-			var d := Vector2(inp.aim_point.x - s.pos.x, inp.aim_point.z - s.pos.z)
-			if d.length() < 0.5:
-				d = Vector2(-sin(s.yaw), -cos(s.yaw))
-			d = d.normalized()
-			for k in int(sp.spikes):
-				var at := s.pos + Vector3(d.x, 0, d.y) * (1.6 + k * float(sp.spacing))
-				at.y = WorldLayout.ground_height(at.x, at.z, s.pos.y + 0.5)
-				if _in_box(at + Vector3(0, 0.3, 0)) or Vector2(at.x - s.pos.x, at.z - s.pos.z).length() > float(sp.range):
-					break   # the line stops at a pillar
-				pending_spells.append([server_tick + 3 + k * 3, "spike", at, p.id])
-			_fx("cast", [p.id, "earth"])
 		"Stun":
 			var tgt := _stun_target(p, hand, inp.aim_point, float(sp.range))
 			var end: Vector3 = tgt[1]
@@ -1384,6 +1381,72 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 				caught += 1
 			_fx("stun_beam", [p.id, hand, end, caught])
 			_fx("stun_burst", [end, r])
+		"Spark Beam":   # v0.12.0: an instant zap along the aim
+			var tgt := _beam_target(p, hand, inp.aim_point, float(sp.range))
+			var hit_id: int = tgt[0]
+			if hit_id != 0:
+				dmg_src = Weapons.WAND
+				dmg_spell = "Spark Beam"
+				_damage(hit_id, int(sp.damage), p.id, (tgt[1] as Vector3) - hand, float(sp.knock))
+				dmg_src = -1
+				dmg_spell = ""
+			_fx("spark", [p.id, hand, tgt[1], hit_id != 0])
+		"Life Drain":   # v0.12.0: hurt the first enemy along the aim; some of what it took comes back as health
+			var tgt := _beam_target(p, hand, inp.aim_point, float(sp.range))
+			var hit_id: int = tgt[0]
+			var heal := 0
+			if hit_id != 0:
+				dmg_src = Weapons.WAND
+				dmg_spell = "Life Drain"
+				_damage(hit_id, int(sp.damage), p.id, (tgt[1] as Vector3) - hand, float(sp.knock))
+				dmg_src = -1
+				dmg_spell = ""
+				heal = drain_heal(last_dealt, float(sp.drain))
+				if s.dead == 0 and heal > 0:
+					s.hp = mini(s.hp + heal, Sim.MAX_HP)
+			_fx("drain", [p.id, hand, tgt[1], heal])
+		"Fog":   # v0.12.0: a cloud round the caster (see Fog)
+			var f := Fog.make(next_fog, s.pos, p.id, server_tick, sp)
+			next_fog += 1
+			fogs.append(f)
+			_fx("fog", Fog.to_args(f))
+
+
+## v0.12.0 Life Drain: the health that comes back for `dealt` damage.
+static func drain_heal(dealt: int, k: float) -> int:
+	return int(round(float(dealt) * k))
+
+
+## v0.12.0: who's on PvP (id -> on), for Fog's rules about enemies.
+func fog_pvp() -> Dictionary:
+	var d := {}
+	for q: ServerPlayer in players.values():
+		d[q.id] = q.pvp
+	return d
+
+
+## v0.12.0 Spark Beam and Life Drain: the first enemy along the line from the wand toward the crosshair point, within
+## reach: players the caster may fight, other summoners' golems, practice dummies, Thunderhorn; walls stop it.
+## -> [target id as _damage takes it, or 0; where the beam ends].
+func _beam_target(p: ServerPlayer, from: Vector3, aim: Vector3, reach: float) -> Array:
+	var dir := aim - from
+	if dir.length() < 0.5:
+		dir = Vector3(-sin(p.state.yaw), 0, -cos(p.state.yaw))
+	dir = dir.normalized()
+	var st := _stun_target(p, from, from + dir * reach, reach)
+	var best: int = st[0]
+	var best_t: float = from.distance_to(st[1])
+	for i in WorldLayout.DUMMIES.size():
+		var t := _ray_cyl(from, dir, WorldLayout.DUMMIES[i], 0.35, 1.9)
+		if t < best_t:
+			best_t = t
+			best = -(i + 1)
+	if boss != null and boss.state != Boss.S.DEATH:
+		var t := _ray_cyl(from, dir, boss.pos, Boss.RADIUS, Boss.HEIGHT)
+		if t < best_t:
+			best_t = t
+			best = Boss.ID
+	return [best, from + dir * best_t]
 
 
 ## A point on the ground (or a pillar top) under where the crosshair is, no further than `reach` from `from`.
@@ -1502,7 +1565,7 @@ func _blast(center: Vector3, sp: Dictionary, owner: int, src := Weapons.STAFF) -
 ## it hit them with, everyone hit by this cast, jumps so far]. It jumps to the nearest enemy of the caster not yet hit,
 ## within chain_range of `from` (body to body), for half the damage; a shield soaks it and the branch ends there.
 func _chain_jump(e: Array, owner: int) -> void:
-	var sp := Weapons.spell(Weapons.STAFF, 0)
+	var sp := Weapons.spell_named(Weapons.STAFF, "Lightning")
 	var from = _target_feet(int(e[4]))
 	var dmg := maxi(int(round(float(e[5]) / 2.0)), 1)
 	var jumps := int(e[7]) + 1
@@ -1584,7 +1647,7 @@ func _server_spells() -> void:
 			match str(e[1]):
 				"lightning":
 					_fx("lightning", [e[2]])
-					var lsp := Weapons.spell(Weapons.STAFF, 0)
+					var lsp := Weapons.spell_named(Weapons.STAFF, "Lightning")
 					var struck := _blast(e[2], lsp, owner, Weapons.STAFF)
 					var seen := {}   # everyone hit by this cast (each at most once)
 					for t in struck:
@@ -1599,30 +1662,30 @@ func _server_spells() -> void:
 					for q: ServerPlayer in players.values():
 						if q.state.dead == 0 and not q.npc and _dist_to_body(e[2], q.state.pos) <= 2.5:
 							_damage(q.id, 18, Boss.ID, q.state.pos - e[2], 4.0)
-				"spike":
-					_fx("spike", [e[2]])
-					_blast(e[2], Weapons.spell(Weapons.WAND, 3), owner, Weapons.WAND)
 				"meteor":
-					var sp := Weapons.spell(Weapons.STAFF, 4)
+					var sp := Weapons.spell_named(Weapons.STAFF, "Meteor")
 					_fx("meteor", [e[2], float(sp.radius), int(sp.burn_ticks), float(sp.burn_radius)])
 					_blast(e[2], sp, owner, Weapons.STAFF)
 					for k in int(sp.burn_ticks) / int(sp.burn_every):
 						pending_spells.append([server_tick + int(sp.burn_every) * (k + 1), "burn", e[2], e[3]])
 				"storm_bolt":
 					_fx("lightning", [e[2]])
-					_blast(e[2], Weapons.spell(Weapons.STAFF, 5), owner, Weapons.STAFF)
+					_blast(e[2], Weapons.spell_named(Weapons.STAFF, "Arcane Storm"), owner, Weapons.STAFF)
 				"burn":
-					var sp := Weapons.spell(Weapons.STAFF, 4)
+					var sp := Weapons.spell_named(Weapons.STAFF, "Meteor")
 					var burn := { "radius": sp.burn_radius, "max_damage": sp.burn_damage, "min_damage": sp.burn_damage, "knock": 0.0 }
 					_blast(e[2], burn, owner, Weapons.STAFF)
 	_server_wells()
 	_server_storms()
+	fogs = Fog.prune(fogs, server_tick)
 	# golems
 	var people := []
 	for p: ServerPlayer in players.values():
 		people.append([p.id, p.state.pos, p.pvp or p.npc, p.state.dead == 0, Golems.Who.NPC if p.npc else Golems.Who.PLAYER])
 	if boss != null and boss.state != Boss.S.ENTER and boss.state != Boss.S.DEATH:
 		people.append([Boss.ID, boss.pos, true, true, Golems.Who.BOSS])   # everyone's golems fight him
+	golems.fogs = fogs
+	golems.fog_pvp = fog_pvp() if not fogs.is_empty() else {}
 	for h in golems.tick(server_tick, people):
 		var g: Golems.G = h[0]
 		var tid: int = h[1]
@@ -1694,11 +1757,7 @@ func _magic_kill(p: ServerPlayer, w: int) -> void:
 			p.state.staff_lvl = lv
 		else:
 			p.state.wand_lvl = lv
-		var spells: Array = Weapons.get_data(w).spells
-		var name := ""
-		for sp in spells:
-			if int(sp.get("level", 1)) == lv:
-				name = str(sp.name)
+		var name := " & ".join(Weapons.spells_at(w, lv))   # v0.12.0: a level may bring two spells
 		_fx("level_up", [p.id, w, lv, name])
 		print("%s's %s reached level %d: %s" % [p.name, Weapons.NAMES[w], lv, name])
 	_server_send_roster()
@@ -1734,7 +1793,7 @@ func _return_unique(p: ServerPlayer) -> void:
 ## gravity, up to a cap) and the caster's enemies' golems slide in too; every half second those near its heart take a
 ## nibble; at the end it bursts outward.
 func _server_wells() -> void:
-	var sp := Weapons.spell(Weapons.WAND, 4)
+	var sp := Weapons.spell_named(Weapons.WAND, "Gravity Well")
 	for e in wells.duplicate():
 		var c: Vector3 = e[1]
 		var owner: int = e[2]
@@ -1775,7 +1834,7 @@ func _server_wells() -> void:
 ## Arcane storms: every `every` ticks a bolt is called down: on an enemy under the cloud (a little off, so a moving
 ## target can dodge the warning ring) two times in three, else anywhere under it; each bolt warns, then strikes.
 func _server_storms() -> void:
-	var sp := Weapons.spell(Weapons.STAFF, 5)
+	var sp := Weapons.spell_named(Weapons.STAFF, "Arcane Storm")
 	for e in storms.duplicate():
 		if server_tick >= e[0]:
 			storms.erase(e)

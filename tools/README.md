@@ -294,7 +294,7 @@ staff or the wand.
 Stone's pool before and after the first level-up, one challenger at a time, challengers and players hurt each other
 whatever PvP says, a challenger kill levels the staff and a fallen challenger leaves, a swordsman closes in and fights,
 an archer (v0.11.0: aims where you stand, with spread and a tell) hits some shots but never every one, standing or strafing, Thunderhorn's health (1.7x for two, 2.4x for three), each spell's effect on him
-(lightning 1/4, meteor and earth spikes x1.5, earth spikes stop a charge, fireball burns, frost slows, stuns shorten,
+(lightning 1/4, meteor x1.5, v0.12.0: earth spikes gone (no weakness), fireball burns, frost slows, a stun adds a point to his stun meter,
 gravity wells can't move him), victory, and defeat then restart alone and with two players (levels kept).
 
 ## boss_test.gd
@@ -327,3 +327,27 @@ positions; it must avoid each >= 90% while an idle player is hit by most (>= 50%
 then dashes it (24 m/s for 0.15 s), snaps it 1.5 m sideways (a net correction) and dashes again, at 60 and 30 fps. Every
 cloth point must stay within its rest length of the point above it, and the hem must trail the body by under 0.7 m
 (without the v0.12 carry it trailed over a metre and whipped back).
+
+## fog_test.gd
+
+`<godot> --headless --path . --script tools/fog_test.gd` (v0.12.0, offline, prints harmless RPC errors): the wand's
+list (Earth Spikes gone); Fog cast by a player covers 25 x 25 m round them (corners in, 14 m out), thick for 8 s,
+thinning and drifting, gone at 10 s; `Fog.view_for` / `look_for`: the caster and an ally (PvP off) see the challenger
+inside outlined and themselves outlined, aren't blinded and see through it; the challenger inside is blinded and sees
+nothing beyond ~2.5 m; out of it the blindness lifts; a PvP enemy outside sees everyone inside hidden, inside is
+blinded; a challenger inside can't target anyone, thrashes or stumbles (both seen as it re-picks every 2 s), is still
+confused 0.5 s after leaving and itself again after ~1 s, can't target the caster inside from outside; a challenger
+walking to someone on the far side never enters the fog and gets round it; an enemy (challenger's) golem in the fog is
+confused while the caster's own golem isn't; Thunderhorn's targeting is the same with a fog over his target (and
+boss.gd has no fog code); overlapping clouds: a same-side overlap (1 and 2, PvP off) stays clear for them with
+the enemy outlined, an opposing overlap (1's and the challenger's) blinds 1, ally 2 and the challenger alike, with no
+outlines on or from anyone in it, while the per-caster rules hold elsewhere. Spark Beam zaps the first enemy on the aim for 7 and misses one off the line; Life Drain hits
+for 18 and gives back 45% (+8), and only of what it really took (5 hp left -> +2).
+
+magic_test (v0.12.0 additions): Fog unlocks at wand level 2, Earth Spikes gone (weapons, CastPose, MagicFx), Spark
+Beam is slot 0 at level 1 with a 1 s recharge and casts once a second held down, Life Drain at level 3 every 3 s,
+eight wand spells = eight recharges in the state and the snapshot (`Codec.RECHARGES`).
+
+Demo: `<godot> --path . -- --host --port 7797 --give-all --max-level --bot fog --shots <dir> [--style figure]`: a
+challenger's fog round you (blind), walking out (thick smoke hides him), then your own fog (faint, him outlined red,
+you cyan).

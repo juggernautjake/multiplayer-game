@@ -101,11 +101,13 @@ Pick a weapon (6 staff, 7 wand), pick a spell with **R**, hold the left mouse bu
 
 | Level | Staff (mana) | Wand (recharge) |
 |---|---|---|
+| 1 | | **Spark Beam** (1 s): an instant zap along the aim, 7 to the first enemy in 30 m; spam it |
 | 1 | **Lightning** (34): a warning ring, then a bolt from the sky: 28 to everyone in the 3 m strike (0.9.0: no falloff), then it **chains** to the nearest enemy not yet hit within 6 m for half (14, 7, 4), up to 5 jumps; a shield soaks a jump and ends that branch | **Golem** (10 s): a small, fast stone golem (8 m/s, faster than walking, slower than sprinting) that chases your enemies from 25 m and hits on the move; up to 6, loyal to you |
 | 1 | **Fireball** (22): a burning orb that bursts on contact: 24 at the centre down to 6 at 3.4 m | **Teleport** (4 s): blink to what the crosshair is on, up to 18 m (five dashes), onto tops or into the air |
 | 1 | **Shield** (10, held): hold the button to keep the bubble up (the staff raised overhead); hits on it cost mana (1.5 a point from weapons, 2 from spells, 25 for a stun); out of mana, it **shatters** | **Stun** (5 s): a bolt that bursts in a 2.5 m ring where it lands; everyone caught is held for 3 s |
-| 2 (3 kills) | **Frost Nova** (30): a ring of ice from you, 6 m: damage, a shove, and half speed for 2 s | **Earth Spikes** (6 s): stone spikes stab up one after another in a line toward the crosshair |
-| 3 (7 kills) | **Meteor** (45): a flaming rock falls where you aim: 40 at the centre down to 10 at 5 m, then burning ground for 3 s | **Gravity Well** (15 s): a vortex that drags enemies within 7 m into its heart for 3 s, then bursts |
+| 2 (3 kills) | **Frost Nova** (30): a ring of ice from you, 6 m: damage, a shove, and half speed for 2 s | **Fog** (18 s): a 25 x 25 m cloud round you for 10 s. You and your allies see it faint, with every enemy inside glowing red; enemies inside are nearly blind (2-3 m); everyone else sees thick smoke hiding everyone in it. Challengers and enemy golems can't see into it and are confused inside. Thunderhorn doesn't care |
+| 3 (7 kills) | **Meteor** (45): a flaming rock falls where you aim: 40 at the centre down to 10 at 5 m, then burning ground for 3 s | **Life Drain** (3 s): a crimson stream from the first enemy along the aim: 18, and 45% of what it took comes back to you as health |
+| 3 (7 kills) | | **Gravity Well** (15 s): a vortex that drags enemies within 7 m into its heart for 3 s, then bursts |
 | 4, ultimate (12 kills) | **Arcane Storm** (80): a storm cloud rains lightning for 5 s, seeking enemies under it | **Stone Titan** (60 s): one giant golem, 150 health, whose slam crushes everyone round it |
 
 Kills with the staff or wand (with **PvP** on: P) level that weapon up: after 3, then 4 more, then 5 more (3, 7, 12). Area damage
@@ -225,13 +227,15 @@ lightning keeps falling).
 
 His weaknesses (and resistances):
 
-- **Earth Spikes** do half again as much damage and **stop a charge dead** (he staggers).
 - **Meteors** do half again as much damage.
 - **Fireballs** set him burning.
-- **Frost Nova** slows him a lot.
-- **Stuns** only stagger him, and shorter each time.
+- **Frost Nova** slows him a lot (but not his charge or the rush).
+- **Stuns** fill his **stun meter** (the gold bar under his health bar): 7 wand Stuns close together and he is
+  **dazed for 7 seconds** (he collapses, then gets up). It interrupts anything, and it is the only way to stop a
+  charge or the rush. The meter holds a while after each Stun, then drains.
 - **Lightning** does only a quarter of its damage: he's made of it. A gravity well can't move him.
-- He can't be hurt while he comes down. The Storm Leap shrugs off staggers, except that Earth Spikes stop the rush.
+- He can't be hurt while he comes down.
+- The wand's **Fog** doesn't bother him at all.
 
 ### Winning and losing
 

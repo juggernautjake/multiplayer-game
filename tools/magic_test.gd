@@ -67,7 +67,7 @@ func _init() -> void:
 
 	# 2) teleport: up to five dashes, never into a pillar
 	var dash := Sim.DASH_SPEED * Sim.DASH_TICKS * Config.DT
-	var reach := float(Weapons.spell(Weapons.WAND, 1).range)
+	var reach := float(Weapons.spell_named(Weapons.WAND, "Teleport").range)
 	check(absf(reach - 5.0 * dash) < 0.01, "teleport reach %.1f m = five dashes (%.1f m each)" % [reach, dash])
 	var far := Sim.teleport_target(Vector3(0, 0, 0), 0.0, Vector3(0, 0, -50), reach)
 	check(absf(Vector2(far.x, far.z).length() - reach) < 0.6, "aimed far away it goes the full %.1f m (%.1f)" % [reach, Vector2(far.x, far.z).length()])
@@ -109,7 +109,7 @@ func _init() -> void:
 	w.weapon = Weapons.WAND
 	var golem_casts := []
 	for i in 1300:
-		var ev := Sim.step(w, Sim.PlayerInput.new(i, Sim.Btn.ATTACK, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 0, Vector3(0, 0, -5)))
+		var ev := Sim.step(w, Sim.PlayerInput.new(i, Sim.Btn.ATTACK, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, Weapons.idx(Weapons.WAND, "Golem"), Vector3(0, 0, -5)))
 		if ev == Sim.Ev.CAST:
 			golem_casts.append(i)
 	check(golem_casts.size() == 3 and golem_casts[1] - golem_casts[0] == 600, "golems every 10 s with the wand held down (%s)" % str(golem_casts))
@@ -119,7 +119,7 @@ func _init() -> void:
 	w2.weapon = Weapons.WAND
 	var tp := []
 	for i in 600:
-		if Sim.step(w2, Sim.PlayerInput.new(i, Sim.Btn.ATTACK, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 1, Vector3(0, 0, -30))) == Sim.Ev.CAST:
+		if Sim.step(w2, Sim.PlayerInput.new(i, Sim.Btn.ATTACK, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, Weapons.idx(Weapons.WAND, "Teleport"), Vector3(0, 0, -30))) == Sim.Ev.CAST:
 			tp.append(i)
 	check(tp.size() >= 2 and tp[1] - tp[0] == 240, "teleport every 4 s (%s)" % str(tp))
 	var w3 := Sim.PlayerState.new()
@@ -127,13 +127,13 @@ func _init() -> void:
 	w3.weapon = Weapons.WAND
 	var st := []
 	for i in 1000:
-		if Sim.step(w3, Sim.PlayerInput.new(i, Sim.Btn.ATTACK, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 2, Vector3(0, 0, -10))) == Sim.Ev.CAST:
+		if Sim.step(w3, Sim.PlayerInput.new(i, Sim.Btn.ATTACK, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, Weapons.idx(Weapons.WAND, "Stun"), Vector3(0, 0, -10))) == Sim.Ev.CAST:
 			st.append(i)
 	check(st.size() >= 2 and st[1] - st[0] == 300, "stun every 5 s (%s)" % str(st))
 
 	# 4) stunned: can't move for 3 s; shield lasts 5 s
 	var v := Sim.PlayerState.new()
-	v.stun = int(Weapons.spell(Weapons.WAND, 2).duration)
+	v.stun = int(Weapons.spell_named(Weapons.WAND, "Stun").duration)
 	var p0 := v.pos
 	for i in 170:
 		Sim.step(v, Sim.PlayerInput.new(i, Sim.Btn.FORWARD | Sim.Btn.JUMP | Sim.Btn.ATTACK, 0.0))
@@ -163,7 +163,24 @@ func _init() -> void:
 	check(Weapons.level_for(2) == 1 and Weapons.level_for(3) == 2 and Weapons.level_for(6) == 2 and Weapons.level_for(7) == 3 and Weapons.level_for(11) == 3 and Weapons.level_for(12) == 4,
 		"levels at 3, 7 and 12 kills (3, then 4 more, then 5 more)")
 	check(not Weapons.unlocked(Weapons.STAFF, 3, 1) and Weapons.unlocked(Weapons.STAFF, 3, 2), "Frost Nova unlocks at staff level 2")
-	check(not Weapons.unlocked(Weapons.WAND, 3, 1) and Weapons.unlocked(Weapons.WAND, 3, 2), "Earth Spikes unlocks at wand level 2")
+	var fog_i := Weapons.idx(Weapons.WAND, "Fog")
+	check(not Weapons.unlocked(Weapons.WAND, fog_i, 1) and Weapons.unlocked(Weapons.WAND, fog_i, 2), "Fog unlocks at wand level 2 (v0.12.0)")
+	check(Weapons.idx(Weapons.WAND, "Earth Spikes") < 0 and Weapons.idx(Weapons.STAFF, "Earth Spikes") < 0 and not CastPose.STYLE.has("Earth Spikes") 		and not MagicFx.SPELL_COLOR.has("Earth Spikes"), "Earth Spikes are gone (v0.12.0)")
+	check(Weapons.idx(Weapons.WAND, "Spark Beam") == 0 and Weapons.unlocked(Weapons.WAND, 0, 1) and int(Weapons.spell_named(Weapons.WAND, "Spark Beam").recharge) == 60,
+		"Spark Beam: the wand's first spell, level 1, ready every second")
+	var ld := Weapons.idx(Weapons.WAND, "Life Drain")
+	check(not Weapons.unlocked(Weapons.WAND, ld, 2) and Weapons.unlocked(Weapons.WAND, ld, 3) and int(Weapons.spell(Weapons.WAND, ld).recharge) == 180,
+		"Life Drain unlocks at wand level 3, every 3 s")
+	check((Weapons.get_data(Weapons.WAND).spells as Array).size() == Codec.RECHARGES and Sim.PlayerState.new().recharge.size() == Codec.RECHARGES,
+		"eight wand spells, eight recharges in the state and the snapshot")
+	var sp_w := Sim.PlayerState.new()
+	sp_w.owned = 0b1111111
+	sp_w.weapon = Weapons.WAND
+	var sparks := []
+	for i in 400:
+		if Sim.step(sp_w, Sim.PlayerInput.new(i, Sim.Btn.ATTACK, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 0, Vector3(0, 0, -10))) == Sim.Ev.CAST:
+			sparks.append(i)
+	check(sparks.size() >= 6 and sparks[1] - sparks[0] == 60, "spark beam: spammable, once a second held down (%d casts in 6.7 s)" % sparks.size())
 	var lk := Sim.PlayerState.new()
 	lk.owned = 0b1111111
 	lk.weapon = Weapons.STAFF
