@@ -240,8 +240,69 @@ func _initialize() -> void:
 			stun_t += 1
 	check(stun_t < 15, "a stunned, low-health player is mostly left alone (%d of 60 picks)" % stun_t)
 
+	_throw_tests()
 	print("%d failed" % bad)
 	quit(bad)
+
+
+## v0.12.0: a charge throws you hard: far, bouncing, skidding, off a trunk, never out of the world; then you get up.
+func _throw(from: Vector3, dir: Vector3) -> Array:
+	var s := Sim.spawn_state(1)
+	s.pos = from
+	s.grounded = true
+	s.vel = dir.normalized() * Net.LAUNCH_V + Vector3(0, Net.LAUNCH_UP, 0)
+	s.grounded = false
+	s.down = Sim.DOWN_TICKS
+	var bounces := 0
+	var was_up := 0.0
+	var ricochet := false
+	var air_peak := 0.0
+	var last_v := Vector2(s.vel.x, s.vel.z)
+	var ticks := 0
+	var inside := true
+	while s.down > 0 and ticks < 1200:
+		var vy := s.vel.y
+		Sim.step(s, Sim.PlayerInput.new(ticks, 0, 0.0, 0.0, 0, 0, 0.0, 0.0))
+		ticks += 1
+		if vy < -1.0 and s.vel.y > 1.0:
+			bounces += 1
+		var hv := Vector2(s.vel.x, s.vel.z)
+		if last_v.length() > 3.0 and hv.length() > 1.0 and hv.dot(last_v) < 0.0:
+			ricochet = true
+		last_v = hv
+		air_peak = maxf(air_peak, s.pos.y)
+		inside = inside and absf(s.pos.x) <= Config.WORLD_HALF and absf(s.pos.z) <= Config.WORLD_HALF
+	return [Vector2(s.pos.x - from.x, s.pos.z - from.z).length(), bounces, ricochet, ticks, inside, s.down]
+
+
+func _throw_tests() -> void:
+	var open := _throw(Vector3(0, 0, 50), Vector3(1, 0, 0.3))
+	print("thrown on open ground: %.1f m, %d bounces, down for %.1f s" % [open[0], open[1], open[3] / 60.0])
+	check(open[0] > 20.0 and open[0] < 45.0, "a charge throws you 20-45 m across the arena (%.1f m)" % open[0])
+	check(open[1] >= 1, "you bounce off the ground (%d bounces)" % open[1])
+	check(open[5] == 0 and open[3] < 6 * 60, "then you lie and get up (%.1f s)" % (open[3] / 60.0))
+	var oak: Vector3 = WorldLayout.TREES[2][1]   # into an oak's trunk from 6 m away
+	var tree := _throw(oak + Vector3(6, 0, 0), Vector3(-1, 0, 0))
+	check(tree[2], "thrown into a tree trunk, you ricochet off it")
+	var edge := _throw(Vector3(Config.WORLD_HALF - 6.0, 0, 0), Vector3(1, 0, 0))
+	check(edge[4] and edge[2], "thrown at the edge of the world, you stay inside and bounce back")
+	# a charge throws players, and challengers / minions caught in it too
+	for st in [Boss.S.CHARGE, Boss.S.RUSH]:
+		var b := Boss.new(Vector3(0, 0, 50), 1, 5)
+		b.yaw = 0.0
+		b.state = st
+		b.t = 1
+		b.charge_dir = Vector2(0, -1)
+		b.bystanders = [[1000001, Vector3(0.5, 0, 46)]]
+		var thrown_p := false
+		var thrown_n := false
+		for k in 40:
+			b.tick(k, [[1, Vector3(-0.5, 0, 44), true, false, 100]], [])
+			for l in b.launches:
+				thrown_p = thrown_p or int(l[0]) == 1
+				thrown_n = thrown_n or int(l[0]) == 1000001
+			b.launches.clear(); b.hits.clear(); b.fx.clear(); b.zaps.clear()
+		check(thrown_p and thrown_n, "%s: the player and a challenger in his path are both thrown" % ("the charge" if st == Boss.S.CHARGE else "the rush"))
 
 
 ## Ten orbs at one player: standing still, or sprinting in a circle and dashing now and then. -> hits.

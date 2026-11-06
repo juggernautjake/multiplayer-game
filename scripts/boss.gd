@@ -410,7 +410,10 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				var d := _flat(p[1] - pos)
 				if d.length() < RADIUS + 0.9 and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
 					charge_hit[p[0]] = true
-					hits.append([p[0], 30 if enraged else 25, Vector3(charge_dir.x + d.normalized().x, 0, charge_dir.y + d.normalized().y), 13.0])
+					var cdir := Vector3(charge_dir.x + d.normalized().x * 0.5, 0, charge_dir.y + d.normalized().y * 0.5).normalized()
+					hits.append([p[0], 30 if enraged else 25, cdir, 0.0])
+					launches.append([p[0], cdir])   # v0.12.0: the charge throws you too
+			_trample_bystanders(RADIUS + 0.9, 25)
 			for g in golems:
 				var d := _flat(g[1] - pos)
 				if d.length() < RADIUS + 0.7 and not charge_hit.has(-1000 - int(g[0])):
@@ -635,6 +638,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 					var dir := Vector3(charge_dir.x + side.x, 0, charge_dir.y + side.y).normalized()
 					hits.append([p[0], 35 if enraged else 30, dir, 0.0])
 					launches.append([p[0], dir])
+			_trample_bystanders(RADIUS + 0.8, 30)
 			var past := true
 			for p in living:
 				if int(p[0]) == rush_target:
@@ -647,6 +651,22 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				fx.append(["boss_pant", [pos]])
 			if t >= 70:
 				_end_leap()
+
+
+## v0.12.0: challengers and corrupted minions caught in a charge or the rush are hurt and thrown like players
+## (`bystanders`: [[id, pos]] from Net; he never picks them as targets).
+var bystanders: Array = []
+
+
+func _trample_bystanders(reach: float, dmg: int) -> void:
+	for b in bystanders:
+		var d := _flat(b[1] - pos)
+		if d.length() < reach and not charge_hit.has(b[0]) and (b[1] as Vector3).y < 3.5:
+			charge_hit[b[0]] = true
+			var n := d.normalized() if d.length() > 0.01 else Vector2.ZERO
+			var dir := Vector3(charge_dir.x + n.x * 0.5, 0, charge_dir.y + n.y * 0.5).normalized()
+			hits.append([b[0], dmg, dir, 0.0])
+			launches.append([b[0], dir])
 
 
 func _end_leap() -> void:

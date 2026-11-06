@@ -37,6 +37,10 @@ const STATIC_STUN := 420     # 7 s
 # v0.11.0 knocked down (launched by Thunderhorn's rush): no control; the last DOWN_GETUP ticks are the get-up
 const DOWN_TICKS := 140
 const DOWN_GETUP := 45
+# v0.12.0 thrown by a charge: bounces on hard landings, ricochets off walls (some speed lost each time)
+const BOUNCE_MIN := 4.0
+const BOUNCE_K := 0.5
+const RICOCHET_K := 0.6
 
 
 ## One tick of player intent. yaw: the camera's heading (radians, 0 = looking down -Z): WASD move relative to it.
@@ -153,7 +157,9 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 		inp = PlayerInput.new(inp.seq, 0, inp.yaw, inp.pitch, s.weapon, inp.view_tick, s.yaw, s.yaw, s.spell, s.pos)
 		s.charge = 0
 	if s.down > 0:   # knocked down: flying, sliding, lying, getting up; no control
-		s.down -= 1
+		# v0.12.0: the clock waits while still tumbling or skidding, so the get-up never starts mid-flight
+		if s.down > DOWN_GETUP + 20 or (s.grounded and Vector2(s.vel.x, s.vel.z).length() < 2.0):
+			s.down -= 1
 		inp = PlayerInput.new(inp.seq, 0, inp.yaw, inp.pitch, s.weapon, inp.view_tick, s.yaw, s.yaw, s.spell, s.pos)
 		s.charge = 0
 	if s.zap >= ZAP_STUN:
@@ -241,19 +247,40 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 	s.pos += s.vel * Config.DT
 
 	s.grounded = false
+	var thrown := s.down > 0 and s.dead == 0
 	if s.pos.y <= 0.0:  # the ground plane
 		s.pos.y = 0.0
-		s.vel.y = 0.0
-		s.grounded = true
+		if thrown and s.vel.y < -BOUNCE_MIN:   # v0.12.0 thrown: smashed into the ground, it bounces back up
+			s.vel.y = -s.vel.y * BOUNCE_K
+			s.vel.x *= 0.82
+			s.vel.z *= 0.82
+		else:
+			s.vel.y = 0.0
+			s.grounded = true
+	var hv := Vector2(s.vel.x, s.vel.z)
 	_collide_boxes(s, prev_y)
 	_collide_dummies(s)
+	if thrown and hv.length() > 4.0:   # ricochet off pillars, trunks and posts instead of sliding along them
+		var nv := Vector2(s.vel.x, s.vel.z)
+		var lost := hv - nv
+		if lost.length() > 1.0:
+			var n := lost.normalized()   # (the wall's normal, pointing into it)
+			var rv := (hv - n * 2.0 * hv.dot(n)) * RICOCHET_K
+			s.vel.x = rv.x
+			s.vel.z = rv.y
+			s.vel.y = maxf(s.vel.y, 3.0)
 	var lim := Config.WORLD_HALF  # the edge of the world
+	if thrown and (absf(s.pos.x) > lim or absf(s.pos.z) > lim):   # thrown into the edge: back off it
+		if absf(s.pos.x) > lim:
+			s.vel.x = -signf(s.pos.x) * absf(s.vel.x) * RICOCHET_K
+		if absf(s.pos.z) > lim:
+			s.vel.z = -signf(s.pos.z) * absf(s.vel.z) * RICOCHET_K
 	if absf(s.pos.x) > lim:
 		s.pos.x = clampf(s.pos.x, -lim, lim)
-		s.vel.x = 0.0
+		s.vel.x = 0.0 if not thrown else s.vel.x
 	if absf(s.pos.z) > lim:
 		s.pos.z = clampf(s.pos.z, -lim, lim)
-		s.vel.z = 0.0
+		s.vel.z = 0.0 if not thrown else s.vel.z
 
 	quantize(s)
 	return ev

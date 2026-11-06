@@ -1954,6 +1954,10 @@ func _server_boss() -> void:
 	for g: Golems.G in golems.list.values():
 		if g.state != Golems.State.DIE:
 			gl.append([g.id, g.pos])
+	boss.bystanders = []   # v0.12.0: challengers and minions get trampled too
+	for q: ServerPlayer in players.values():
+		if q.npc and q.state.dead == 0:
+			boss.bystanders.append([q.id, q.state.pos])
 	boss.tick(server_tick, people, gl)
 	for h in boss.hits:
 		_damage(int(h[0]), int(h[1]), Boss.ID, h[2], float(h[3]))
@@ -2035,7 +2039,13 @@ func add_static(q: ServerPlayer, need: int) -> void:
 		_fx("static_hit", [q.id, s.pos + Vector3(0, 1.0, 0), s.zap / Sim.ZAP_STACK])
 
 
-## Thrown by the rush: flying ~15 m, then knocked down (Sim.DOWN_TICKS). A held shield that survives the hit stops it.
+## Thrown by a charge or the rush (v0.12.0: much harder): smashed across the ground, bouncing (Sim.BOUNCE_K),
+## ricocheting off pillars and trunks (Sim.RICOCHET_K), skidding, then knocked down (Sim.DOWN_TICKS, its clock waiting
+## until the skid stops) and getting up. A held shield that survives the hit stops it.
+const LAUNCH_V := 22.0
+const LAUNCH_UP := 11.0
+
+
 func boss_launch(id: int, dir: Vector3) -> void:
 	if not players.has(id):
 		return
@@ -2043,7 +2053,7 @@ func boss_launch(id: int, dir: Vector3) -> void:
 	if s.dead > 0 or s.shield > 0:
 		return
 	var d := Vector3(dir.x, 0, dir.z).normalized()
-	s.vel = d * 17.0 + Vector3(0, 10.0, 0)
+	s.vel = d * LAUNCH_V + Vector3(0, LAUNCH_UP, 0)
 	s.grounded = false
 	s.dash_ticks = 0
 	s.charge = 0

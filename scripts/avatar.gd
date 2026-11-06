@@ -235,6 +235,51 @@ func set_pvp(on: bool) -> void:
 	label.text = ("⚔ " if on else "") + _name
 
 
+# v0.12.0 thrown by a charge: Pip spins head over heels in the view's plane (the billboards are switched off and the
+# body is turned to face the camera, rolled round its middle), with a dust burst at every bounce and a dust trail as he
+# skids; the lying and getting-up frames take over once he stops.
+var _roll := 0.0
+var _rolling := false
+var _roll_vy := 0.0
+var _roll_dust := 0.0
+var _roll_hv := Vector2.ZERO
+
+
+func _pip_tumble(delta: float, cam: Camera3D) -> void:
+	var st := state
+	var hv := Vector2(_vel.x, _vel.z)
+	var on := st != null and st.down > 0 and st.dead == 0 and cam != null and (not grounded or hv.length() > 3.0)
+	if st != null and st.down > 0 and st.dead == 0 and get_parent() != null:
+		if _roll_vy < -3.0 and (_vel.y > 0.5 or grounded):
+			MotionFx.land(get_parent(), global_position, clampf(-_roll_vy / 8.0, 0.4, 1.6))
+		elif _roll_hv.length() > 5.0 and hv.dot(_roll_hv) < 0.0:
+			MotionFx.land(get_parent(), global_position + Vector3(0, 0.6, 0), 0.8)
+		if grounded and hv.length() > 2.0:
+			_roll_dust -= delta
+			if _roll_dust <= 0.0:
+				_roll_dust = 0.05
+				MotionFx.puff(get_parent(), global_position, 2, 0.45)
+	_roll_vy = _vel.y
+	_roll_hv = hv
+	if on:
+		var cb := cam.global_transform.basis
+		var right_ish := hv.normalized().dot(Vector2(cb.x.x, cb.x.z)) if hv.length() > 0.1 else 1.0
+		_roll -= delta * clampf(hv.length() * 0.8, 5.0, 18.0) * (1.0 if right_ish >= 0.0 else -1.0)
+		for sp in [sprite, _accent, _carry]:
+			if sp != null:
+				sp.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		var rb := Basis(cb.z.normalized(), _roll) * Basis(cb.x, cb.y, cb.z).orthonormalized()
+		var c := Vector3(0, 0.5, 0)
+		model.global_transform = Transform3D(rb, global_position + Vector3(0, 0.3, 0) + c - rb * c)
+		_rolling = true
+	elif _rolling:
+		_rolling = false
+		model.transform = Transform3D.IDENTITY
+		for sp in [sprite, _accent, _carry]:
+			if sp != null:
+				sp.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+
+
 ## Briefly tint red (hit).
 func flash() -> void:
 	_flash = 0.18
@@ -260,6 +305,7 @@ func animate(delta: float, cam: Camera3D) -> void:
 			sprite.position.x = 0.0
 			_hit_shake = false
 		return
+	_pip_tumble(delta, cam)
 	if not _have_last:
 		_last = position
 		_have_last = true

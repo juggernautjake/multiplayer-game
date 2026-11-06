@@ -55,6 +55,26 @@ var hp_bar: Sprite3D
 var zap_bar: Sprite3D        # v0.11.0: Static build-up (Avatar.static_bars)
 var zap_back: Sprite3D
 var _tumble := 0.0
+var _thrown_vy := 0.0
+var _thrown_dust := 0.0
+
+
+## v0.12.0 thrown by a charge: a dust burst and a thud every time he smashes into the ground or bounces off a wall,
+## and a trail of dust while he skids.
+func _thrown_fx(delta: float, grounded: bool, hspeed: float) -> void:
+	if get_parent() == null or not model.visible:
+		return
+	var vy := _vel.y
+	if _thrown_vy < -3.0 and (vy > 0.5 or grounded):   # hit the ground (a bounce, or the landing)
+		MotionFx.land(get_parent(), position, clampf(-_thrown_vy / 8.0, 0.4, 1.6))
+	elif (_last_vel * Vector3(1, 0, 1)).length() > 5.0 and Vector2(_vel.x, _vel.z).dot(Vector2(_last_vel.x, _last_vel.z)) < 0.0:
+		MotionFx.land(get_parent(), position + Vector3(0, 0.8, 0), 0.8)   # off a trunk or a pillar
+	_thrown_vy = vy
+	if grounded and hspeed > 2.0:
+		_thrown_dust -= delta
+		if _thrown_dust <= 0.0:
+			_thrown_dust = 0.05
+			MotionFx.puff(get_parent(), position, 2, 0.5)
 var blob: MeshInstance3D
 var held: Node3D               # club / sword / slingshot model (the bow is drawn live)
 var held_w := -1
@@ -417,25 +437,32 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	var downed := st != null and st.down > 0 and not dead
 	var lie := -PI / 2.0 if dead else 0.0
 	var lie_y := 0.25 if dead else 0.0
+	var hspeed := Vector2(_vel.x, _vel.z).length()
 	if downed:
-		if not grounded:
-			_tumble -= delta * 9.0
-			lie = -PI / 2.0 + _tumble
-		else:
-			_tumble = 0.0
-			var up := 1.0 - clampf(float(st.down) / Sim.DOWN_GETUP, 0.0, 1.0)
-			lie = -PI / 2.0 * (1.0 - _smooth(up))
-			lie_y = 0.25 * (1.0 - up)
-			_crouch = maxf(_crouch, 0.35 * sin(up * PI))
+		_thrown_fx(delta, grounded, hspeed)
+	if downed and (not grounded or hspeed > 3.0):
+		# v0.12.0 thrown: head over heels, faster the faster he flies, a cartwheel mixed in; skidding along the
+		# ground he keeps rolling until the skid slows
+		_tumble -= delta * clampf(hspeed * 0.7, 4.0, 16.0)
+		lie = -PI / 2.0 + _tumble
+		model.rotation.z = sin(_tumble * 0.6) * 0.9
+	elif downed:
+		_tumble = 0.0
+		var up := 1.0 - clampf(float(st.down) / Sim.DOWN_GETUP, 0.0, 1.0)
+		lie = -PI / 2.0 * (1.0 - _smooth(up))
+		lie_y = 0.25 * (1.0 - up)
+		_crouch = maxf(_crouch, 0.35 * sin(up * PI))
 	else:
 		_tumble = 0.0
-	if downed and not grounded:
+	var tumbling := downed and (not grounded or hspeed > 3.0)
+	if tumbling:
 		model.rotation.x = lie
 	else:
 		model.rotation.x = lerpf(model.rotation.x, lie, a)
-	model.position.y = lerpf(model.position.y, lie_y, a)
+	model.position.y = lerpf(model.position.y, lie_y + (0.35 if tumbling else 0.0), a)
 	var dizzy := st != null and st.stun > 0 and not dead
-	model.rotation.z = sin(_t * 5.0) * 0.1 if dizzy else lerpf(model.rotation.z, 0.0, a)
+	if not tumbling:
+		model.rotation.z = sin(_t * 5.0) * 0.1 if dizzy else lerpf(model.rotation.z, 0.0, a)
 	dead = dead or downed
 	var breathe := sin(_t * 1.6) * 0.01                                    # ~15 breaths a minute
 	var moving := clampf(speed / 1.5, 0.0, 1.0) if grounded else 0.0

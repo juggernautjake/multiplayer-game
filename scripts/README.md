@@ -793,3 +793,12 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   damage goes into `damage_by`), and killing a golem gives nothing.
 - `npc_ai.gd`: `_pick_target` turns on a players' golem within 4 m (or one that hit it in the last 2 s, within 8 m),
   through `_golem_proxy` (a ServerPlayer standing in for it).
+- Charge throws (v0.12.0): both the charge and the rush now throw (`Boss.launches`), and also hit and throw
+  challengers and minions in the path (`Boss.bystanders`, filled by `Net._server_boss`; `_trample_bystanders`).
+  `Net.boss_launch`: `LAUNCH_V` 22 m/s out, `LAUNCH_UP` 11 m/s up. `Sim.step` while `down`: smashing into the ground
+  faster than `BOUNCE_MIN` (4 m/s) bounces (`BOUNCE_K` 0.5, losing 18% across), hitting a pillar, trunk or post
+  ricochets (`RICOCHET_K` 0.6, a hop up) instead of sliding along it, the world's edge throws you back, and the
+  knock-down clock waits through the flight and skid. Typically ~30 m with two bounces, ~3 s down. The figure tumbles
+  head over heels with a cartwheel (also while skidding), Pip spins in the view's plane (`Avatar._pip_tumble`: the
+  billboards off, the body rolled round its middle); both throw dust at each bounce and ricochet and trail it while
+  skidding. Tests: boss_test (`_throw_tests`).
