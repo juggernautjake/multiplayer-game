@@ -169,13 +169,37 @@ func _initialize() -> void:
 					hit = true
 			b.hits.clear()
 		check(hit != jump, "a landing ring: %s" % ("jumped over it: no hit" if jump else "standing on the ground: hit"))
+	# v0.12.0: the landing ring and the slam waves cross the whole map: a player 150 m away is hit standing, not jumping
+	for jump in [false, true]:
+		var b := Boss.new(Vector3(0, 0, 56), 1, 3)
+		b.state = Boss.S.HOWL
+		b.orb_plan = 0
+		var s := Sim.spawn_state(1)
+		s.pos = Vector3(-120, 0, -40)
+		var far := Vector2(s.pos.x, s.pos.z).distance_to(Vector2(0, 56))
+		b.rings.append([Boss.RADIUS, {}, Vector3(0, 0, 56), Boss.WAVE_V, 18, 1, Boss.wave_max(Vector3(0, 0, 56))])
+		var hit := false
+		for k in int(far / Boss.WAVE_V * 60.0) + 120:
+			var r := float(b.rings[0][0]) if not b.rings.is_empty() else 9999.0
+			var press: bool = jump and r > far - Boss.WAVE_V * 0.22 and r < far - Boss.WAVE_V * 0.12 and s.grounded
+			idle(s, Sim.Btn.JUMP if press else 0)
+			b.state = Boss.S.HOWL
+			b.t = 1
+			b.tick(k, people_of([[1, s]]), [])
+			for h in b.hits:
+				if h[0] == 1:
+					hit = true
+			b.hits.clear(); b.fx.clear(); b.zaps.clear()
+		check(hit != jump, "a map-wide ring %.0f m away: %s" % [far, "jumped over it: no hit" if jump else "standing on the ground: hit"])
+	check(Boss.wave_max(Vector3(0, 0, 56)) > 250.0, "the waves run past the farthest corner of the map (%.0f m)" % Boss.wave_max(Vector3(0, 0, 56)))
+	check(Boss.WAVE_GAP * Config.DT > 2.0 * Sim.JUMP_SPEED / Sim.GRAVITY + 0.3, "time between slam waves to land and jump again (%.2f s vs %.2f s in the air)" % [Boss.WAVE_GAP * Config.DT, 2.0 * Sim.JUMP_SPEED / Sim.GRAVITY])
 
 	# ---- the rush: dash sideways in time and he misses; otherwise launched, knocked down, then up again
 	for dodge in [true, false]:
 		net.summon_boss()
 		var b: Boss = net.boss
 		b.state = Boss.S.SLAMS
-		b.t = 139
+		b.t = 30 + 2 * Boss.WAVE_GAP + 39
 		b.yaw = 0.0   # facing -Z
 		a.state = Sim.spawn_state(1)
 		a.state.pos = b.pos + Vector3(0, 0, -16)

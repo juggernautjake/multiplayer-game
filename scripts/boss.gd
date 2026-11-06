@@ -91,6 +91,20 @@ const ORB_VMAX := 15.0
 const ORB_ACC := 5.0
 const ORB_TURN := 2.8            # rad/s
 const ORB_LIFE := 330
+## v0.12.0 map-wide shockwaves: the Storm Leap's landing ring and the three slam waves after the howl race out at one
+## steady speed (WAVE_V) until they have swept the whole map (wave_max: past its farthest corner), so every grounded
+## player is hit unless they jump as it passes, wherever they are. WAVE_GAP ticks between slam waves (1.25 s: time to
+## land from one jump, ~0.7 s in the air, and jump the next).
+const WAVE_V := 22.0
+const WAVE_GAP := 75
+
+
+static func wave_max(c: Vector3) -> float:
+	var h := Config.WORLD_HALF
+	var m := 0.0
+	for k in [Vector2(h, h), Vector2(-h, h), Vector2(h, -h), Vector2(-h, -h)]:
+		m = maxf(m, Vector2(c.x, c.z).distance_to(k))
+	return m + 2.0
 const ORB_FAR_V := 30.0          # v0.12.0 cruise speed while more than ORB_SLOW_R from the target
 const ORB_SLOW_R := 30.0
 const ORB_DMG := 6
@@ -580,7 +594,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 					var d := _flat(p[1] - pos)
 					if d.length() < RADIUS + 1.2:
 						hits.append([p[0], 22, Vector3(d.x, 0, d.y), 12.0])
-				rings.append([RADIUS, {}, Vector3(pos.x, 0, pos.z), 10.0, 18, 1])
+				rings.append([RADIUS, {}, Vector3(pos.x, 0, pos.z), WAVE_V, 18, 1, wave_max(pos)])   # v0.12.0: map-wide
 				_go(S.LEAP_LAND)
 		S.LEAP_LAND:
 			if t >= 40:
@@ -601,10 +615,10 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			if t >= 260:
 				_go(S.SLAMS)
 		S.SLAMS:
-			if t == 30 or t == 70 or t == 110:
-				var k := (t - 30) / 40
-				_slam(9.0 + 1.5 * k, 15)
-			if t >= 140:
+			if t == 30 or t == 30 + WAVE_GAP or t == 30 + 2 * WAVE_GAP:   # v0.12.0: three map-wide waves
+				rings.append([RADIUS, {}, Vector3(pos.x, 0, pos.z), WAVE_V, 12 + (2 if enraged else 0), 2, wave_max(pos)])
+				fx.append(["boss_slam", [pos, 0]])
+			if t >= 30 + 2 * WAVE_GAP + 40:
 				var best = null
 				var bd := INF
 				for p in living:
@@ -1300,7 +1314,7 @@ func _tick_rings(living: Array, golems: Array) -> void:
 			if absf(d - float(r[0])) < 0.7 and not (r[1] as Dictionary).has(-1000 - int(g[0])):
 				r[1][-1000 - int(g[0])] = true
 				hits.append([-1000 - int(g[0]), 13, Vector3.ZERO, 0.0])
-	rings = rings.filter(func(r): return float(r[0]) < 24.0)
+	rings = rings.filter(func(r): return float(r[0]) < (float(r[6]) if r.size() > 6 else 24.0))
 
 
 func _tick_balls(living: Array) -> void:

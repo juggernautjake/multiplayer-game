@@ -997,10 +997,19 @@ func _level_up(id: int, w: int, lv: int, spell: String) -> void:
 	var m := _glow_mat(Color("ffd86a"), 3.0, 0.45)
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	col.material_override = m
-	main.add_child(col)
-	col.global_position = at + Vector3(0, 4.5, 0)
+	# v0.12.0: the column rides along with the player (a child of their avatar) for ~3.5 s, then fades
+	(avatars[id] as Node3D).add_child(col)
+	col.position = Vector3(0, 4.5, 0)
+	var glow := OmniLight3D.new()
+	glow.light_color = Color("ffd86a")
+	glow.light_energy = 3.0
+	glow.omni_range = 7.0
+	glow.position = Vector3(0, -2.5, 0)
+	col.add_child(glow)
 	var tw := col.create_tween()
-	tw.tween_property(m, "albedo_color:a", 0.0, 1.6)
+	tw.tween_interval(2.2)
+	tw.tween_property(m, "albedo_color:a", 0.0, 1.4)
+	tw.parallel().tween_property(glow, "light_energy", 0.0, 1.4)
 	tw.tween_callback(col.queue_free)
 	_flash_light(at + Vector3(0, 2, 0), Color("ffd86a"), 6.0, 10.0, 1.2)
 	Fx.burst(main, at + Vector3(0, 1.0, 0), Vector3.UP, Color("ffe9a0"), 50, 6.0, 0.05)

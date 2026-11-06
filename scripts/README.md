@@ -846,3 +846,11 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
 - Demo: `--bot boss --leap --chase` follows him with the camera through the leap (`Main._chase_cam`); `--every N`,
   `--from T`, `--until T` control the leap pictures. Record a video with Godot's movie maker, e.g.
   `<godot> --path . --write-movie leap.avi --fixed-fps 30 -- --host --port 7793 --give-all --bot boss --leap --chase --every 100000 --until 1000`.
+- Map-wide shockwaves (v0.12.0): the Storm Leap's landing ring (kind 1, gold) and the three slam waves after the howl
+  (kind 2, white-blue, 12 damage, 14 enraged) race out at `Boss.WAVE_V` (22 m/s) until `wave_max(centre)` (past the
+  map's farthest corner), so every grounded player anywhere is hit unless they jump as it passes; `WAVE_GAP` 75 ticks
+  (1.25 s) between slam waves leaves time to land and jump again. Rings carry a 7th field, their end radius (24 m for
+  the ordinary stomp rings). BossView draws the wide ones with a constant band width and a 1.4 m glowing wall, dust
+  thrown up where it is nearest you, a ripple running ahead and a rumble (whoosh + slam) timed to its arrival.
+- Level up (v0.12.0, `MagicFx._level_up`): the light column is a child of the player's avatar, so it rides along for
+  ~2.2 s and fades over 1.4 s (with its own light).
