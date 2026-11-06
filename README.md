@@ -776,7 +776,7 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
 - Challenger wand wizards keep at most 3 golems; their golems fight you and your golems and crumble when their wizard
   falls.
 
-## What's new in 0.12.2 (not released yet)
+## What's new in 0.12.2
 
 - **Easier weapon and spell picking**: the mouse wheel steps through your weapons, a tap of Tab goes back to the last
   one, and holding Tab opens a weapon wheel. With the staff or wand, a **spell hotbar** over your health shows every
