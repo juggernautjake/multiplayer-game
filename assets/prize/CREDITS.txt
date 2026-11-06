@@ -1,0 +1,33 @@
+Pictures used in the prize fiesta (scripts/prize_screen.gd). All are public domain dedications (CC0) on Wikimedia
+Commons; the licence was checked on each file's page (and via the Commons API's LicenseShortName) on 2026-11-06.
+They were downloaded as SVG and rasterised to PNG (about 512 px on the long side) with Godot's own SVG loader; the
+pictures themselves are unchanged. CC0 asks for no credit; it is given anyway.
+
+taco.png
+  "Taco.svg" by gnokii (openclipart.org)
+  https://commons.wikimedia.org/wiki/File:Taco.svg
+  Licence: CC0 1.0 Universal Public Domain Dedication, https://creativecommons.org/publicdomain/zero/1.0/
+
+sombrero_cactus.png
+  "Sombrero on cactus.svg" by OpenClipart-Vectors
+  https://commons.wikimedia.org/wiki/File:Sombrero_on_cactus.svg
+  Licence: CC0 1.0 Universal Public Domain Dedication, https://creativecommons.org/publicdomain/zero/1.0/
+
+maracas.png
+  "Maracas.svg" by Gerald G
+  https://commons.wikimedia.org/wiki/File:Maracas.svg
+  Licence: CC0 1.0 Universal Public Domain Dedication, https://creativecommons.org/publicdomain/zero/1.0/
+
+chili.png
+  "Pepper-37221.svg" by ClkerFreeVectorImages (originally on Pixabay)
+  https://commons.wikimedia.org/wiki/File:Pepper-37221.svg
+  Licence: CC0 1.0 Universal Public Domain Dedication, https://creativecommons.org/publicdomain/zero/1.0/
+
+Everything else in the fiesta (the abuela and her chancla, the ring, Smiguel's big cartoon eyes, the piñata and its
+candy, the lucha libre mask, the giant sombrero, the tortilla, the fireworks, the lights and the screen effects) is
+drawn by the game itself, and its sounds (air horn, "ay ay ay" siren, whooshes, the piñata's whacks and burst, the
+slide whistle, the boing, the ring's ting, fireworks) are made in scripts/synth.gd.
+
+"My precious" (precious.wav / precious_custom.wav): no film or TV audio is used. The line is an original recording
+or generated voice supplied separately; record its source here when it is added. A precious_custom.wav (or .ogg) here,
+or in the prize folder next to the game's exe, replaces it; with neither, that beat is silent.

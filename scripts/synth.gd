@@ -367,3 +367,90 @@ static func grunt(kind := 0, titan := false) -> AudioStreamWAV:
 		var env := minf(t / 0.03, 1.0) * clampf((dur - t) / 0.12, 0.0, 1.0)
 		d[i] = clampf((f1 * 1.6 + lp * 0.5 * (0.6 + 0.4 * sin(t * TAU * 23.0))) * env * 0.8, -1.0, 1.0)
 	return _wav(d)
+
+
+## v0.12.6 the prize fiesta's comic sounds (PrizeScreen's meme moments):
+##   "airhorn"  three party air-horn blasts (BWAAA BWA BWAAAAA): a stack of detuned square-ish saws a fifth apart that
+##              dip in pitch at each start (2.0 s);
+##   "siren"    the "ay ay ay" siren: three wailing sweeps, each starting higher, with a little vibrato (2.0 s);
+##   "whistle"  a slide whistle falling (the giant sombrero dropping) (1.0 s);
+##   "boing"    a spring boing (the tortilla bouncing) (0.6 s);
+##   "thwack"   a stick whacking the piñata: a hollow papery knock (0.25 s);
+##   "pinata"   the piñata bursting: a papery crunch, a pop and a sparkly shower of little candy ticks (1.4 s);
+##   "firework" a rocket whistling up and bursting into crackles (1.6 s);
+##   "bonk"     the chancla landing: a rubbery slap with a cartoon "doink" (0.4 s);
+##   "ting"     the ring catching the light: a bright little bell (inharmonic partials ringing out) (1.0 s).
+static func fiesta(kind: String) -> AudioStreamWAV:
+	var dur: float = {"airhorn": 2.0, "siren": 2.0, "whistle": 1.0, "boing": 0.6, "thwack": 0.25, "pinata": 1.4,
+		"firework": 1.6, "bonk": 0.4, "ting": 1.0}.get(kind, 0.5)
+	var n := int(RATE * dur)
+	var d := PackedFloat32Array()
+	d.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 165 + kind.length()
+	var ph := [0.0, 0.0, 0.0, 0.0]
+	var lp := 0.0
+	var spark := 0.0
+	var blasts := [[0.0, 0.42], [0.5, 0.22], [0.8, 1.15]]
+	var horn := [415.0, 419.0, 622.0, 311.0]
+	for i in n:
+		var t := float(i) / RATE
+		var s := 0.0
+		var noise := rng.randf_range(-1.0, 1.0)
+		match kind:
+			"airhorn":
+				for b in blasts:
+					var tb := t - float(b[0])
+					if tb >= 0.0 and tb < float(b[1]):
+						var bend := 1.0 - 0.12 * exp(-tb * 30.0)
+						var env := minf(tb / 0.012, 1.0) * clampf((float(b[1]) - tb) / 0.05, 0.0, 1.0)
+						for k in horn.size():
+							ph[k] += float(horn[k]) * bend / RATE
+							var x: float = fposmod(ph[k], 1.0)
+							s += ((1.0 if x < 0.45 else -1.0) * 0.5 + (2.0 * x - 1.0) * 0.5) * env * 0.3
+			"siren":
+				var seg := fmod(t, 0.66) / 0.66
+				var k := floori(t / 0.66)
+				var f := (330.0 + 90.0 * k) * (1.0 + 0.55 * sin(seg * PI * 0.85)) * (1.0 + 0.02 * sin(t * TAU * 7.0))
+				ph[0] += f / RATE
+				var env := minf(seg / 0.05, 1.0) * clampf((1.0 - seg) / 0.12, 0.0, 1.0)
+				s = (sin(ph[0] * TAU) * 0.7 + (2.0 * fposmod(ph[0], 1.0) - 1.0) * 0.25) * env * 0.8
+			"whistle":
+				ph[0] += lerpf(1900.0, 380.0, pow(t / dur, 0.8)) / RATE
+				s = (sin(ph[0] * TAU) + noise * 0.06) * minf(t / 0.03, 1.0) * clampf((dur - t) / 0.1, 0.0, 1.0) * 0.6
+			"boing":
+				ph[0] += (180.0 + 260.0 * exp(-t * 6.0) * (0.5 + 0.5 * cos(t * TAU * 11.0))) / RATE
+				s = sin(ph[0] * TAU) * exp(-t * 4.5) * minf(t / 0.005, 1.0) * 0.8
+			"thwack":
+				lp += (noise - lp) * 0.25
+				ph[0] += (220.0 * (1.0 - t * 1.5)) / RATE
+				s = lp * 1.6 * exp(-t * 30.0) + sin(ph[0] * TAU) * 0.7 * exp(-t * 18.0)
+			"pinata":
+				lp += (noise - lp) * 0.3
+				var crunch := lp * 1.8 * exp(-t * 9.0) * (0.6 + 0.4 * sin(t * TAU * 37.0))
+				ph[0] += (140.0 * exp(-t * 8.0) + 50.0) / RATE
+				var pop := sin(ph[0] * TAU) * exp(-t * 12.0)
+				if t > 0.12 and rng.randf() < 0.012 * exp(-(t - 0.12) * 1.8):
+					spark = maxf(spark, rng.randf_range(0.5, 1.0))
+				spark *= 0.995
+				s = crunch + pop + sin(t * TAU * (2200.0 + 600.0 * sin(t * 13.0))) * spark * 0.5 + (noise - lp) * spark * 0.4
+			"firework":
+				if t < 0.7:
+					ph[0] += lerpf(900.0, 2600.0, t / 0.7) / RATE
+					s = sin(ph[0] * TAU) * 0.25 * minf(t / 0.05, 1.0)
+				else:
+					var tb := t - 0.7
+					lp += (noise - lp) * 0.06
+					if rng.randf() < 0.02 * exp(-tb * 2.0):
+						spark = 1.0
+					spark *= 0.993
+					s = lp * 4.0 * exp(-tb * 7.0) + noise * spark * 0.7
+			"bonk":
+				lp += (noise - lp) * 0.4
+				ph[0] += (520.0 * exp(-t * 5.0) + 160.0) / RATE
+				s = lp * 1.4 * exp(-t * 40.0) + sin(ph[0] * TAU) * exp(-t * 7.0) * 0.8
+			"ting":
+				s = (sin(t * TAU * 1760.0) * exp(-t * 4.0) + sin(t * TAU * 2794.0) * 0.5 * exp(-t * 6.0)
+					+ sin(t * TAU * 4186.0) * 0.3 * exp(-t * 9.0)) * minf(t / 0.003, 1.0) * 0.5
+		d[i] = clampf(s, -1.0, 1.0)
+	return _wav(d)

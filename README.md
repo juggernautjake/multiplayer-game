@@ -317,6 +317,23 @@ or its releases: the game looks for `smiguel_el_magnifico.png` in a folder calle
 `MultiplayerGame.exe` (or in `prize\` in the game's user folder, `%APPDATA%\Godot\app_userdata\Multiplayer Game\prize\`).
 Without it, a drawn stand-in (a huge sombrero and a grand moustache) takes his place.
 
+### The fiesta (v0.12.6)
+
+The prize is now a 24-second meme show that loops until you press a key, all over a screen shader (zoom punches, shake,
+waves, fisheye pulses on the beat, an RGB split, a kaleidoscope, VHS tears, bloom) and party lights (spotlights
+sweeping on the beat, god rays, a disco ball, a red/green beacon, rainbow stripes). Flashes are short and never strobe.
+In order: air horns and the slam; a cactus in a sombrero dances across ("¡ÁNDALE! ¡ARRIBA!"); **the ring** floats in,
+Smiguel's eyes go huge and follow it ("my precious", "¡MI TESORO!") until an abuela's **chancla** smacks him (¡PUM!,
+dizzy eyes) and knocks the ring away; a piñata is whacked open (candy, fireworks, and the ring falls out again);
+"¡AY, CARAMBA!" in a kaleidoscope; tacos rain and a tortilla boings; a lucha libre mask; the "¡AY AY AYYYYY!" siren
+(the ring a third time) until a giant sombrero sweeps it away and lands on the camera; fireworks and "¡VIVA SMIGUEL!".
+The taco, chilli, maracas and cactus pictures are public-domain (CC0) clip art in `assets/prize/` (sources in
+[assets/prize/CREDITS.txt](assets/prize/CREDITS.txt)); everything else is drawn and synthesised by the game.
+
+**"My precious":** played from `assets/prize/precious.wav` (or `.ogg`). To use your own recording, put
+`precious_custom.wav` (or `.ogg`) in `assets/prize/`, or in the `prize` folder next to `MultiplayerGame.exe` (or the user
+folder's `prize\`) -- it wins over the built-in one. With no file at all that beat is simply silent.
+
 ### Credits
 
 Music in the prize: "Mariachi Snooze" Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution
@@ -585,7 +602,7 @@ The bot modes (all in `scripts/main.gd`, functions `_bot_input`, `_bot_fight` an
 | `--bot boss --leap` | (v0.11.0, `--host --give-all --shots <folder>`) Static stacks on you, then a Storm Leap at once; a picture every 10 ticks for 25 s. |
 | `--bot boss --cutscene` | (v0.12.3, `--host --give-all`) As `--bot boss`, but drops him under 60% right after his entrance so the Duel Stone's corruption plays at once, lets the minions come for 10 s (`--kill-after <ticks>`), then kills him (the minions collapse into smoke). `--every N --shots <folder>` saves pictures, `--until T` quits. Record it with `--write-movie cut.avi --fixed-fps 30 --quit-after 1150` before `--`. |
 | `--bot boss [--defeat]` | (`--host --give-all --shots <folder>`) Levels up to 3 (the stone turns violet, the altar rises), jumps on the altar, watches Thunderhorn come down and fight from 10-16 m (kept alive), takes him to half and a quarter of his health, then beats him and pictures the victory and the prize. With `--defeat` it dies instead: the defeat screen, a key, the restart. |
-| `--bot prize [--defeat] [--no-prize-pic]` | Just the end screens (victory and the prize, or defeat); `--no-prize-pic` shows the drawn stand-in. |
+| `--bot prize [--defeat] [--no-prize-pic] [--every N] [--ticks N]` | Just the end screens (victory and the prize, or defeat); `--no-prize-pic` shows the drawn stand-in. `--every N` saves a shot every N ticks (default 30), `--ticks N` runs that long (default 1100; ~2300 shows a whole fiesta loop). For a video use Godot's `--write-movie out.avi --fixed-fps 30` before the `--`. |
 | `--bot close` | Close-quarters test. After picking everything up, for each weapon it walks right into the middle dummy and then into the nearest tall pillar (7 s each), keeps the crosshair on the target, and attacks (clicks, then holds; bows draw and release). Every 6 ticks it logs how far the body is turned from the target and from the camera; at the end it prints the worst angle per weapon and quits. Add `--shots <folder>` to save screenshots at three moments of each phase. |
 
 Other command-line options (after `--`):
