@@ -19,12 +19,175 @@ const STONE_DARK := Color("5d5a55")
 const MOSS := Color("5f7f3a")
 
 var net: Net
+var main = null      # v0.12.2 (Main, untyped: it has no class name): for where players (main.avatars) and Thunderhorn (main.boss_view) are drawn
 var golems := {}     # id -> { root, body, head, arm_l, arm_r, leg_l, leg_r, pos, yaw, state, t, hp, stun, seen, mats, owner, label, bar }
+## v0.12.2 golem orders, as the server said: owner -> { mode, point, target, age }. Each standing order has a marker
+## in the owner's colour: a pulsing ring and a faint shaft of light on the spot to hold (Stay here / Go there), or a
+## ring round the feet of the one to attack with the crossed-swords icon over it. Every golem carries a small order
+## icon (its owner's colour) while the order isn't Follow, and for a few seconds after any order; when an order
+## comes, its golems turn their heads to the spot or the target, and the owner hears a grunt.
+var orders := {}
+var markers := {}    # owner -> { root, ring, ring_mat, shaft, shaft_mat, icon }
+var _grunts := {}
 
 
-func setup(n: Net) -> void:
+func setup(n: Net, m = null) -> void:
 	net = n
+	main = m
 	net.golems_changed.connect(_on_states)
+	net.golem_order_changed.connect(_on_order)
+
+
+func _owner_color(owner: int) -> Color:
+	return net.roster.get(owner, {}).get("color", Color("d9cfc0"))
+
+
+## A new order (or Follow again) for `owner`'s golems.
+func _on_order(owner: int, mode: int, point: Vector3, target: int) -> void:
+	if mode == Golems.Order.FOLLOW:
+		orders.erase(owner)
+	else:
+		orders[owner] = { "mode": mode, "point": point, "target": target, "age": 0.0 }
+	var any_titan := false
+	var mine := 0
+	for g: Dictionary in golems.values():
+		if g.owner != owner or g.state == Golems.State.DIE:
+			continue
+		mine += 1
+		any_titan = any_titan or g.titan
+		g.icon_t = 4.0
+		(g.icon as Sprite3D).texture = Icons.texture("o:" + Golems.ORDER_NAMES[mode], _owner_color(owner))
+		if mode == Golems.Order.FOLLOW or mode == Golems.Order.REGROUP:
+			g.look_owner = true
+		else:
+			g.look_owner = false
+		g.look_t = 1.6
+		g.look_yaw = (g.head as Node3D).rotation.y
+	if owner == net.my_id and mine > 0:
+		var k := "%d%s" % [1 if mode == Golems.Order.ATTACK else 0, "t" if any_titan else ""]
+		if not _grunts.has(k):
+			_grunts[k] = Synth.grunt(1 if mode == Golems.Order.ATTACK else 0, any_titan)
+		Synth.play(self, _grunts[k], -4.0)
+
+
+## Where a golem order's target is drawn now (a player or challenger, Thunderhorn, a golem, a dummy), or null.
+func target_point(t: int):
+	if t == Boss.ID:
+		return main.boss_view.pos if main != null and main.boss_view != null and main.boss_view.alive else null
+	if t > 0:
+		if main != null and main.avatars.has(t) and (main.avatars[t] as Node3D).visible:
+			return (main.avatars[t] as Node3D).position
+		return null
+	if t <= -1000:
+		var g = golems.get(-1000 - t, null)
+		return (g.root as Node3D).position if g != null and g.state != Golems.State.DIE else null
+	if t < 0 and -t - 1 < WorldLayout.DUMMIES.size():
+		return WorldLayout.DUMMIES[-t - 1]
+	return null
+
+
+## Where an owner's golems should look when an order comes: the spot, the target, or the owner.
+func _look_point(g: Dictionary):
+	var o = orders.get(g.owner, null)
+	if g.get("look_owner", false) or o == null:
+		if main != null and main.avatars.has(g.owner):
+			return (main.avatars[g.owner] as Node3D).position
+		return null
+	if o.mode == Golems.Order.ATTACK:
+		return target_point(o.target)
+	return o.point
+
+
+func _make_marker(owner: int) -> Dictionary:
+	var col := _owner_color(owner)
+	var root := Node3D.new()
+	add_child(root)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.86
+	tm.outer_radius = 1.0
+	ring.mesh = tm
+	var rm := StandardMaterial3D.new()
+	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	rm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rm.albedo_color = Color(col.r, col.g, col.b, 0.85)
+	rm.no_depth_test = false
+	ring.material_override = rm
+	ring.scale = Vector3(1, 0.15, 1)
+	ring.position.y = 0.05
+	root.add_child(ring)
+	var shaft := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.05
+	cm.bottom_radius = 0.22
+	cm.height = 3.0
+	shaft.mesh = cm
+	var sm := StandardMaterial3D.new()
+	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	sm.albedo_color = Color(col.r, col.g, col.b, 0.3)
+	sm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	shaft.material_override = sm
+	shaft.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	shaft.position.y = 1.5
+	root.add_child(shaft)
+	var icon := Sprite3D.new()
+	icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	icon.no_depth_test = true
+	icon.pixel_size = 0.012
+	icon.position.y = 3.3
+	root.add_child(icon)
+	return { "root": root, "ring": ring, "ring_mat": rm, "shaft": shaft, "shaft_mat": sm, "icon": icon, "col": col, "mode": -1 }
+
+
+## Markers follow the orders: on the spot to hold, or round the target's feet (sized to it), pulsing.
+func _update_markers(delta: float) -> void:
+	for owner in markers.keys():
+		if not orders.has(owner) or orders[owner].mode == Golems.Order.REGROUP:
+			(markers[owner].root as Node3D).queue_free()
+			markers.erase(owner)
+	for owner in orders.keys():
+		var o: Dictionary = orders[owner]
+		o.age += delta
+		if o.mode == Golems.Order.REGROUP:
+			continue
+		if not markers.has(owner):
+			markers[owner] = _make_marker(owner)
+		var mk: Dictionary = markers[owner]
+		var root: Node3D = mk.root
+		if mk.mode != o.mode:
+			mk.mode = o.mode
+			(mk.icon as Sprite3D).texture = Icons.texture("o:" + Golems.ORDER_NAMES[o.mode], mk.col)
+		var at = o.point
+		var r := 1.6
+		var top := 3.3
+		if o.mode == Golems.Order.ATTACK:
+			at = target_point(o.target)
+			if o.target == Boss.ID:
+				r = Boss.RADIUS + 0.4
+				top = Boss.HEIGHT + 1.2
+			elif o.target <= -1000 and golems.has(-1000 - o.target) and golems[-1000 - o.target].titan:
+				r = 1.6
+				top = 4.8
+			else:
+				r = 0.75
+				top = 2.6
+		root.visible = at != null
+		if at == null:
+			continue
+		root.global_position = Vector3(at.x, at.y, at.z)
+		var mine: bool = owner == net.my_id
+		var pulse := 0.5 + 0.5 * sin(o.age * 6.0)
+		var settle := clampf(1.0 - (o.age - 2.5) / 1.5, 0.0, 1.0)   # bright at first, then quieter
+		var base_a := (0.55 + 0.35 * settle) if mine else (0.3 + 0.3 * settle)
+		var grow := 1.0 + 0.6 * maxf(0.0, 1.0 - o.age / 0.35)      # it lands with a little shrink
+		(mk.ring as Node3D).scale = Vector3(r * grow * (1.0 + 0.06 * pulse), 0.15, r * grow * (1.0 + 0.06 * pulse))
+		(mk.ring_mat as StandardMaterial3D).albedo_color.a = base_a * (0.75 + 0.25 * pulse)
+		(mk.shaft as Node3D).visible = o.mode != Golems.Order.ATTACK
+		(mk.shaft_mat as StandardMaterial3D).albedo_color.a = 0.25 * (0.4 + 0.6 * settle) * (0.8 + 0.2 * pulse)
+		var icon: Sprite3D = mk.icon
+		icon.position.y = top + 0.12 * sin(o.age * 3.0)
+		icon.modulate.a = base_a + 0.1
 
 
 func _on_states(tick: int, data: Array) -> void:
@@ -152,13 +315,51 @@ func _make(owner: int, titan := false) -> Dictionary:
 	bar.no_depth_test = true
 	bar.position.y = 3.95 if titan else 1.58
 	root.add_child(bar)
+	var icon := Sprite3D.new()   # v0.12.2: its order, over its name
+	icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	icon.no_depth_test = true
+	icon.pixel_size = 0.0065 if not titan else 0.009
+	icon.position.y = 4.65 if titan else 2.12
+	icon.visible = false
+	root.add_child(icon)
+	var o = orders.get(owner, null)
+	if o != null:
+		icon.texture = Icons.texture("o:" + Golems.ORDER_NAMES[o.mode], _owner_color(owner))
 	return { "root": root, "body": body, "head": head, "arm_l": arms[0], "arm_r": arms[1], "leg_l": legs[0], "leg_r": legs[1],
 		"pos": root.position, "yaw": 0.0, "state": Golems.State.RISE, "t": 0.0, "hp": Golems.HP, "stun": false,
 		"mats": mats, "owner": owner, "label": label, "bar": bar, "phase": 0.0, "flash": 0.0, "pieces": [], "titan": titan,
-		"eyes": eyes, "seed": randf() * 10.0, "squash": 0.0, "swing": 0, "landed": true, "thumped": false }
+		"eyes": eyes, "seed": randf() * 10.0, "squash": 0.0, "swing": 0, "landed": true, "thumped": false,
+		"icon": icon, "icon_t": 0.0, "look_t": 0.0, "look_owner": false }
+
+
+## v0.12.2: just after an order, the head turns to the spot / target / owner (within its neck's reach); the order
+## icon shows while the order isn't Follow, and for a few seconds after any order.
+func _order_look(g: Dictionary, delta: float) -> void:
+	var icon: Sprite3D = g.icon
+	g.icon_t = maxf(float(g.icon_t) - delta, 0.0)
+	var o = orders.get(g.owner, null)
+	icon.visible = icon.texture != null and (g.icon_t > 0.0 or (o != null and o.mode != Golems.Order.REGROUP))
+	if o == null and g.icon_t <= 0.0:
+		icon.texture = null
+	icon.modulate.a = clampf(float(g.icon_t) / 0.5, 0.55, 1.0) if o != null else clampf(float(g.icon_t) / 0.5, 0.0, 1.0)
+	if g.look_t <= 0.0:
+		return
+	g.look_t = float(g.look_t) - delta
+	var at = _look_point(g)
+	if at == null:
+		return
+	var root: Node3D = g.root
+	var d := Vector2(at.x - root.position.x, at.z - root.position.z)
+	if d.length() < 0.3:
+		return
+	var want := wrapf(atan2(-d.x, -d.y) - root.rotation.y, -PI, PI)
+	var head: Node3D = g.head
+	g.look_yaw = lerp_angle(float(g.get("look_yaw", head.rotation.y)), clampf(want, -1.3, 1.3), clampf(delta * 9.0, 0.0, 1.0))
+	head.rotation.y = lerp_angle(head.rotation.y, g.look_yaw, clampf(g.look_t / 0.4, 0.0, 1.0))
 
 
 func _process(delta: float) -> void:
+	_update_markers(delta)
 	for id in golems.keys():
 		var g: Dictionary = golems[id]
 		g.t += delta
@@ -174,6 +375,7 @@ func _process(delta: float) -> void:
 		root.rotation.y = at[1]
 		var speed := Vector2(root.position.x - before.x, root.position.z - before.z).length() / maxf(delta, 1e-4)
 		_pose(g, speed, delta)
+		_order_look(g, delta)
 		var k := float(g.hp) / float(Golems.TITAN_HP if g.titan else Golems.HP)
 		(g.bar as Sprite3D).scale.x = maxf(0.6 * k, 0.001)
 		(g.bar as Sprite3D).modulate = Color(0.9, 0.3, 0.2).lerp(Color(0.85, 0.8, 0.6), k)

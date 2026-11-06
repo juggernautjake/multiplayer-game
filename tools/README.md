@@ -23,6 +23,7 @@ the script through `OS.get_cmdline_user_args()`.
 | [eco_test.gd](#eco_testgd) | test | no | Runs the yard for 20 minutes and checks that everything happens. |
 | [invite_test.gd](#invite_testgd) | test | no | Checks that invite codes round-trip. |
 | [cloth_test.gd](#cloth_testgd) | test | no | Dashes a robed body and checks the cloth keeps up without stretching. |
+| [order_test.gd](#order_testgd) | test | no | v0.12.2 golem orders: follow, stay, go there, attack that, regroup, PvP rules, synced. |
 | [figure_poses.gd](#figure_posesgd) | renderer | yes | One pose of the 3D figure, saved as a PNG. |
 | [figure_strip.gd](#figure_stripgd) | renderer | yes | A filmstrip of one move of the 3D figure. |
 | [pip_feet_check.gd](#pip_feet_checkgd) | renderer | yes | Pip at ground level, to check his feet sit on the ground. |
@@ -238,6 +239,20 @@ crumble at 0 health and their summoner can't hurt them; one titan at a time, who
 (0.8.0) one leaps at someone 4.5 m off and comes down on them, three after one target spread round it, and with
 nothing to fight they stand guard round their summoner.
 
+## order_test.gd
+
+`<godot> --headless --path . -s tools/order_test.gd` (v0.12.2): golem orders (`Golems.order`). Follow: they keep up
+with a summoner who walks off and stand round them. Stay here: they hold the spot while the summoner walks 30 m away,
+leave an enemy 12 m from the spot alone and fight one 5 m from it without straying. Go there: golems and the titan
+walk 17 m to the spot and hold it; a spot further than 60 m is brought in. Attack that: the ordered target is hit
+first though another enemy is nearer, and everyone (titan too) goes after it; the order ends when the target dies, or
+5 s after it got more than 30 m from the summoner. PvP: with PvP off an attack order on a player (or a player's golem)
+is refused and nobody hits them; with it on for both the order is taken (no grudge needed), and it ends (and the hits
+stop) when player 2 turns PvP off. No golems: refused. Regroup: they drop the fight, come back, then follow again.
+Thunderhorn: golems close in and hit him (his id used to read as a golem's) and can be ordered against him. Through
+`Net` (offline peer, as a host): the server's refusals come back as toasts, accepted orders and the order ending when
+PvP goes off are synced (`golem_order_changed`, `golem_orders`).
+
 ## net_magic_test.gd
 
 `Godot --headless --path . --script tools/net_magic_test.gd`: the server's magic, run offline (an `OfflineMultiplayerPeer`;
@@ -273,7 +288,8 @@ dark robe's hood a rounded cowl with his face in its shadow. Run it after changi
 
 `Godot --headless --path . --script tools/rehost_test.gd`: host on UDP 7777 (7797 if another program has it), leave,
 host again; a guest joins, leaves and joins again; host -> leave -> join -> leave -> host. The host and the guest live
-in their own branches of the tree with their own multiplayer.
+in their own branches of the tree with their own multiplayer. `-- --port <n>` (v0.12.2) tests on another port, to keep
+clear of a game running on 7777.
 
 ## garb_check.gd
 

@@ -31,6 +31,7 @@ signal eco(kind: String, args: Array)   # the living yard (trees, fruit, worms, 
 signal item_removed(id: int, taker: int)
 signal magic_fx(kind: String, args: Array)        # spells: see MagicFx
 signal golems_changed(tick: int, data: Array)   # golems' state from the server: see GolemView
+signal golem_order_changed(owner: int, mode: int, point: Vector3, target: int)   # v0.12.2: a summoner's order (Golems.Order)
 
 const COLORS := [Color("e6194b"), Color("3cb44b"), Color("ffe119"), Color("4363d8"), Color("f58231"), Color("911eb4"),
 	Color("46f0f0"), Color("f032e6"), Color("bcf60c"), Color("fabebe"), Color("008080"), Color("e6beff")]
@@ -154,6 +155,7 @@ var _last_frame_us := 0
 var _frame_us := 0          # how long the last frame took: samples taken right after a local hitch are skipped
 var jitter_ms := 0.0        # how unevenly snapshots arrive (95th percentile lateness), for the readout
 var tailscale_path := {}    # address -> "direct" / "relayed (DERP ...)" / "checking" / "": see check_tailscale_path()
+var golem_orders := {}      # v0.12.2: summoner id -> [Golems.Order, point, target] as the server last said (not FOLLOW)
 
 
 func _ready() -> void:
@@ -244,6 +246,7 @@ func shutdown() -> void:
 	wells.clear()
 	storms.clear()
 	golems = Golems.new()
+	golem_orders.clear()
 	ecology = null
 	predicted = null
 	my_id = 0
@@ -304,6 +307,7 @@ func _on_peer_disconnected(id: int) -> void:
 			if g.owner == id:
 				g.hp = 0
 				golems._to_state(g, Golems.State.DIE)
+		golems._end_order(id)
 		players.erase(id)
 		_server_send_roster()
 
@@ -336,6 +340,9 @@ func hello(player_name: String, character := "pip", version := "") -> void:
 	items_full.rpc_id(id, list)
 	if vault_open_until > 0:
 		spell_fx.rpc_id(id, "vault_door", [true])
+	for owner in golems.orders.keys():   # v0.12.2: standing golem orders, for their markers
+		var o: Array = golems.order_of(owner)
+		golem_order_sync.rpc_id(id, owner, o[0], o[1], o[2])
 	print("+ %s joined (%d online)" % [players[id].name, humans()])
 
 
@@ -386,6 +393,61 @@ func request_pvp(on: bool) -> void:
 		_server_set_pvp(my_id if my_id != 0 else 1, on)
 	else:
 		set_pvp.rpc_id(1, on)
+
+
+## v0.12.2 golem orders (G, the golem wheel, middle mouse): a player asks, the server decides (Golems.order) and
+## tells everyone (golem_order_sync), so every screen shows the same marker; a refusal comes back as a toast.
+@rpc("any_peer", "call_remote", "reliable")
+func golem_order_req(mode: int, point: Vector3, target: int) -> void:
+	if multiplayer.is_server():
+		_server_golem_order(multiplayer.get_remote_sender_id(), mode, point, target)
+
+
+func request_golem_order(mode: int, point: Vector3, target: int) -> void:
+	if multiplayer.multiplayer_peer == null:
+		return
+	if multiplayer.is_server():
+		_server_golem_order(my_id if my_id != 0 else 1, mode, point, target)
+	else:
+		golem_order_req.rpc_id(1, mode, point, target)
+
+
+func _server_golem_order(id: int, mode: int, point: Vector3, target: int) -> void:
+	if not players.has(id) or players[id].npc or mode < 0 or mode >= Golems.Order.size():
+		return
+	var why := golems.order(id, mode, point, target, server_tick, _golem_people())
+	if why != "":
+		_toast(id, why)
+	_send_golem_orders()
+
+
+## Orders that changed (given, or ended by the golems: the target died, got away, everyone regrouped) go to everyone.
+func _send_golem_orders() -> void:
+	for owner in golems.orders_dirty.keys():
+		var o: Array = golems.order_of(owner)
+		golem_order_sync.rpc(owner, o[0], o[1], o[2])
+		if is_host_player:
+			golem_order_sync(owner, o[0], o[1], o[2])
+	golems.orders_dirty.clear()
+
+
+@rpc("authority", "call_remote", "reliable")
+func golem_order_sync(owner: int, mode: int, point: Vector3, target: int) -> void:
+	if mode == Golems.Order.FOLLOW:
+		golem_orders.erase(owner)
+	else:
+		golem_orders[owner] = [mode, point, target]
+	golem_order_changed.emit(owner, mode, point, target)
+
+
+## Everyone golems care about, as Golems.tick takes them: [id, position, PvP, alive, Golems.Who].
+func _golem_people() -> Array:
+	var people := []
+	for p: ServerPlayer in players.values():
+		people.append([p.id, p.state.pos, p.pvp or p.npc, p.state.dead == 0, Golems.Who.NPC if p.npc else Golems.Who.PLAYER])
+	if boss != null and boss.state != Boss.S.ENTER and boss.state != Boss.S.DEATH:
+		people.append([Boss.ID, boss.pos, true, true, Golems.Who.BOSS])   # everyone's golems fight him
+	return people
 
 
 ## Can `from` hurt player `target`? Only when both have PvP on (dummies and the yard can always be hit).
@@ -1778,11 +1840,7 @@ func _server_spells() -> void:
 	_server_heal_auras()
 	fogs = Fog.prune(fogs, server_tick)
 	# golems
-	var people := []
-	for p: ServerPlayer in players.values():
-		people.append([p.id, p.state.pos, p.pvp or p.npc, p.state.dead == 0, Golems.Who.NPC if p.npc else Golems.Who.PLAYER])
-	if boss != null and boss.state != Boss.S.ENTER and boss.state != Boss.S.DEATH:
-		people.append([Boss.ID, boss.pos, true, true, Golems.Who.BOSS])   # everyone's golems fight him
+	var people := _golem_people()
 	golems.fogs = fogs
 	golems.fog_pvp = fog_pvp() if not fogs.is_empty() else {}
 	for h in golems.tick(server_tick, people):
@@ -1795,6 +1853,8 @@ func _server_spells() -> void:
 			_damage(tid, int(h[2]), g.owner, h[3], Golems.TITAN_KNOCK if g.titan else Golems.KNOCK)
 		dmg_src = -1
 		_fx("golem_slam", [g.id, g.pos + Vector3(-sin(g.yaw), 0, -cos(g.yaw)) * (Golems.TITAN_REACH if g.titan else 0.7), g.titan])
+	if not golems.orders_dirty.is_empty():
+		_send_golem_orders()
 	if server_tick % 3 == 0 and (not golems.list.is_empty() or _golems_were):
 		_golems_were = not golems.list.is_empty()
 		var data := golems.pack()

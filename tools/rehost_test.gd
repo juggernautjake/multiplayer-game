@@ -23,6 +23,10 @@ func check(ok: bool, what: String) -> void:
 
 
 func _initialize() -> void:
+	var ua := OS.get_cmdline_user_args()   # `-- --port <n>`: test on another port (to keep clear of a running game)
+	var pi := ua.find("--port")
+	if pi >= 0 and pi + 1 < ua.size():
+		port = int(ua[pi + 1])
 	var probe := PacketPeerUDP.new()
 	if probe.bind(port) != OK:
 		print("UDP %d is in use by another program: testing on 7797 instead" % port)
