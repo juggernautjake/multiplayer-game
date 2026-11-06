@@ -774,3 +774,22 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   getUp frames following the clock; the figure tumbles in the air, lies flat, then pushes up). `main.gd`: the HUD
   Static bar (segments, stun countdown), "Knocked down!", the `--leap` bot.
 - `npc_ai.gd`: ranged challengers: `SHOT_ERR`, `SHOT_START`, `SHOT_HOLD`, `_pause`; `_lead(..., lead)` (0 for them).
+
+## v0.12.0
+
+- `wizard_garb.gd`: cloth keeps up with fast moves. `_carry(step)`: of the body's step this frame (the anchor's
+  motion), anything beyond `lag_speed` (7 m/s) x the frame time is added to every free point and its previous position
+  before integrating, so a dash, teleport, frame hitch or net correction (own or interpolated remote players: both go
+  through `update`) no longer leaves the robe, cloak, hat, hood tail, tabard and sash tails behind to whip back. A last
+  pass clamps every robe and cloak segment to its rest length. Pip's garb is drawn into his sprite sheets, so it never
+  lagged. Test: `tools/cloth_test.gd`.
+- `golems.gd`: golems fight for their summoner. `foe(owner, other, pvp)`: Thunderhorn (`Who.BOSS`), challengers and
+  minions (`Who.NPC`) and their golems always; other players and their golems only with PvP on for both and a grudge
+  (`harmed(owner, other, GRUDGE)`: they hurt the summoner or one of the summoner's golems in the last 12 s). A
+  challenger's own golems fight players (and their golems). `_pick`: within `LEASH` (18 m) of the summoner and `SENSE`
+  of the golem, whoever hit the summoner in the last 4 s (`ATTACKING`) first, then the nearest. `note_harm(victim,
+  attacker, tick)` is called by `Net._damage` for every hit on a player or a golem. `people` rows gained a 5th field,
+  `Who`. Credit is unchanged: a golem's hit is its summoner's (`dmg_src = WAND`: challenger kills level the wand, boss
+  damage goes into `damage_by`), and killing a golem gives nothing.
+- `npc_ai.gd`: `_pick_target` turns on a players' golem within 4 m (or one that hit it in the last 2 s, within 8 m),
+  through `_golem_proxy` (a ServerPlayer standing in for it).

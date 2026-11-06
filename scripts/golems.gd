@@ -50,6 +50,15 @@ const LEAP_DAMAGE := 10
 const LEAP_CD := 240
 const SPREAD := 0.75           # radians between golems closing in on the same target
 const GUARD_R := 2.2           # the guard ring round the summoner
+## v0.12.0: golems fight for their summoner. They always go for Thunderhorn, Duel Stone challengers, corrupted minions
+## and those enemies' golems: first whatever has hurt their summoner in the last few seconds, else the nearest, but
+## never further than LEASH from the summoner. Other players and their golems only with PvP on (both sides) and only
+## after that player hurt the summoner or one of the summoner's golems in the last GRUDGE ticks (the grudge then
+## expires). A challenger's golems fight for the challenger: against the players and the players' golems.
+const LEASH := 18.0
+const GRUDGE := 12 * 60
+const ATTACKING := 4 * 60      # ticks a hit on the summoner keeps that attacker first in line
+enum Who { PLAYER, NPC, BOSS }
 
 
 class G:
@@ -77,6 +86,22 @@ class G:
 
 var list := {}        # id -> G
 var next_id := 1
+var harm := {}        # victim player id -> { attacker id: tick of the last hit on them or their golems }
+var _now := 0
+
+
+## Someone (a player, a challenger, Thunderhorn) hurt `victim` or one of `victim`'s golems.
+func note_harm(victim: int, attacker: int, now: int) -> void:
+	if victim == attacker or attacker == 0:
+		return
+	if not harm.has(victim):
+		harm[victim] = {}
+	harm[victim][attacker] = now
+
+
+## Did `attacker` hurt `victim` (or victim's golems) within `ticks`?
+func harmed(victim: int, attacker: int, ticks: int) -> bool:
+	return harm.has(victim) and harm[victim].has(attacker) and _now - int(harm[victim][attacker]) <= ticks
 
 
 func spawn(owner: int, pos: Vector3, yaw: float, now: int, titan := false) -> G:
@@ -127,14 +152,17 @@ func stun(id: int, ticks: int) -> void:
 		list[id].stun = ticks
 
 
-## One server tick. people: [id, position, pvp, alive] for every player. Returns the slams that landed this tick:
-## [golem, target id (player id, -(dummy + 1) or -1000 - golem id), damage, direction].
+## One server tick. people: [id, position, pvp, alive, Who] for every player, challenger and the boss. Returns the
+## slams that landed this tick: [golem, target id (player id, -(dummy + 1) or -1000 - golem id), damage, direction].
 func tick(now: int, people: Array) -> Array:
 	var hits := []
 	var pvp := {}
 	var where := {}
+	_now = now
+	_who = {}
 	for pe in people:
 		pvp[pe[0]] = pe[2]
+		_who[pe[0]] = int(pe[4]) if pe.size() > 4 else Who.PLAYER
 		if pe[3]:
 			where[pe[0]] = pe[1]
 	_assign_slots()
@@ -284,22 +312,49 @@ func _target_pos(g: G, where: Dictionary):
 	return null
 
 
+var _who := {}
+
+
+## May a golem of `owner` fight `other` (a player, challenger or the boss, or the summoner of a golem)?
+func foe(owner: int, other: int, pvp: Dictionary) -> bool:
+	if other == owner:
+		return false
+	var me: int = _who.get(owner, Who.PLAYER)
+	var it: int = _who.get(other, Who.PLAYER)
+	if me == Who.NPC:   # a challenger's golems: against players (and their golems) and nothing else
+		return it == Who.PLAYER
+	if it == Who.BOSS or it == Who.NPC:
+		return true
+	return pvp.get(owner, false) and pvp.get(other, false) and harmed(owner, other, GRUDGE)
+
+
 func _pick(g: G, where: Dictionary, pvp: Dictionary) -> int:
 	var best := 0
-	var best_d := SENSE
-	if pvp.get(g.owner, false):
-		for id in where.keys():
-			if id != g.owner and pvp.get(id, false):
-				var d: float = g.pos.distance_to(where[id])
-				if d < best_d:
-					best_d = d
-					best = id
-		for o: G in list.values():
-			if o.owner != g.owner and o.state != State.DIE and o.state != State.RISE and pvp.get(o.owner, false):
-				var d := g.pos.distance_to(o.pos)
-				if d < best_d:
-					best_d = d
-					best = -1000 - o.id
+	var best_d := INF
+	var home = where.get(g.owner, null)
+	var centre: Vector3 = home if home != null else g.pos
+	var leash := LEASH if home != null else SENSE
+	for id in where.keys():
+		if not foe(g.owner, id, pvp):
+			continue
+		var at: Vector3 = where[id]
+		if _who.get(id, Who.PLAYER) == Who.BOSS:   # measured to his flank, not his middle
+			at = at + (g.pos - at).normalized() * 2.0
+		if Vector2(at.x - centre.x, at.z - centre.z).length() > leash or g.pos.distance_to(at) > SENSE:
+			continue
+		var d := g.pos.distance_to(at) - (100.0 if harmed(g.owner, id, ATTACKING) else 0.0)
+		if d < best_d:
+			best_d = d
+			best = id
+	for o: G in list.values():
+		if o.owner == g.owner or o.state == State.DIE or o.state == State.RISE or not foe(g.owner, o.owner, pvp):
+			continue
+		if Vector2(o.pos.x - centre.x, o.pos.z - centre.z).length() > leash or g.pos.distance_to(o.pos) > SENSE:
+			continue
+		var d := g.pos.distance_to(o.pos) - (100.0 if harmed(g.owner, o.owner, ATTACKING) else 0.0)
+		if d < best_d:
+			best_d = d
+			best = -1000 - o.id
 	if best != 0:
 		return best
 	best_d = 14.0

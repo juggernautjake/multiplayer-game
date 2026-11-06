@@ -251,7 +251,29 @@ func _pick_target(net: Net, me: Net.ServerPlayer):
 		if d < best_d:
 			best_d = d
 			best = q
+	# v0.12.0: a players' golem in its face (or one that just hit it) is dealt with first
+	var gbest: Golems.G = null
+	var gd := best_d if best != null else 45.0
+	for g: Golems.G in net.golems.list.values():
+		if g.state == Golems.State.DIE or g.state == Golems.State.RISE or (net.players.has(g.owner) and net.players[g.owner].npc):
+			continue
+		var d := g.pos.distance_to(me.state.pos)
+		var hit_me := net.golems.harmed(me.id, g.owner, 120) and d < 8.0
+		if (d < 4.0 or hit_me) and d - (3.0 if hit_me else 0.0) < gd:
+			gd = d
+			gbest = g
+	if gbest != null:
+		if _golem_proxy == null:
+			_golem_proxy = Net.ServerPlayer.new()
+			_golem_proxy.state = Sim.PlayerState.new()
+		_golem_proxy.id = -1000 - gbest.id
+		_golem_proxy.state.pos = gbest.pos
+		_golem_proxy.state.vel = Vector3.ZERO
+		return _golem_proxy
 	return best
+
+
+var _golem_proxy: Net.ServerPlayer = null   # a golem it fights, dressed as a player for the rest of its brain
 
 
 ## A threat to dodge, as the way to dash (sideways to it), or zero: a shot that will pass within a metre in the next

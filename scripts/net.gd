@@ -958,6 +958,11 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		return
 	if not can_hurt(from, target):
 		return
+	# v0.12.0: who hurt whom, for golems (they go after whoever is attacking their summoner, and hold PvP grudges)
+	if target > 0:
+		golems.note_harm(target, from, server_tick)
+	elif target <= -1000 and golems.list.has(-1000 - target):
+		golems.note_harm(golems.list[-1000 - target].owner, from, server_tick)
 	var killed := false
 	var pos: Vector3
 	if target == Boss.ID:   # Thunderhorn: his resistances and weaknesses decide what he takes
@@ -1607,9 +1612,9 @@ func _server_spells() -> void:
 	# golems
 	var people := []
 	for p: ServerPlayer in players.values():
-		people.append([p.id, p.state.pos, p.pvp or p.npc, p.state.dead == 0])
+		people.append([p.id, p.state.pos, p.pvp or p.npc, p.state.dead == 0, Golems.Who.NPC if p.npc else Golems.Who.PLAYER])
 	if boss != null and boss.state != Boss.S.ENTER and boss.state != Boss.S.DEATH:
-		people.append([Boss.ID, boss.pos, true, true])   # everyone's golems fight him
+		people.append([Boss.ID, boss.pos, true, true, Golems.Who.BOSS])   # everyone's golems fight him
 	for h in golems.tick(server_tick, people):
 		var g: Golems.G = h[0]
 		var tid: int = h[1]

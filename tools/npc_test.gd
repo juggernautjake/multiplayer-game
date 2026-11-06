@@ -174,5 +174,46 @@ func _initialize() -> void:
 	check(net.defeated and "defeat" in results, "both down at once: defeat")
 	net.ask_restart()
 	check(not net.defeated and a.state.dead == 0 and b.state.dead == 0 and net.boss == null, "and both start again")
+	_golem_credit(net, a, b)
 	print("%d failed" % bad)
 	quit(bad)
+
+
+## v0.12.0: golems fight for their summoner, and what they do counts for them.
+func _golem_credit(net: Net, a: Net.ServerPlayer, b: Net.ServerPlayer) -> void:
+	# a golem's kill of a challenger counts toward its summoner's wand level
+	var q := net.spawn_npc(a, Weapons.SWORD)
+	q.state.hp = 5
+	var g := net.golems.spawn(a.id, q.state.pos + Vector3(0, 0, 1), 0.0, net.server_tick)
+	var k1: int = a.kills[1]
+	net.dmg_src = Weapons.WAND
+	net._damage(q.id, Golems.DAMAGE, a.id, Vector3(0, 0, -1), Golems.KNOCK)   # (what Net does with a golem's slam)
+	net.dmg_src = -1
+	check(q.state.dead > 0 and a.kills[1] == k1 + 1, "a golem's kill of a challenger counts toward its summoner's levels")
+	# killing a golem gives nothing
+	var q2 := net.spawn_npc(a, Weapons.WAND)
+	var g2 := net.golems.spawn(q2.id, q2.state.pos, 0.0, net.server_tick)
+	g2.state = Golems.State.IDLE
+	g2.hp = 1
+	var k2: int = a.kills[1]
+	net.dmg_src = Weapons.WAND
+	net._damage(-1000 - g2.id, 5, a.id, Vector3.ZERO, 0.0)
+	net.dmg_src = -1
+	check(g2.state == Golems.State.DIE and a.kills[1] == k2, "killing a golem still gives no credit")
+	# a golem's damage to Thunderhorn counts toward the summoner's share
+	net.summon_boss()
+	net.boss.state = Boss.S.IDLE
+	var before := int(net.boss.damage_by.get(a.id, 0))
+	net.dmg_src = Weapons.WAND
+	net._damage(Boss.ID, Golems.DAMAGE, g.owner, Vector3.ZERO, 0.0)
+	net.dmg_src = -1
+	check(int(net.boss.damage_by.get(a.id, 0)) > before, "a golem's hits on Thunderhorn count toward its summoner's damage share")
+	# hits on the summoner and their golems are remembered (who golems go after; PvP grudges)
+	net._damage(a.id, 1, q2.id, Vector3.ZERO, 0.0)
+	check(net.golems.harmed(a.id, q2.id, 60), "a challenger hitting the summoner is noted for their golems")
+	# a challenger turns on a golem in its face
+	var g3 := net.golems.spawn(a.id, q2.state.pos + Vector3(1.5, 0, 0), 0.0, net.server_tick)
+	g3.state = Golems.State.IDLE
+	var tgt = q2.ai._pick_target(net, q2)
+	check(tgt != null and tgt.id == -1000 - g3.id, "a challenger fights a golem that gets in its face")
+	net.boss = null
