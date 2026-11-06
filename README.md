@@ -175,8 +175,9 @@ Challengers wear the enemy red, have a name tag ("Challenger Brutus") and a heal
 rocks, and can hurt you and be hurt whether PvP is on or off. Their fighting style depends on their weapon:
 swordsmen and clubbers keep a striking distance, strafe, dodge (not every time), feint, punish you while you recover
 from a swing, and back off when hurt; archers and slingers keep their distance, lead their shots at you when you move
-and back away when you get close; wizards shield, use area spells, blink away when cornered, summon golems (wand) and
-follow a stun with something heavy. They're medium difficulty by default.
+and back away when you get close; wizards shield, use area spells, blink away when cornered, summon golems (wand, at
+most 3) and follow a stun with something heavy. Challengers come in **tiers** (shown on the name tag): tier 2 after 3
+duels won or a level-2 staff or wand, tier 3 after 8 wins or level 3; from tier 2 they dash out of spell warning rings.
 
 ### Thunderhorn, the storm bull
 
@@ -474,6 +475,10 @@ These need no window and exit with code 0 when everything passes.
 | `<godot> --headless --path . -s tools/invite_test.gd` | Invite codes: encoding then decoding gives back the address and port. |
 | `<godot> --headless --path . -s tools/boss_test.gd` | v0.11.0: Static (a stack a hit, holds, drains, 7 s stun at 6, 5 enraged, shield blocks, synced), homing orbs (count by players, even split, dodgeable), 2-5 Storm Leaps a fight 25 s apart, jumping the landing ring, the rush (side-dash dodges; otherwise thrown, knocked down, up again), fair targeting. |
 | `<godot> --headless --path . -s tools/npc_test.gd` | v0.10.0: who the Duel Stone summons before and after the first level-up, one challenger at a time, challengers hurt and are hurt whatever PvP says, kills on them level the staff, a swordsman closes in and an archer leads its shots, Thunderhorn's health with two players, what each spell does to him, victory, and defeat then restart (alone and with two players, levels kept). |
+| `<godot> --headless --path . -s tools/fog_test.gd` | The wand's Fog (who sees what, opposing overlaps, challengers and golems confused, Thunderhorn unaffected), Spark Beam, Life Drain (and healing allies), Earth Spikes gone. |
+| `<godot> --headless --path . -s tools/wizard_test.gd` | Challenger wizards: level-1 kits, mana and resting, spell choice, aim error, wind-up tells. |
+| `<godot> --headless --path . -s tools/dodge_test.gd` | Challengers dashing out of warning rings and the charge line, by tier. |
+| `<godot> --headless --path . -s tools/heal_test.gd` | The staff's Heal Aura. |
 
 ### Visual checks (need a window)
 
@@ -700,3 +705,19 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
 - **Faster levels**: 3 kills, then 4 more, then 5 more (levels at 3, 7 and 12).
 - **The Storm Altar's button is solid**: land on top of it to summon him. It stays pressed for the fight.
 - The level-up light now follows you for a few seconds.
+
+## What's new since 0.12.0 (not released yet)
+
+- **Thunderhorn's stun meter**: every wand Stun that catches him fills a gold bar under his health bar; at 7 he is
+  **dazed for 7 seconds** (he collapses, then struggles up). It interrupts anything and is the only way to stop his
+  charge or the rush. Every one of his attacks now has a clear tell, and a dash dodges any of his hits.
+- **New wand spells**: Earth Spikes are gone. **Spark Beam** (level 1, 1 s): an instant zap, spam it. **Fog**
+  (level 2): a 25 x 25 m cloud that blinds enemies inside while your side sees them glowing red (Thunderhorn doesn't
+  care). **Life Drain** (level 3): steals health from an enemy, or heals the ally you point it at.
+- **Heal Aura** (staff, level 3, held): heals you and your allies within 7 m, 8 a second for 12 mana a second.
+- **Smarter challenger wizards**: they start with their level-1 spells, run out of mana and rest, pick spells to suit
+  the moment, aim with a little lag and error and show a wind-up glow before each cast; a mana bar under their health.
+- **Challenger tiers**: challengers get tougher as you win duels and level up (the tier is on their name tag). From
+  tier 2 they dash out of spell warning rings and Thunderhorn's charge (not every time).
+- Challenger wand wizards keep at most 3 golems; their golems fight you and your golems and crumble when their wizard
+  falls.
