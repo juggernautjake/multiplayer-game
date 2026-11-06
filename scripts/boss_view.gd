@@ -323,7 +323,8 @@ func _process(delta: float) -> void:
 				var ph := fposmod(t - 0.5 + 0.55, Boss.WAVE_GAP * Config.DT)
 				rear = (clampf(ph / 0.5, 0.0, 1.0) if ph < 0.55 else maxf(0.0, 1.0 - (ph - 0.55) * 5.0)) if t < 3.1 else 0.0
 			else:
-				var cyc := fposmod(t + 0.2, 0.4) / 0.4
+				var per := Boss.STOMP_EVERY * Config.DT   # up between the slams, down hard on each
+				var cyc := fposmod(t, per) / per
 				rear = 0.75 * maxf(0.0, sin(cyc * PI)) if t > 0.15 else maxf(0.0, 1.0 - t * 7.0)
 			p.brow = -1.0
 			p.jaw = 0.4
@@ -1480,7 +1481,7 @@ func _on_fx(kind: String, a: Array) -> void:
 			_sound("roar%d" % clampi(v, 0, 2), a[0], 6.0 if v == 0 else 4.0)
 			fx._shake_near_scaled(a[0], 0.4 if v != 2 else 0.3)
 			fx._flash_light(a[0] + Vector3(0, 4, 0), Color("ff9a8a") if v == 1 else Color("bfd8ff"), 6.0, 24.0, 0.5)
-			_air_ring(a[0], 16.0)
+			_air_ring(a[0], Boss.ROAR_R)
 		"boss_roar_wind":
 			_snort()
 		"boss_enrage":
@@ -1656,10 +1657,14 @@ func _on_fx(kind: String, a: Array) -> void:
 				if alive:
 					MotionFx.land(main, a[0], 3.5)
 					fx._shake_near_scaled(a[0], 0.6))
-		"boss_get_up":
+		"boss_get_up":   # he shakes it off: a big body shake, a snort, a burst of sparks; the meter is empty
 			_snort()
+			_idle_shake = 1.6
+			flinch = 1.0
 			_sound("roar0", a[0], 0.0)
 			MotionFx.land(main, a[0], 2.0)
+			Fx.burst(main, (a[0] as Vector3) + Vector3(0, 4.5, 0), Vector3.UP, GOLD, 36, 7.0, 0.05)
+			fx._flash_light((a[0] as Vector3) + Vector3(0, 4, 0), Color("cfe4ff"), 6.0, 14.0, 0.3)
 		"boss_death":   # he bellows, comes apart into cloud and lightning
 			_sound("roar3", a[0], 6.0)
 			for i in 6:

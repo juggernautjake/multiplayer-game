@@ -30,10 +30,15 @@
 ## after the last hit, then drains a stack every 3.3 s. A held shield blocks the orbs (they bounce off) and adds nothing.
 ##
 ## STUN METER (v0.12.0, replaces the old "stuns only stagger, shorter each time" rule): every wand Stun that catches
-## him adds 1 (stunned()); at STUN_NEED (10) he is DAZED for STUN_TICKS (7 s): he staggers, his legs buckle, he goes
+## him adds 1 (stunned()); at STUN_NEED (7) he is DAZED for STUN_TICKS (7 s): he staggers, his legs buckle, he goes
 ## down on his knees and side, dazed (head swaying, stars, sparks), then struggles up. He takes normal damage and does
-## nothing (no attacks, no static field). The meter holds STUN_HOLD (3 s) after the last hit, then drains a point every
-## STUN_DRAIN ticks (1.5 s); it empties when he gets up. Nothing is immune: a charge, the rush, a beam, the Storm Leap
+## nothing (no attacks, no static field). The meter holds stun_hold_ticks() after the last hit, then drains a point
+## every STUN_DRAIN ticks (6 s); it empties completely when he gets up (he shakes it off), and Stuns landing while he's
+## down don't count. The math: the wand's Stun recharges in 300 ticks and takes 26 to cast, so one player lands at most
+## one every ~5.4 s; the hold is that recharge + cast + STUN_MARGIN (2.5 s) = ~8 s, longer than the gap, so a player
+## stunning him on every recharge never loses a point: 7 Stuns fill it in ~33 s; missing every 4th cast costs half a
+## point each time (~49 s). Two wand players fill it in about half that. Derived from
+## Weapons in code, so it stays right if the recharge changes. Nothing is immune: a charge, the rush, a beam, the Storm Leap
 ## (in the air he lands first, then drops; the rest of the sequence is dropped and he goes back to his normal attacks).
 ## It is the ONLY way to stop a charge or the rush (no spell stops them any more; frost no longer slows them): fill it
 ## during the wind-up, the pawing or the gallop itself. Sent as extra[8]; BossView draws it under his health bar.
@@ -47,7 +52,7 @@
 ##
 ## STORM LEAP (v0.11.0), the signature sequence:
 ##   LEAP_WIND 1.5 s  he crouches, lightning gathers, a charge-up roar; a glowing marker shows where he will land, far
-##                    across the arena (never within 6 m of a player)
+##                    up to 200 m away (v0.12.0: the point of the map furthest from every player, see _leap_spot)
 ##   LEAP      1.4 s  a huge arc across the arena; landing on someone hurts (22)
 ##   landing          a low shockwave ring: JUMP it (it only hits players on the ground: 18)
 ##   HOWL      4.3 s  a long roar; 10 homing orbs (one player), 15 (two), +5 per extra player (24 at most), split
@@ -109,6 +114,7 @@ const ORB_VMAX := 15.0
 const ORB_ACC := 5.0
 const ORB_TURN := 2.8            # rad/s
 const ORB_LIFE := 330
+const ORB_COMMIT := 5.0          # v0.12.0: within this of the target an orb stops steering: a sidestep beats it
 ## v0.12.0 map-wide shockwaves: the Storm Leap's landing ring and the three slam waves after the howl race out at one
 ## steady speed (WAVE_V) until they have swept the whole map (wave_max: past its farthest corner), so every grounded
 ## player is hit unless they jump as it passes, wherever they are. WAVE_GAP ticks between slam waves (1.25 s: time to
@@ -130,10 +136,12 @@ enum S { ENTER, IDLE, WALK, CHARGE_WIND, CHARGE, STOMP_WIND, STOMP, BEAM_WIND, B
 	STRAFE, BACKOFF, HOP, TURN, GORE_WIND, GORE, TAIL_WIND, TAIL, PHASE, LEAP_WIND, LEAP, LEAP_LAND, HOWL, SLAMS, PAW,
 	RUSH, RECOVER, LUNGE, TREE, HOME, DAZED }
 ## v0.12.0 the stun meter (header)
-const STUN_NEED := 10
+const STUN_NEED := 7          # Jacob: 7 wand Stuns
 const STUN_TICKS := 420
-const STUN_HOLD := 180
-const STUN_DRAIN := 90
+const STUN_MARGIN := 150        # ticks of hold beyond the Stun's recharge + cast (stun_hold_ticks)
+const STUN_DRAIN := 360          # then a point every 6 s
+const STOMP_EVERY := 52          # v0.12.0 ticks between the stomp's slams (was 24: rings 0.3 s apart)
+const STOMP_V := 9.5
 const MIN_TELL := 24             # v0.12.0: no wind-up shorter than 0.4 s, enraged or not
 var stun_m := 0.0
 var stun_hold := 0
@@ -312,13 +320,21 @@ func stunned(_now: int) -> void:
 	if state in [S.ENTER, S.DEATH, S.DAZED]:
 		return
 	stun_m = minf(stun_m + 1.0, float(STUN_NEED))
-	stun_hold = STUN_HOLD
+	stun_hold = stun_hold_ticks()
 	fx.append(["boss_stun_hit", [pos, int(stun_m)]])
 	if stun_m >= STUN_NEED:
 		if state == S.LEAP:
 			daze_pending = true
 		else:
 			_daze()
+
+
+## How long the meter holds after a Stun: the wand Stun's recharge + its cast + STUN_MARGIN (~8 s; see the header).
+static func stun_hold_ticks() -> int:
+	for sp in Weapons.get_data(Weapons.WAND).spells:
+		if str(sp.name) == "Stun":
+			return int(sp.get("recharge", 300)) + int(sp.get("cast", 26)) + STUN_MARGIN
+	return 300 + 26 + STUN_MARGIN
 
 
 ## Down he goes, whatever he was doing (the meter stays full while he's down and empties as he gets up).
@@ -512,14 +528,14 @@ func tick(now: int, people: Array, golems: Array) -> void:
 					_after()
 		S.STOMP_WIND:   # he rears up
 			if t >= _wind(48):
-				_slam(9.0, 13)
+				_slam(STOMP_V, 13)
 				_go(S.STOMP)
-		S.STOMP:
-			var every := 24
+		S.STOMP:   # v0.12.0: STOMP_EVERY apart at one speed, so every ring can be jumped on the beat
+			var every := STOMP_EVERY
 			if t % every == 0 and t / every < (4 if variant > 0 else 3):
-				_slam(9.0 + t / every, 13)
+				_slam(STOMP_V, 13)
 				if variant > 0 and t / every == 3:
-					rings.append([RADIUS - 1.6, {}, Vector3(pos.x, 0, pos.z), 9.5, 15, 0])   # the double ring
+					rings.append([RADIUS - 1.6, {}, Vector3(pos.x, 0, pos.z), STOMP_V, 15, 0])   # the double ring
 			if t >= (4 if variant > 0 else 3) * every + 12:
 				_after()
 		S.BEAM_WIND:    # the horns crackle and glow
@@ -567,9 +583,9 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				fx.append(["boss_roar", [pos, 1 if enraged else 2]])
 				for p in living:
 					var dd := (p[1] as Vector3).distance_to(pos)
-					if dd < 16.0:
+					if dd < ROAR_R:
 						slows.append([p[0], 120])
-					if variant > 0 and dd < 13.0:
+					if variant > 0 and dd < ROAR_R - 2.0:
 						zaps.append([p[0], 0, (p[1] as Vector3) - pos, bool(p[3])])   # the static roar
 			if t >= ROAR_AT + 45:
 				_after()
@@ -959,7 +975,8 @@ const BEAM_ORB := 6.6
 const BEAM_ORB_Y := 3.1
 const BEAM_REACH := 24.0
 const BEAM_R := 0.75
-const ROAR_AT := 36
+const ROAR_AT := 45               # v0.12.0 the roar lands 0.75 s in (it was 0.25 s)
+const ROAR_R := 12.0             # its slow reaches 12 m (was 16), the static roar 10 m (was 13)
 
 
 static func beam_ends(at: Vector3, a: float) -> Array:
@@ -1503,6 +1520,8 @@ func _tick_orbs(living: Array) -> void:
 				var cur := ov.normalized() if ov.length() > 0.01 else want
 				var ang := cur.angle_to(want)
 				var mx := ORB_TURN * Config.DT
+				if op.distance_to((tgt[1] as Vector3) + Vector3(0, 1.0, 0)) < ORB_COMMIT and ov.length() > 0.01:
+					mx = 0.0   # v0.12.0 committed: straight on for the last few metres
 				var dir := want if ang <= mx else cur.slerp(want, mx / ang).normalized()
 				ov = dir * sp
 		op += ov * Config.DT

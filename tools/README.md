@@ -307,12 +307,18 @@ dashing one by few); the Storm Leap over six simulated fights (2-5 leaps, at lea
 players are hurt); the landing ring hits a grounded player and misses one who jumps it; the rush (a side-dash makes
 him miss; standing, you're hit for 30, thrown more than 10 m, knocked down 2.3 s, then up and moving); targeting
 (with two players the one hurting him gets more attention but not all; a stunned, low-health player is left alone).
-v0.12.0 `_stun_meter_tests`: 9 wand Stun hits don't daze him, the 10th does; the meter holds 3 s, then drains a point
+v0.12.0 `_stun_meter_tests`: 6 wand Stun hits don't daze him, the 7th does; the meter holds 3 s, then drains a point
 every 1.5 s and empties; dazed he takes normal damage and for 7 s does nothing (no attacks, no static field, no moving)
 even with someone at his side, then gets up with the meter empty; frost no longer slows a charge and a full meter stops
 one dead; filled in the air he lands, drops and goes back to his normal attacks (the leap sequence is over); his state
 carries the meter and the dazed flag; fog (once the wand has it) changes nothing about his targeting. The rush's
 side-dash check is deterministic now (a fixed seed, and it stops before his next random attack could land).
+The meter's fill rate: one wand player casting Stun on every recharge dazes him within 40 s, missing every 4th within
+50 s, two players within 25 s; the hold outlasts the Stun's recharge + cast. v0.12.0 `_dodge_tests`: a skilled-dodger
+bot (sees everything 15 ticks = 250 ms late, extrapolating motion; jumps rings on the beat, side-dashes charges, backs
+off and dashes from gores, tail lashes and roars, leaves warning circles and the leap marker, outruns balls, crosses
+orbs, gets out of the beam or dashes through it) against every attack, 24 trials each (half enraged), from typical
+positions; it must avoid each >= 90% while an idle player is hit by most (>= 50%). Prints the table (tells, rates).
 
 
 ## cloth_test.gd

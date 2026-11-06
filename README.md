@@ -45,7 +45,7 @@ Contents:
 | WASD, Shift, Space, Q | move relative to the camera (you turn to face the way you walk), sprint, jump, dash |
 | Left mouse | attack the way you face (in place, or stepping into it if you're moving); click again for the combo; hold to draw a bow or slingshot, let go to shoot. While you hold it, your character turns toward the crosshair |
 | Right mouse | aim: face where the camera looks, zoom in, finer mouse |
-| E | pick up the weapon you're standing at (ammo is picked up by walking over it); next to a fallen fruit with no weapon in reach, eat it (+8 HP) |
+| E | pick up the weapon you're standing at (ammo is picked up by walking over it); next to a fallen fruit with no weapon in reach, eat it (+18 HP; walking over a fallen apple while hurt eats it too) |
 | 1-5 / Tab | fists, club, sword, bow, slingshot (the ones you have) |
 | V, mouse wheel | first / third person, camera distance |
 | F2 | host only: switch everyone between Pip (sprite) and the 3D figure |
@@ -108,7 +108,7 @@ Pick a weapon (6 staff, 7 wand), pick a spell with **R**, hold the left mouse bu
 | 3 (7 kills) | **Meteor** (45): a flaming rock falls where you aim: 40 at the centre down to 10 at 5 m, then burning ground for 3 s | **Gravity Well** (15 s): a vortex that drags enemies within 7 m into its heart for 3 s, then bursts |
 | 4, ultimate (12 kills) | **Arcane Storm** (80): a storm cloud rains lightning for 5 s, seeking enemies under it | **Stone Titan** (60 s): one giant golem, 150 health, whose slam crushes everyone round it |
 
-Kills with the staff or wand (with **PvP** on: P) level that weapon up: after 3, then 5 more, then 10 more. Area damage
+Kills with the staff or wand (with **PvP** on: P) level that weapon up: after 3, then 4 more, then 5 more (3, 7, 12). Area damage
 is always strongest at the centre and falls off toward the edge; you never hurt yourself. Players only hurt each other
 when both have PvP on; dummies and golems can always be hit.
 
@@ -161,8 +161,8 @@ New in 0.10.0: things to fight that fight back, a boss, and a prize.
 2. **Wizards:** once you level up your staff or your wand for the first time (level 2), the stone's runes turn violet
    ("The Duel Stone now summons wizards!") and it summons staff and wand wizards too. A wizard is never a higher level
    than you.
-3. **Kills on challengers count toward your levels** exactly like kills on other players (golem and titan kills still
-   never count). So the stone is the way to level up alone.
+3. **Kills on challengers count toward your levels** exactly like kills on other players. Killing a golem or a
+   titan never counts; a kill made BY your golem or titan counts as yours. So the stone is the way to level up alone.
 4. **The Storm Altar** lies at the far end of the field (north of the spawn): a ring of dark stone round a huge round
    button. It stays sunk into the ground until you reach **level 3** with the staff or the wand; then it rises, crackles
    and a little storm turns over it ("The Storm Altar has risen!").
@@ -642,7 +642,7 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
 - **3D figure:** the robe and cloak keep their length when jumping (they used to stretch toward the ground); sleeves
   are tubes round the arms with bell cuffs; the hooded robe for Pip redrawn (a peaked cowl framing the face).
 - **Tests:** chain lightning (28/14/7 down a line, out of range, never the caster or their golem or PvP-off players,
-  shields end a branch, two in the strike both take 28); golem and titan kills never count toward levels.
+  shields end a branch, two in the strike both take 28); killing a golem or titan never counts toward levels (kills made by your golems count as yours).
 
 ## What's new in 0.10.0
 

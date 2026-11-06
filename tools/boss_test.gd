@@ -268,6 +268,7 @@ func _initialize() -> void:
 	check(stun_t < 15, "a stunned, low-health player is mostly left alone (%d of 60 picks)" % stun_t)
 
 	_stun_meter_tests(net)
+	_dodge_tests()
 	_throw_tests()
 	_maximin_tests()
 	_tree_tests()
@@ -292,18 +293,25 @@ func _stun_meter_tests(net: Net) -> void:
 	var b := Boss.new(c, 1, 3)
 	b.state = Boss.S.IDLE
 	b.last_leap = 0
-	for i in 9:
+	var n1 := Boss.STUN_NEED - 1
+	for i in n1:
 		b.stunned(i)
-	check(b.state != Boss.S.DAZED and is_equal_approx(b.stun_m, 9.0), "9 Stun hits: not dazed (meter %.0f/10)" % b.stun_m)
-	_tick_n(b, Boss.STUN_HOLD - 5, me)
-	check(is_equal_approx(b.stun_m, 9.0), "the meter holds for 3 s after a hit")
+	check(b.state != Boss.S.DAZED and is_equal_approx(b.stun_m, n1), "%d Stun hits: not dazed (meter %.0f/%d)" % [n1, b.stun_m, Boss.STUN_NEED])
+	var hold := Boss.stun_hold_ticks()
+	var sp: Dictionary = {}
+	for x in Weapons.get_data(Weapons.WAND).spells:
+		if str(x.name) == "Stun":
+			sp = x
+	check(hold > int(sp.recharge) + int(sp.cast), "the meter holds longer than the Stun's recharge + cast (%.1f s vs %.1f s)" % [hold / 60.0, (int(sp.recharge) + int(sp.cast)) / 60.0])
+	_tick_n(b, hold - 5, me)
+	check(is_equal_approx(b.stun_m, n1), "the meter holds for %.1f s after a hit" % (hold / 60.0))
 	_tick_n(b, 5 + Boss.STUN_DRAIN * 3, me)
-	check(b.stun_m < 6.6 and b.stun_m > 5.4, "then drains a point every 1.5 s (%.2f after 4.5 s more)" % b.stun_m)
+	check(b.stun_m < n1 - 2.4 and b.stun_m > n1 - 3.6, "then drains a point every %.0f s (%.2f after 3 points' time)" % [Boss.STUN_DRAIN / 60.0, b.stun_m])
 	_tick_n(b, Boss.STUN_DRAIN * 8, me)
 	check(b.stun_m == 0.0, "and empties when nobody keeps stunning him")
-	for i in 10:
+	for i in Boss.STUN_NEED:
 		b.stunned(i)
-	check(b.state == Boss.S.DAZED, "the 10th hit dazes him")
+	check(b.state == Boss.S.DAZED, "the %dth hit dazes him" % Boss.STUN_NEED)
 	var hp0 := b.hp
 	b.hurt(40, 1, "")
 	check(b.hp == hp0 - 40, "dazed, he takes normal damage")
@@ -315,8 +323,33 @@ func _stun_meter_tests(net: Net) -> void:
 		hits += b.hits.size()
 		b.hits.clear(); b.fx.clear(); b.zaps.clear(); b.launches.clear(); b.strikes.clear(); b.slows.clear()
 	check(b.state == Boss.S.DAZED and hits == 0 and b.pos.distance_to(p0) < 0.01, "(%s, %d hits, moved %.2f m) for 7 s" % [Boss.S.keys()[b.state], hits, b.pos.distance_to(p0)] + "  he does nothing (no attacks, no static field, no moving), even with someone right next to him")
+	for i in 3:
+		b.stunned(i)   # Stuns while he's down don't count
 	_tick_n(b, 3, me)
-	check(b.state != Boss.S.DAZED and b.stun_m == 0.0, "then he gets up, the meter empty (%.1f s)" % (Boss.STUN_TICKS / 60.0))
+	check(b.state != Boss.S.DAZED and b.stun_m == 0.0, "then he gets up, the meter empty (%.1f s; Stuns while he was down didn't count)" % (Boss.STUN_TICKS / 60.0))
+	# casting Stun on every recharge fills it; missing every 4th cast still does; two players fill it faster
+	var every := int(sp.recharge) + int(sp.cast)
+	for case in [[1, 0], [1, 4], [2, 0]]:
+		var bb := Boss.new(c, 1, 9)
+		bb.state = Boss.S.IDLE
+		var casts := 0
+		var filled := -1
+		for k in 60 * 60:
+			for who in int(case[0]):
+				if (k + who * every / 2) % every == 0:
+					casts += 1
+					if int(case[1]) == 0 or casts % int(case[1]) != 0:
+						bb.stunned(k)
+			bb.tick(k, me, [])
+			bb.hits.clear(); bb.fx.clear(); bb.zaps.clear(); bb.launches.clear(); bb.strikes.clear(); bb.slows.clear()
+			bb.hp = bb.max_hp
+			bb.last_leap = k
+			if bb.state == Boss.S.DAZED:
+				filled = k
+				break
+		var what := "%d wand player%s on cooldown%s" % [case[0], "s" if case[0] > 1 else "", ", missing every 4th" if case[1] > 0 else ""]
+		var limit := (25 if case[0] == 2 else (50 if case[1] > 0 else 40)) * 60
+		check(filled >= 0 and filled < limit, "%s: dazed after %.1f s (under %d s)" % [what, filled / 60.0, limit / 60])
 	# the only way to stop a charge: fill the meter during the wind-up or the gallop
 	var ch := Boss.new(c, 1, 5)
 	ch.state = Boss.S.IDLE
@@ -327,7 +360,7 @@ func _stun_meter_tests(net: Net) -> void:
 	var at := ch.pos
 	_tick_n(ch, 6, [[1, c + Vector3(0, 0, -20), true, false, 100]])
 	check(ch.pos.distance_to(at) > Boss.GALLOP * 0.09, "frost doesn't slow a charge any more (%.1f m in 0.1 s)" % ch.pos.distance_to(at))
-	for i in 10:
+	for i in Boss.STUN_NEED:
 		ch.stunned(i)
 	at = ch.pos
 	_tick_n(ch, 30, [[1, c + Vector3(0, 0, -20), true, false, 100]])
@@ -338,7 +371,7 @@ func _stun_meter_tests(net: Net) -> void:
 	lp._start_leap(me)
 	_tick_n(lp, 100, me)
 	check(lp.state == Boss.S.LEAP and lp.pos.y > 1.0, "(in the air)")
-	for i in 10:
+	for i in Boss.STUN_NEED:
 		lp.stunned(i)
 	check(lp.state == Boss.S.LEAP, "filled mid-leap: he still lands first")
 	_tick_n(lp, lp.leap_air, me)
@@ -352,7 +385,7 @@ func _stun_meter_tests(net: Net) -> void:
 		pk.stunned(i)
 	var d := pk.pack()
 	check(is_equal_approx(float(d[13][8]), 4.0), "his state carries the meter (%s)" % str(d[13][8]))
-	for i in 6:
+	for i in Boss.STUN_NEED - 4:
 		pk.stunned(i)
 	check(int(pk.pack()[8]) & 64 != 0, "and the dazed flag")
 	# fog (the wand's, when it's in the game) doesn't change who he goes after
@@ -618,3 +651,319 @@ func _orb_run(move: bool) -> int:
 		if b.state == Boss.S.SLAMS:
 			break
 	return hits
+
+
+# ================================================================ v0.12.0 the dodge audit
+## A "skilled dodger" bot against each of his attacks: it sees the world REACT ticks late (~250 ms: the boss's state,
+## rings, orbs, balls and the warning circles, extrapolated forward the way a player reads motion) and gives each
+## attack its answer: side-dash the charge, the rush and the gore; back off from the tail lash and the roar; jump the
+## rings and waves; leave the marked spots (called lightning, the leap's landing); outrun or dash the balls and orbs; out
+## of the beam's reach or dash through it as it sweeps over. An idle player is set up the same way. Each type must be
+## avoided >= 90% of the time by the bot, while the idle player is hit by most.
+const REACT := 15
+const DEBUG_DODGE := false
+const DODGE_TRIALS := 24
+var dodge_report: Array = []
+
+
+func _snap(b: Boss) -> Dictionary:
+	return {"st": b.state, "t": b.t, "pos": b.pos, "yaw": b.yaw, "beam_from": b.beam_from, "beam_to": b.beam_to,
+		"variant": b.variant, "leap_to": b.leap_to, "stomp_w": b._wind(48), "leap_air": b.leap_air,
+		"rings": b.rings.map(func(r): return [float(r[0]), r[2], float(r[3])]),
+		"orbs": b.orbs.filter(func(o): return not o[5]).map(func(o): return [o[0], o[1]]),
+		"balls": b.balls.map(func(x): return [x[0], x[1]])}
+
+
+static func _f(v: Vector3) -> Vector2:
+	return Vector2(v.x, v.z)
+
+
+## The beam's heading at tick t of S.BEAM (the server's formula: there, then back again when enraged).
+static func _beam_at(o: Dictionary, t: int) -> float:
+	if t <= 90:
+		return lerp_angle(o.beam_from, o.beam_to, clampf(float(t) / 90.0, 0.0, 1.0))
+	return lerp_angle(o.beam_to, o.beam_from, clampf(float(t - 90) / 70.0, 0.0, 1.0))
+
+
+## One tick of the bot: -> [buttons, yaw]. o: what it saw REACT ticks ago; mem: its own notes for this trial.
+func _bot(s: Sim.PlayerState, o: Dictionary, strikes_seen: Array, now: int, mem: Dictionary) -> Array:
+	var me := _f(s.pos)
+	var bp := _f(o.pos)
+	var rel := me - bp
+	var d := rel.length()
+	var away := rel.normalized() if d > 0.01 else Vector2(1, 0)
+	var fwd := Vector2(-sin(o.yaw), -cos(o.yaw))
+	var lag := REACT * Config.DT
+	var want := Vector2.ZERO
+	var dash := false
+	var jump := false
+	var st: int = o.st
+	# rings: jump as the band arrives (its speed is steady: read where it is now)
+	for r in o.rings:
+		var rd := (me - _f(r[1])).length()
+		var rn: float = float(r[0]) + float(r[2]) * lag
+		var ta := (rd - 0.7 - rn) / float(r[2])
+		if s.grounded and ta > 0.05 and ta < 0.12:
+			jump = true
+	# the rings he's about to send: a player reads the rhythm (the rear, the slam) and jumps on the beat, not after
+	# seeing the ring (one sent from 5 m away arrives before anyone could react to it)
+	var tn := int(o.t) + REACT
+	var future := []   # [tick in the state it goes out, speed, start radius, centre]
+	var gc := Vector3(o.pos.x, 0, o.pos.z)
+	match st:
+		Boss.S.STOMP_WIND:
+			future.append([int(o.stomp_w) - int(o.t), Boss.STOMP_V, Boss.RADIUS, gc])
+			for i in range(1, 4 if o.variant > 0 else 3):
+				future.append([int(o.stomp_w) - int(o.t) + Boss.STOMP_EVERY * i, Boss.STOMP_V, Boss.RADIUS, gc])
+		Boss.S.STOMP:
+			for i in range(1, 4 if o.variant > 0 else 3):
+				future.append([Boss.STOMP_EVERY * i - int(o.t), Boss.STOMP_V, Boss.RADIUS, gc])
+				if o.variant > 0 and i == 3:
+					future.append([Boss.STOMP_EVERY * i - int(o.t), Boss.STOMP_V, Boss.RADIUS - 1.6, gc])
+		Boss.S.SLAMS:
+			for i in 3:
+				future.append([30 + i * Boss.WAVE_GAP - int(o.t), Boss.WAVE_V, Boss.RADIUS, gc])
+		Boss.S.LEAP_WIND:
+			future.append([90 - int(o.t) + int(o.leap_air), Boss.WAVE_V, Boss.RADIUS, o.leap_to])
+		Boss.S.LEAP:
+			future.append([int(o.leap_air) - int(o.t), Boss.WAVE_V, Boss.RADIUS, o.leap_to])
+	for f in future:
+		if int(f[0]) <= 0:
+			continue   # already out: it is in the list above
+		var rd := (me - _f(f[3])).length()
+		var ta := (int(f[0]) - REACT) * Config.DT + (rd - 0.7 - float(f[2])) / float(f[1])
+		if s.grounded and ta > 0.05 and ta < 0.12 and rd > float(f[2]) - 0.7:
+			jump = true
+	# warning circles: step out of any that will fire soon
+	for k in strikes_seen:
+		var sp := _f(k[0])
+		if int(k[1]) > now and (me - sp).length() < 4.2:
+			want += (me - sp).normalized() * 2.0
+	match st:
+		Boss.S.CHARGE_WIND, Boss.S.CHARGE, Boss.S.PAW, Boss.S.RUSH:
+			var perp := Vector2(-fwd.y, fwd.x)
+			var lat := rel.dot(perp)
+			var side := perp * (1.0 if lat >= 0.0 else -1.0)
+			var along := rel.dot(fwd)
+			if absf(lat) < 6.5 and along > -4.0:
+				want += side
+			if st in [Boss.S.CHARGE, Boss.S.RUSH]:
+				var v := (Boss.RUSH_V if st == Boss.S.RUSH else Boss.GALLOP * (1.3 if o.variant > 0 else 1.0))
+				var gap := along - v * lag
+				var key := "dashed%d" % int(o.get("seq", 0))
+				if gap < 10.0 and gap > 0.0 and absf(lat) < 5.5 and not mem.has(key):
+					dash = true
+					mem[key] = true
+		Boss.S.GORE_WIND, Boss.S.GORE, Boss.S.TAIL_WIND, Boss.S.TAIL:
+			if d < 9.5:
+				want += away * 2.0
+				if not mem.has("dashed"):
+					dash = true
+					mem["dashed"] = true
+		Boss.S.ROAR:
+			if d < 17.0:
+				want += away * 2.0
+				if not mem.has("dashed"):
+					dash = true
+					mem["dashed"] = true
+		Boss.S.BEAM_WIND:
+			want += away * 2.0
+		Boss.S.BEAM:
+			want += away * 2.0
+			for k in [1, 3, 5]:
+				if Boss.beam_hits(o.pos, _beam_at(o, tn + k), s.pos) and s.dash_cd == 0:
+					dash = true
+		Boss.S.LEAP_WIND, Boss.S.LEAP:
+			var lt := _f(o.leap_to)
+			if (me - lt).length() < Boss.RADIUS + 6.0:
+				want += (me - lt).normalized() * 2.0
+	# balls and orbs: run from the nearest one coming; sidestep across its path; dash it at the last moment
+	var near := INF
+	var flee := Vector2.ZERO
+	for x in o.orbs + o.balls:
+		var p: Vector3 = (x[0] as Vector3) + (x[1] as Vector3) * lag
+		var v := _f(x[1])
+		var off := me - _f(p)
+		var dist := off.length()
+		if dist < 9.0 and dist < near and (v.length() < 0.1 or v.dot(off) > 0.0):
+			near = dist
+			var across := Vector2(-v.y, v.x).normalized()
+			if across.dot(off) < 0.0:
+				across = -across
+			flee = (across * 1.5 + off.normalized()).normalized() if v.length() > 7.0 else off.normalized()
+	if near < INF:
+		want += flee * 3.0
+		if near < 1.8 and s.dash_cd == 0:
+			dash = true
+	elif st in [Boss.S.HOWL, Boss.S.BALLS] or not o.orbs.is_empty():
+		want += Vector2(-away.y, away.x) + away * clampf((14.0 - d) * 0.2, -1.0, 1.0)   # keep moving, round him
+	if want.length() < 0.01:
+		return [Sim.Btn.JUMP if jump else 0, s.yaw]
+	var yaw := atan2(-want.x, -want.y)
+	return [Sim.Btn.FORWARD | Sim.Btn.SPRINT | (Sim.Btn.DASH if dash else 0) | (Sim.Btn.JUMP if jump else 0), yaw]
+
+
+## One trial: -> [hits on the player, chances (1, or the orbs sent)].
+func _dodge_trial(kind: String, sd: int, skilled: bool, enraged: bool) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = sd * 7919 + (1 if enraged else 0)
+	var c := Boss.arena_c()
+	var b := Boss.new(c, 1, sd)
+	b.enraged = enraged
+	b.phase = 1 if enraged else 0
+	b.want_phase = b.phase
+	b.yaw = rng.randf() * TAU
+	b.last_leap = 0
+	var fwd := Vector2(-sin(b.yaw), -cos(b.yaw))
+	var ang := rng.randf_range(-0.5, 0.5)
+	var dist := 12.0
+	match kind:
+		"charge": dist = rng.randf_range(12.0, 22.0)
+		"gore": dist = rng.randf_range(4.6, 6.6)
+		"tail":
+			dist = rng.randf_range(4.6, 7.0)
+			ang = PI + rng.randf_range(-1.4, 1.4)
+		"stomp": dist = rng.randf_range(5.0, 14.0)
+		"beam": dist = rng.randf_range(9.0, 19.0)
+		"call": dist = rng.randf_range(8.0, 20.0)
+		"balls": dist = rng.randf_range(8.0, 16.0)
+		"roar": dist = rng.randf_range(6.0, 10.0)
+		"rush": dist = rng.randf_range(12.0, 20.0)
+		"orbs": dist = rng.randf_range(10.0, 16.0)
+		"waves": dist = rng.randf_range(5.0, 25.0)
+		"leap": dist = 0.0
+	var dir := fwd.rotated(ang)
+	if kind == "leap":
+		dir = Vector2(1, 0)
+	var s := Sim.spawn_state(1)
+	s.pos = c + Vector3(dir.x, 0, dir.y) * dist
+	var ppl := func(): return [[1, s.pos, true, false, 100, s.dash_ticks, false, false]]
+	var end_st := Boss.S.IDLE
+	match kind:
+		"rush":
+			b.state = Boss.S.SLAMS
+			b.t = 30 + 2 * Boss.WAVE_GAP + 39
+			b.yaw = atan2(-(s.pos - c).x, -(s.pos - c).z)
+			end_st = Boss.S.RECOVER
+		"orbs":
+			b.state = Boss.S.LEAP_LAND
+			b.t = 39
+			end_st = Boss.S.SLAMS
+		"waves":
+			b.state = Boss.S.SLAMS
+			b.t = 0
+			end_st = Boss.S.PAW
+		"leap":   # he takes off 40 m away and comes down on (about) you
+			b.pos = c + Vector3(dir.x, 0, dir.y) * -40.0
+			b._start_leap(ppl.call())
+			b.leap_to = s.pos + Vector3(rng.randf_range(-1.5, 1.5), 0, rng.randf_range(-1.5, 1.5))
+			end_st = Boss.S.HOWL
+		"call":
+			b.storm = enraged and sd % 2 == 0
+			b._attack("call", s.pos)
+		_:
+			b._attack(kind, s.pos)
+	var hist: Array = []
+	var pending: Array = []   # called lightning: [point, fire tick, seen from tick]
+	var mem := {}
+	var hits := 0
+	var chances := 1
+	var seq := 0
+	var last_st := -1
+	var started := false
+	for k in 1200:
+		var snap := _snap(b)
+		if b.state == Boss.S.CHARGE_WIND and last_st == Boss.S.CHARGE:
+			seq += 1   # the next charge of a double
+		last_st = b.state
+		snap["seq"] = seq
+		hist.append(snap)
+		var o: Dictionary = hist[maxi(hist.size() - 1 - REACT, 0)]
+		var btn := 0
+		var yaw := s.yaw
+		if skilled:
+			var seen := pending.filter(func(x): return k >= int(x[2])).map(func(x): return [x[0], x[1]])
+			var out := _bot(s, o, seen, k, mem)
+			btn = out[0]
+			yaw = out[1]
+		Sim.step(s, Sim.PlayerInput.new(k, btn, yaw, 0.0, 0, 0, yaw, yaw))
+		b.tick(k, ppl.call(), [])
+		var got := false
+		for h in b.hits:
+			got = got or int(h[0]) == 1
+		for z in b.zaps:
+			if int(z[0]) == 1:
+				if kind == "orbs":
+					hits += 1
+				got = true
+		for sl in b.slows:
+			got = got or int(sl[0]) == 1
+		for st in b.strikes:
+			pending.append([st[0], k + int(st[1]), k + REACT])
+		for e in pending.duplicate():
+			if k >= int(e[1]):
+				pending.erase(e)
+				var cp: Vector3 = e[0]
+				var y := clampf(cp.y, s.pos.y, s.pos.y + 1.8)
+				if cp.distance_to(Vector3(s.pos.x, y, s.pos.z)) <= 2.5:
+					got = true
+		if kind != "orbs" and got:
+			if hits == 0 and skilled and DEBUG_DODGE:
+				print("DBG %s k=%d st=%s t=%d d=%.1f y=%.2f gr=%s rings=%s leap_to=%s" % [kind, k, Boss.S.keys()[b.state], b.t, _f(s.pos - b.pos).length(), s.pos.y, s.grounded, str(b.rings.map(func(r): return snappedf(float(r[0]), 0.1))), str(b.leap_to)])
+			hits = 1
+		b.hits.clear(); b.fx.clear(); b.zaps.clear(); b.launches.clear(); b.strikes.clear(); b.slows.clear()
+		b.felled.clear(); b.splats.clear()
+		if b.state == end_st and k > 2:
+			started = true
+		if started:
+			b.state = end_st
+			b.t = 0
+			if kind == "orbs":
+				chances = b.orb_total
+				if b.orbs.is_empty():
+					break
+			elif pending.is_empty() and b.rings.is_empty() and b.balls.is_empty():
+				break
+	return [hits, chances]
+
+
+func _dodge_tests() -> void:
+	var kinds := ["charge", "rush", "gore", "tail", "stomp", "waves", "beam", "call", "balls", "roar", "leap", "orbs"]
+	print("attack     tell (calm / enraged+2p)   skilled bot avoided   idle player hit")
+	for kind in kinds:
+		var res := {true: [0, 0], false: [0, 0]}
+		for skilled in [true, false]:
+			for i in DODGE_TRIALS:
+				var r := _dodge_trial(kind, 1000 + i, skilled, i % 2 == 1)
+				res[skilled][0] += int(r[0])
+				res[skilled][1] += int(r[1])
+		var avoid := 1.0 - float(res[true][0]) / float(res[true][1])
+		var idle_hit := float(res[false][0]) / float(res[false][1])
+		var tell := _tell(kind)
+		print("%-10s %-26s %5.0f%% (%d/%d)        %5.0f%%" % [kind, tell, avoid * 100.0, res[true][1] - res[true][0], res[true][1], idle_hit * 100.0])
+		dodge_report.append([kind, tell, avoid, idle_hit])
+		check(avoid >= 0.9, "dodge: the skilled bot avoids the %s %.0f%% of the time (>= 90%%)" % [kind, avoid * 100.0])
+		check(idle_hit >= 0.5, "dodge: an idle player is hit by the %s %.0f%% of the time (most)" % [kind, idle_hit * 100.0])
+
+
+## The telegraph of each attack, calm and at its shortest (enraged with two players), in seconds.
+func _tell(kind: String) -> String:
+	var calm := Boss.new(Vector3.ZERO, 1, 1)
+	var fast := Boss.new(Vector3.ZERO, 2, 1)
+	fast.enraged = true
+	var w := func(base: int, plus: int) -> String:
+		return "%.2f / %.2f s" % [(calm._wind(base) + plus) * Config.DT, (fast._wind(base) + plus) * Config.DT]
+	match kind:
+		"charge": return w.call(50, 0)
+		"gore": return w.call(32, 6)
+		"tail": return w.call(30, 9)
+		"stomp": return w.call(48, 0)
+		"beam": return w.call(60, 0)
+		"roar": return "%.2f s" % (Boss.ROAR_AT * Config.DT)
+		"call": return "%.2f s" % (80 * Config.DT)
+		"rush": return "%.2f s (paw)" % (96 * Config.DT)
+		"leap": return "%.2f s (marker)" % (90 * Config.DT)
+		"waves": return "rear 0.5 s"
+		"balls": return "%.2f s" % (20 * Config.DT)
+		"orbs": return "0.5 s launch"
+	return "?"

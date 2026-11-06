@@ -900,15 +900,45 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
 ## Thunderhorn: stun meter, dodging, horn beam (v0.12.0, Group B)
 
 - Stun meter (`Boss.stunned`, `_daze`, `S.DAZED`; replaces "stuns only stagger, shorter each time"): each wand Stun
-  that catches him adds 1 (`stun_m`); at `STUN_NEED` 10 he is dazed for `STUN_TICKS` 420 (7 s). The meter holds
+  that catches him adds 1 (`stun_m`); at `STUN_NEED` 7 (Jacob) he is dazed for `STUN_TICKS` 420 (7 s). The meter holds
   `STUN_HOLD` 180 ticks (3 s) after a hit, then drains a point every `STUN_DRAIN` 90 ticks (1.5 s); it stays full while
   he's down and empties as he gets up. Dazed: normal damage, no attacks, no static field, no moving, no big-hit
   stagger. It interrupts anything: a charge or the rush stops dead (with a skid), the beam goes out, a howl stops
   launching orbs; filled while he's in the air (`daze_pending`) he lands (the landing ring still goes out) and drops,
   and when he gets up the rest of the Storm Leap sequence is dropped: back to his normal attacks. It is the only way
   to stop a charge or the rush now: frost no longer slows them (they ignore `slow`). Synced: `extra[8]` (the meter,
-  0..10) and status bit 64 (dazed). BossView: a thin gold bar under the health bar with a notch per hit and
-  "STUN n/10" (flashing "DAZED n s" while down), a toast at 8 and 9, a "THUNDERHORN IS DAZED!" banner, then the
+  0..7) and status bit 64 (dazed). BossView: a thin gold bar under the health bar with a notch per hit and
+  "STUN n/7" (flashing "DAZED n s" while down), a toast two and one short, a "THUNDERHORN IS DAZED!" banner, then the
   animation (`S.DAZED` in `_process`): a stagger, the legs buckle (`crouch` 2, legs tucked, rolled onto his side),
   head low and swaying, lids drooping, tongue out, a ring of stars and gold sparks round his head (`_update_daze`),
-  then 1.3 s of struggling up. Fx: `boss_stun_hit` [pos, meter], `boss_dazed`, `boss_get_up`.
+  then 1.3 s of struggling up, and he shakes it off (a body shake, snort and spark burst). Fx: `boss_stun_hit` [pos,
+  meter], `boss_dazed`, `boss_get_up`. Stuns while he's down don't count.
+- The meter's math (Jacob: stunning him consistently must fill it): the wand's Stun recharges in 300 ticks and casts in
+  26, so one player lands one every ~5.4 s. The hold is `Boss.stun_hold_ticks()` = that recharge + cast +
+  `STUN_MARGIN` 150 = 476 ticks (7.9 s, read from `Weapons` so it follows the spell), then `STUN_DRAIN` 360 (a point
+  per 6 s). One player on cooldown: dazed after 32.6 s; missing every 4th cast: 48.9 s; two wand players: 16.3 s.
+- Dodge audit: every attack has a tell of at least `MIN_TELL` 0.4 s (`Boss._wind(base)`), and a dash's i-frames
+  (`dash_ticks`) cover every one of his hits (`Boss._dodging` drops the hit, launch and zap and shows "Dodged!";
+  orbs and ball lightning fly through a dashing player). Changes: gore wind-up 26 -> 32 ticks, tail 24 -> 30, stomp
+  40 -> 48, beam 45 -> 60, a follow-up charge at least 0.5 s; the roar lands at `ROAR_AT` 45 ticks (was 15) and
+  reaches `ROAR_R` 12 m (slow; was 16) / 10 m (static; was 13); the stomp's slams are `STOMP_EVERY` 52 ticks apart at
+  one speed `STOMP_V` 9.5 m/s (they were 0.4 s apart and faster each time, so at some distances a ring came just as
+  you landed from jumping the last: an impossible chain); homing orbs commit within `ORB_COMMIT` 5 m (they stop
+  steering, so a sidestep beats them); the SLAMS rear-up is timed to each wave (0.5 s before it); frost no longer
+  slows charges. Per attack, tell (calm / enraged with two players), the skilled bot's avoidance and an idle
+  player's hit rate (boss_test `_dodge_tests`, 24 trials each, half enraged):
+
+  | attack | tell | answer | skilled bot avoided | idle hit |
+  |---|---|---|---|---|
+  | charge (double/triple) | 0.83 / 0.47 s | side-step, dash across | 100% | 100% |
+  | rush | 1.60 s pawing | side-dash | 100% | 100% |
+  | gore | 0.63 / 0.50 s | back off + dash | 100% | 100% |
+  | tail lash | 0.65 / 0.55 s | back off + dash | 100% | 88% |
+  | stomp rings | 0.80 / 0.45 s, then 0.87 s apart | jump on the beat | 100% | 100% |
+  | slam waves (leap) | 0.5 s rear each | jump on the beat | 100% | 100% |
+  | horn beam | 1.00 / 0.57 s | out of reach, or dash through | 100% | 79% |
+  | called lightning | 1.33 s circles | leave the circle | 100% | 100% |
+  | ball lightning | 0.33 s (slow drifters) | outrun | 100% | 100% |
+  | roar | 0.75 s | back off past 12 m (or shield) | 100% | 100% |
+  | leap landing + ring | 1.5 s marker | leave the marker, jump the ring | 100% | 100% |
+  | homing orbs (per orb) | 0.5 s launch | keep moving across them, dash late | 95% | 100% |
