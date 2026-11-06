@@ -228,7 +228,7 @@ Functions: `step(s, btn, yaw)` (movement on flat ground) and `run(lat_ms, jit_ms
 is reachable with one jump from the step below; the teleport reaches 18 m (five dashes), lands short when you aim at
 nearer ground, lands on tops, goes up into the sky, and never ends inside a pillar; staff spells cost mana; wand spells
 use recharges (golem 10 s, teleport 4 s, stun 5 s); a stun holds you 3 s; the shield stays up while held, costs its
-mana once and stops mana coming back; levels at 3, 8 and 18 kills unlock spells; frost slows to half speed.
+mana once and stops mana coming back; levels at 3, 7 and 12 kills unlock spells; frost slows to half speed.
 
 ## golem_test.gd
 

@@ -1682,7 +1682,7 @@ var dmg_spell := ""        # v0.10.0: the spell dealing the damage right now (Th
 var hit_list_boss := false   # while a spell's damage is being dealt: the weapon it counts for (Weapons.STAFF / WAND), else -1
 
 
-## A player was knocked out with the staff or wand: count it; at 3, 8 and 18 kills the weapon levels up and gains its
+## A player was knocked out with the staff or wand: count it; at 3, 7 and 12 kills the weapon levels up and gains its
 ## next spell (Weapons.LEVEL_KILLS), with a burst of light for everyone and the news on the killer's screen.
 func _magic_kill(p: ServerPlayer, w: int) -> void:
 	var i := 0 if w == Weapons.STAFF else 1

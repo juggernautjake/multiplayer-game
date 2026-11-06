@@ -54,12 +54,12 @@ const DATA := [
 		# level 2 (3 kills with the staff): a ring of ice bursts out from you: damage, a shove, and a 2 s slow
 		{ "name": "Frost Nova", "level": 2, "cost": 30, "windup": 14, "cast": 30, "cooldown": 30, "radius": 6.0,
 		  "max_damage": 18, "min_damage": 6, "knock": 3.5, "slow": 120 },
-		# level 3 (8 kills): a flaming rock falls where you aim after `delay` ticks, a big blast (strongest at the
+		# level 3 (7 kills): a flaming rock falls where you aim after `delay` ticks, a big blast (strongest at the
 		# centre), then the ground burns for burn_ticks: burn_damage every burn_every ticks within burn_radius
 		{ "name": "Meteor", "level": 3, "cost": 45, "windup": 22, "cast": 40, "cooldown": 60, "range": 35.0, "delay": 60,
 		  "radius": 5.0, "max_damage": 40, "min_damage": 10, "knock": 9.0,
 		  "burn_radius": 3.0, "burn_ticks": 180, "burn_every": 30, "burn_damage": 4 },
-		# level 4, the ultimate (18 kills): a storm gathers over where you aim and rains lightning for `duration` ticks,
+		# level 4, the ultimate (12 kills): a storm gathers over where you aim and rains lightning for `duration` ticks,
 		# a bolt every `every` ticks, each seeking an enemy under the cloud (or striking at random within `area`)
 		{ "name": "Arcane Storm", "level": 4, "cost": 80, "windup": 30, "cast": 50, "cooldown": 120, "range": 35.0,
 		  "duration": 300, "area": 7.0, "every": 20, "warn": 12,
@@ -75,12 +75,12 @@ const DATA := [
 		# level 2 (3 kills with the wand): stone spikes burst up one after another in a line toward the crosshair
 		{ "name": "Earth Spikes", "level": 2, "cost": 0, "windup": 12, "cast": 30, "cooldown": 10, "recharge": 360,
 		  "range": 16.0, "spikes": 9, "spacing": 1.7, "radius": 1.5, "max_damage": 16, "min_damage": 8, "knock": 7.0 },
-		# level 3 (8 kills): a vortex where you aim, dragging enemies within `pull_radius` toward it for `duration`
+		# level 3 (7 kills): a vortex where you aim, dragging enemies within `pull_radius` toward it for `duration`
 		# ticks (nibbling at those near its heart), then bursting outward
 		{ "name": "Gravity Well", "level": 3, "cost": 0, "windup": 14, "cast": 30, "cooldown": 10, "recharge": 900,
 		  "range": 25.0, "duration": 180, "pull_radius": 7.0, "pull": 14.0, "nibble": 3, "nibble_radius": 2.0,
 		  "radius": 3.5, "max_damage": 18, "min_damage": 8, "knock": 9.0 },
-		# level 4, the ultimate (18 kills): one great stone titan (Golems: TITAN_*), recharging for a minute
+		# level 4, the ultimate (12 kills): one great stone titan (Golems: TITAN_*), recharging for a minute
 		{ "name": "Stone Titan", "level": 4, "cost": 0, "windup": 36, "cast": 60, "cooldown": 20, "recharge": 3600, "range": 10.0 },
 	] },
 ]
@@ -88,7 +88,7 @@ const DATA := [
 const MAX_MANA := 100
 ## Kills with the staff or wand level it up: level 2 after 3, level 3 after 5 more, the ultimate (level 4) after 10 more.
 ## Each level adds that weapon's next spell.
-const LEVEL_KILLS := [0, 3, 8, 18]
+const LEVEL_KILLS := [0, 3, 7, 12]   # v0.12.0: 3, then 4 more, then 5 more (was 3, 8, 18)
 const MAX_LEVEL := 4
 const MANA_EVERY := 5      # ticks per point of mana back (12 a second), not while casting
 ## v0.8.1: the bubble is centred SHIELD_CENTER_Y above the feet and big enough to hold the whole caster, the raised

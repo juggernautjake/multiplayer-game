@@ -105,8 +105,8 @@ Pick a weapon (6 staff, 7 wand), pick a spell with **R**, hold the left mouse bu
 | 1 | **Fireball** (22): a burning orb that bursts on contact: 24 at the centre down to 6 at 3.4 m | **Teleport** (4 s): blink to what the crosshair is on, up to 18 m (five dashes), onto tops or into the air |
 | 1 | **Shield** (10, held): hold the button to keep the bubble up (the staff raised overhead); hits on it cost mana (1.5 a point from weapons, 2 from spells, 25 for a stun); out of mana, it **shatters** | **Stun** (5 s): a bolt that bursts in a 2.5 m ring where it lands; everyone caught is held for 3 s |
 | 2 (3 kills) | **Frost Nova** (30): a ring of ice from you, 6 m: damage, a shove, and half speed for 2 s | **Earth Spikes** (6 s): stone spikes stab up one after another in a line toward the crosshair |
-| 3 (8 kills) | **Meteor** (45): a flaming rock falls where you aim: 40 at the centre down to 10 at 5 m, then burning ground for 3 s | **Gravity Well** (15 s): a vortex that drags enemies within 7 m into its heart for 3 s, then bursts |
-| 4, ultimate (18 kills) | **Arcane Storm** (80): a storm cloud rains lightning for 5 s, seeking enemies under it | **Stone Titan** (60 s): one giant golem, 150 health, whose slam crushes everyone round it |
+| 3 (7 kills) | **Meteor** (45): a flaming rock falls where you aim: 40 at the centre down to 10 at 5 m, then burning ground for 3 s | **Gravity Well** (15 s): a vortex that drags enemies within 7 m into its heart for 3 s, then bursts |
+| 4, ultimate (12 kills) | **Arcane Storm** (80): a storm cloud rains lightning for 5 s, seeking enemies under it | **Stone Titan** (60 s): one giant golem, 150 health, whose slam crushes everyone round it |
 
 Kills with the staff or wand (with **PvP** on: P) level that weapon up: after 3, then 5 more, then 10 more. Area damage
 is always strongest at the centre and falls off toward the edge; you never hurt yourself. Players only hurt each other

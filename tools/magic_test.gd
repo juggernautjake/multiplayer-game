@@ -159,9 +159,9 @@ func _init() -> void:
 		Sim.step(sh, Sim.PlayerInput.new(300 + i, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 2, Vector3.ZERO))
 	check(sh.mana > m0, "with it down, mana comes back")
 
-	# levels: 3 kills, 5 more, 10 more
-	check(Weapons.level_for(2) == 1 and Weapons.level_for(3) == 2 and Weapons.level_for(8) == 3 and Weapons.level_for(18) == 4,
-		"levels at 3, 8 and 18 kills (3, then 5 more, then 10 more)")
+	# levels (v0.12.0): 3 kills, 4 more, 5 more
+	check(Weapons.level_for(2) == 1 and Weapons.level_for(3) == 2 and Weapons.level_for(6) == 2 and Weapons.level_for(7) == 3 and Weapons.level_for(11) == 3 and Weapons.level_for(12) == 4,
+		"levels at 3, 7 and 12 kills (3, then 4 more, then 5 more)")
 	check(not Weapons.unlocked(Weapons.STAFF, 3, 1) and Weapons.unlocked(Weapons.STAFF, 3, 2), "Frost Nova unlocks at staff level 2")
 	check(not Weapons.unlocked(Weapons.WAND, 3, 1) and Weapons.unlocked(Weapons.WAND, 3, 2), "Earth Spikes unlocks at wand level 2")
 	var lk := Sim.PlayerState.new()
