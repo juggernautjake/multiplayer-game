@@ -666,8 +666,14 @@ func _update_prop(delta: float) -> void:
 	var px := (hx - _anchor.x) * PIXEL * sprite.scale.x
 	var py := (_anchor.y - hy) * PIXEL * sprite.scale.y
 	# in front of him: a clear 12 cm toward the camera (it used to be 3 cm, which could lose the depth test to his body
-	# sprite at some camera angles and put the weapon behind him), and sorted after him too
-	_carry.position = sprite.position + right * (px + side) + Vector3(0, py + lift, 0) + toward * 0.12
+	# sprite at some camera angles and put the weapon behind him), and sorted after him too.
+	# v0.12.4: but only when he faces us or is side on. With his back to the camera (N, NE, NW) he holds it in front of
+	# himself, on his far side, so it goes 12 cm away from the camera and his body hides it: just the parts past his
+	# outline (the staff's head over his shoulder, the bow's tips) show. It used to be drawn across his back.
+	var away := dir in ["N", "NE", "NW"]
+	_carry.sorting_offset = -1.0 if away else 1.0
+	_carry.render_priority = -1 if away else 1
+	_carry.position = sprite.position + right * (px + side) + Vector3(0, py + lift, 0) + toward * (-0.12 if away else 0.12)
 	_carry.visible = true
 
 

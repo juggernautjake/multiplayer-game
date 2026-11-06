@@ -752,7 +752,8 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   `_shield_up`; magic_fx.gd `_chain`. weapons.gd: Lightning's `falloff: false`, `chain_range`, `chain_max`,
   `chain_every`; `area_damage` honours `falloff`.
 - **Pip's carried weapon:** 12 cm toward the camera (was 3 cm) with a sorting offset, 2 px out from his middle, ahead
-  of him side on.
+  of him side on. v0.12.4: with his back to the camera (N, NE, NW) it goes 12 cm *away* from the camera instead and
+  sorts before him, so his body hides it (it used to be drawn across his back); only what sticks out past him shows.
 - **Cloth length:** the robe's and cloak's lengths come from the feet (`feet_y`), not the ground.
 
 ## v0.10.0: the Duel Stone, challengers, the Storm Altar, Thunderhorn and the prize
