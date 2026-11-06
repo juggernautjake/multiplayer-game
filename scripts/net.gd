@@ -558,6 +558,8 @@ func _server_tick() -> void:
 				if gain > 0:
 					p.state.hp = mini(p.state.hp + gain, Sim.MAX_HP)
 					Sim.quantize(p.state)
+					if boss != null and p.id in boss_fighters:
+						boss.eaten += 1.0   # he notices
 	if server_tick % Config.SNAPSHOT_EVERY == 0:
 		var ents := []
 		for p: ServerPlayer in players.values():
@@ -1932,6 +1934,8 @@ func _server_altar() -> void:
 
 
 func summon_boss() -> void:
+	if ecology:
+		ecology.restore_trees(server_tick)   # v0.12.0: every tree standing again for a new fight
 	boss_fighters = []
 	for p: ServerPlayer in players.values():
 		if not p.npc:
@@ -1960,6 +1964,14 @@ func _server_boss() -> void:
 	for g: Golems.G in golems.list.values():
 		if g.state != Golems.State.DIE:
 			gl.append([g.id, g.pos])
+	boss.trees = []   # v0.12.0: the standing trees and fallen apples round the arena (he knows apples heal)
+	boss.apples = []
+	if ecology:
+		var ac := Boss.arena_c()
+		for tr in ecology.trees:
+			if not tr.felled and Vector2(tr.pos.x - ac.x, tr.pos.z - ac.z).length() < WorldLayout.ARENA_R + 8.0:
+				boss.trees.append([tr.i, tr.pos])
+		boss.apples = ecology.ground_fruit_near(ac, WorldLayout.ARENA_R + 8.0, server_tick)
 	boss.bystanders = []   # v0.12.0: challengers and minions get trampled too
 	for q: ServerPlayer in players.values():
 		if q.npc and q.state.dead == 0:
@@ -1971,6 +1983,13 @@ func _server_boss() -> void:
 	for z in boss.zaps:   # static: damage, and a stack unless a shield took it
 		_boss_zap(int(z[0]), int(z[1]), z[2], bool(z[3]))
 	boss.zaps.clear()
+	if ecology:
+		for f in boss.felled:
+			ecology.fell_tree(int(f[0]), server_tick, f[1])
+		for id in boss.splats:
+			ecology.splat(int(id), server_tick)
+	boss.felled.clear()
+	boss.splats.clear()
 	for l in boss.launches:   # the rush: thrown across the arena, knocked down
 		boss_launch(int(l[0]), l[1])
 	boss.launches.clear()
@@ -1992,6 +2011,8 @@ func _server_boss() -> void:
 			boss_state(server_tick, data)
 	if boss.done:   # victory!
 		boss = null
+		if ecology:
+			ecology.restore_trees(server_tick)
 		boss_state.rpc(server_tick, [])
 		if is_host_player:
 			boss_state(server_tick, [])
@@ -2087,6 +2108,8 @@ func restart_after_defeat() -> void:
 			p.state.wand_lvl = old.wand_lvl
 			p.was_dead = false
 	boss_fighters = []
+	if ecology:
+		ecology.restore_trees(server_tick)
 	_result("restart")
 
 

@@ -823,3 +823,11 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   real apple trees ring Thunderhorn's arena (`WorldLayout.TREES`, the last five). `fell_tree`, `restore_trees`,
   `ground_fruit_near`, `splat` (events `tree_fell`, `tree_up`, `fruit_splat`) are for Thunderhorn (below). Test:
   fruit_test `_apples`.
+- Thunderhorn vs trees and apples (v0.12.0, `boss.gd` "knows apples heal" block; `Net._server_boss` fills
+  `boss.trees` / `boss.apples` and applies `felled` / `splats` through Ecology): he goes for the nearest tree within
+  24 m now and then (`S.TREE`: walk up, lower the horns, splinter it; `TREE_CD` 15 s apart, likelier when a fighter is
+  under half health or has just eaten), lines charges up through a tree near his line to the target (70% of
+  charges, `_tree_on_line`), fells anything his charge or rush runs through, tramples apples underfoot and stomps (or
+  bucks, 5 m) apples near him (`APPLE_CD` 4 s, shorter under pressure). Felled trees topple in EcoView and bear no
+  fruit; `Ecology.restore_trees` stands them up again on summoning, victory and restart. Splats fade after ~5 s.
+  Tests: boss_test `_tree_tests`.

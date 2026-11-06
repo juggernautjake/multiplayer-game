@@ -242,6 +242,7 @@ func _initialize() -> void:
 
 	_throw_tests()
 	_maximin_tests()
+	_tree_tests()
 	print("%d failed" % bad)
 	quit(bad)
 
@@ -327,6 +328,77 @@ func _maximin_tests() -> void:
 	check(inside, "and the pick is always inside the arena, short of the edge")
 	check(Boss.maximin_spot([c]) == Boss.maximin_spot([c]), "the same answer every time (deterministic)")
 	check(Boss.LEAP_H >= 30.0 and Boss.LEAP_AIR * Config.DT >= 2.0, "he leaps super high (%d m, %.1f s in the air)" % [int(Boss.LEAP_H), Boss.LEAP_AIR * Config.DT])
+
+
+## v0.12.0: he knows apples heal: fells trees now and then (more when they're low), charges through trees, tramples
+## apples; cooldowns keep it pressure, not a wipe.
+func _tree_run(low: bool, seed_v: int) -> Array:
+	var c := Boss.arena_c()
+	var b := Boss.new(c, 1, seed_v)
+	b.state = Boss.S.IDLE
+	var standing := [[30, c + Vector3(8, 0, 8)], [31, c + Vector3(-9, 0, 6)], [32, c + Vector3(6, 0, -10)], [33, c + Vector3(-12, 0, -8)]]
+	var fells := 0
+	var me := c + Vector3(0, 0, 14)
+	for k in 60 * 60:
+		b.trees = standing
+		b.apples = []
+		b.tick(k, [[1, me, true, false, 30 if low else 100]], [])
+		for f in b.felled:
+			fells += 1
+			for i in range(standing.size() - 1, -1, -1):
+				if int(standing[i][0]) == int(f[0]):
+					standing.remove_at(i)
+		b.felled.clear(); b.hits.clear(); b.fx.clear(); b.zaps.clear(); b.launches.clear(); b.strikes.clear(); b.slows.clear()
+		b.splats.clear()
+		b.hp = b.max_hp
+	return [fells]
+
+
+func _tree_tests() -> void:
+	var low := 0
+	var high := 0
+	for sd in [3, 7, 11, 19]:
+		low += int(_tree_run(true, sd)[0])
+		high += int(_tree_run(false, sd)[0])
+	print("trees felled in a minute: %d (players low) vs %d (healthy), over 4 fights" % [low, high])
+	check(low >= 2, "he goes for the trees during the fight (%d)" % low)
+	check(low >= high, "more when the players are low")
+	check(low <= 4 * 5, "but no more than one every %d s (%d in 4 minutes)" % [Boss.TREE_CD / 60, low])
+	# a charge runs through a tree in its path
+	var c := Boss.arena_c()
+	var b := Boss.new(c, 1, 2)
+	b.state = Boss.S.CHARGE
+	b.t = 1
+	b.yaw = 0.0
+	b.charge_dir = Vector2(0, -1)
+	var smashed := false
+	for k in 60:
+		b.trees = [[40, c + Vector3(0.5, 0, -6)]] if not smashed else []
+		b.tick(k, [[1, c + Vector3(0, 0, -16), true, false, 100]], [])
+		smashed = smashed or not b.felled.is_empty()
+		b.felled.clear(); b.hits.clear(); b.fx.clear(); b.launches.clear()
+	check(smashed, "a tree in the path of his charge is smashed")
+	# lining up: with a tree near the line to the target, he aims through it
+	var lined := 0
+	for sd in 20:
+		var b2 := Boss.new(c, 1, 100 + sd)
+		b2.trees = [[41, c + Vector3(2.0, 0, -8)]]
+		var got = b2._tree_on_line(c + Vector3(0, 0, -16))
+		if got != null:
+			lined += 1
+	check(lined >= 8 and lined < 20, "he usually (not always) lines a charge up through a tree on the way (%d of 20)" % lined)
+	# apples: trampled underfoot, stomped when near
+	var b3 := Boss.new(c, 1, 4)
+	b3.state = Boss.S.IDLE
+	b3.t = 0
+	var stomped := false
+	for k in 30:
+		b3.apples = [[77, c + Vector3(3.5, 0.09, 0)]]
+		b3.tick(k, [[1, c + Vector3(0, 0, 14), true, false, 100]], [])
+		stomped = stomped or 77 in b3.splats
+		b3.splats.clear(); b3.fx.clear(); b3.hits.clear()
+	check(stomped, "an apple near him gets stomped to mush")
+	check(b3.apple_cd > 0, "then a cooldown before the next stomp")
 
 
 ## Ten orbs at one player: standing still, or sprinting in a circle and dashing now and then. -> hits.

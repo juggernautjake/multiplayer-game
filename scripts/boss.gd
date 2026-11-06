@@ -90,7 +90,7 @@ const ORB_LIFE := 330
 const ORB_DMG := 6
 enum S { ENTER, IDLE, WALK, CHARGE_WIND, CHARGE, STOMP_WIND, STOMP, BEAM_WIND, BEAM, CALL, ROAR, BALLS, STAGGER, DEATH,
 	STRAFE, BACKOFF, HOP, TURN, GORE_WIND, GORE, TAIL_WIND, TAIL, PHASE, LEAP_WIND, LEAP, LEAP_LAND, HOWL, SLAMS, PAW,
-	RUSH, RECOVER, LUNGE }
+	RUSH, RECOVER, LUNGE, TREE }
 const SEQ := [S.LEAP_WIND, S.LEAP, S.LEAP_LAND, S.HOWL, S.SLAMS, S.PAW, S.RUSH, S.RECOVER]
 const MOVES := [S.STRAFE, S.BACKOFF, S.HOP, S.TURN, S.LUNGE]
 
@@ -327,6 +327,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 	_tick_orbs(living)
 	var tp = _target_pos(living, golems)
 	var wk := windup_k()
+	_trees_and_apples(living)
 	match state:
 		S.ENTER:
 			if t >= 150:
@@ -395,8 +396,10 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				_after_move()
 		# ---- attacks
 		S.CHARGE_WIND:   # head down, a hoof scraping: then he goes
+			if t == 1:
+				via_tree = _tree_on_line(tp)
 			if tp != null and t < int(34 * wk):
-				_turn_to(tp, 0.14)
+				_turn_to(via_tree if via_tree != null else tp, 0.14)   # v0.12.0: lined up through a tree when he can
 			if t % 18 == 9:
 				fx.append(["boss_scrape", [pos, yaw]])
 			if t >= int(50 * wk):
@@ -646,11 +649,160 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			if t >= 70 or (t > 20 and past) or _flat(pos - arena_c()).length() > WorldLayout.ARENA_R + 7.0:
 				fx.append(["boss_skid", [pos, yaw]])
 				_go(S.RECOVER)
+		S.TREE:   # v0.12.0: he goes for a tree, lowers his horns and splinters it
+			if tree_target < 0 or not _tree_alive(tree_target) or t > 360:
+				tree_target = -1
+				_after()
+			else:
+				var tpos := _tree_pos(tree_target)
+				var rel := _flat(tpos - pos)
+				if rep == 0:
+					_turn_to(tpos, 0.12)
+					if rel.length() > RADIUS + 1.6:
+						_step(rel.normalized() * WALK * 1.4 * speed_k())
+					else:
+						rep = 1
+						t = 0
+						fx.append(["boss_gore_wind", [pos, yaw]])
+				elif t >= 28:
+					_fell(tree_target, Vector3(rel.x, 0, rel.y))
+					fx.append(["boss_gore", [pos, yaw]])
+					tree_target = -1
+					rep = 0
+					_after()
 		S.RECOVER:
 			if t == 20:
 				fx.append(["boss_pant", [pos]])
 			if t >= 70:
 				_end_leap()
+
+
+## v0.12.0 Thunderhorn knows apples heal. Net fills `trees` ([tree index, position] of the standing trees round the
+## arena) and `apples` ([fruit id, position] on the ground there) each tick, and bumps `eaten` when a fighter eats one;
+## he answers with `felled` ([tree, direction]) and `splats` (fruit ids), which Net passes to Ecology.
+##  - Now and then (TREE_CD apart; more likely when someone is below half health or has just eaten) he goes for the
+##    nearest tree within 24 m, gores it and it falls (S.TREE): no more apples from it this fight.
+##  - Lining up a charge, he aims through a tree that stands near his line to the target (within 3 m of it, short of
+##    the target): `_tree_on_line`; anything his charge or rush runs through is felled.
+##  - Apples under his hooves while he moves are trampled; near an apple (APPLE_CD apart, shorter when they're low or
+##    eating) he stomps it to mush, or bucks and stomps everything within 5 m.
+const TREE_CD := 15 * 60
+const APPLE_CD := 4 * 60
+var trees: Array = []
+var apples: Array = []
+var eaten := 0.0
+var felled: Array = []
+var splats: Array = []
+var tree_cd := 6 * 60
+var apple_cd := 0
+var tree_target := -1
+var via_tree = null
+
+
+func _tree_alive(i: int) -> bool:
+	for tr in trees:
+		if int(tr[0]) == i:
+			return true
+	return false
+
+
+func _tree_pos(i: int) -> Vector3:
+	for tr in trees:
+		if int(tr[0]) == i:
+			return tr[1]
+	return pos
+
+
+func _fell(i: int, dir: Vector3) -> void:
+	felled.append([i, dir])
+	for k in range(trees.size() - 1, -1, -1):
+		if int(trees[k][0]) == i:
+			trees.remove_at(k)
+
+
+func _pressure(living: Array) -> float:
+	var low := 0.0
+	for p in living:
+		if _p_hp(p) < Sim.MAX_HP / 2:
+			low = 1.0
+	return low + minf(eaten, 1.0)
+
+
+## A standing tree near his line to the target (and short of it): where to aim so the charge goes through it.
+func _tree_on_line(tp):
+	if tp == null or rng.randf() > 0.7:
+		return null
+	var to := _flat(tp - pos)
+	if to.length() < 0.1:
+		return null
+	var best = null
+	var best_d := 3.0
+	for tr in trees:
+		var rel := _flat((tr[1] as Vector3) - pos)
+		var along := rel.dot(to.normalized())
+		if along < 4.0 or along > to.length() + 2.0:
+			continue
+		var side := absf(rel.cross(to.normalized()))
+		if side < best_d:
+			best_d = side
+			best = tr[1]
+	return best
+
+
+func _trees_and_apples(living: Array) -> void:
+	eaten *= 0.996
+	if tree_cd > 0:
+		tree_cd -= 1
+	if apple_cd > 0:
+		apple_cd -= 1
+	if state in [S.CHARGE, S.RUSH]:   # smashing through
+		for tr in trees.duplicate():
+			if _flat((tr[1] as Vector3) - pos).length() < RADIUS + 0.7:
+				_fell(int(tr[0]), Vector3(charge_dir.x, 0, charge_dir.y))
+				fx.append(["boss_skid", [pos, yaw]])
+	if state in [S.LEAP, S.ENTER, S.DEATH]:
+		return
+	var moving := state in [S.CHARGE, S.RUSH, S.WALK, S.STRAFE, S.BACKOFF, S.LUNGE, S.TREE, S.HOP]
+	for a in apples:
+		var d := _flat((a[1] as Vector3) - pos).length()
+		if moving and d < RADIUS * 0.8 and not int(a[0]) in splats:
+			splats.append(int(a[0]))
+	if apple_cd == 0 and state in [S.IDLE, S.WALK, S.STRAFE, S.TURN]:
+		var near := false
+		for a in apples:
+			if _flat((a[1] as Vector3) - pos).length() < RADIUS + 2.2:
+				near = true
+		if near:
+			var buck := rng.randf() < 0.35
+			var r := 5.0 if buck else RADIUS + 2.4
+			for a in apples:
+				if _flat((a[1] as Vector3) - pos).length() < r and not int(a[0]) in splats:
+					splats.append(int(a[0]))
+			fx.append(["boss_snort", [pos]] if buck else ["boss_scrape", [pos, yaw]])
+			apple_cd = int(APPLE_CD / (1.0 + _pressure(living)))
+
+
+## Go for a tree now? (from _choose)
+func _want_tree(living: Array) -> bool:
+	if tree_cd > 0 or trees.is_empty() or in_sequence():
+		return false
+	if rng.randf() > 0.1 + 0.3 * _pressure(living):
+		return false
+	var best := -1
+	var best_d := 24.0
+	for tr in trees:
+		var d := _flat((tr[1] as Vector3) - pos).length()
+		if d < best_d:
+			best_d = d
+			best = int(tr[0])
+	if best < 0:
+		return false
+	tree_target = best
+	tree_cd = TREE_CD
+	rep = 0
+	_go(S.TREE)
+	fx.append(["boss_snort", [pos]])
+	return true
 
 
 ## v0.12.0: challengers and corrupted minions caught in a charge or the rush are hurt and thrown like players
@@ -711,6 +863,8 @@ func _choose(living: Array, golems: Array) -> void:
 		return
 	if _want_leap(living):
 		_start_leap(living)
+		return
+	if _want_tree(living):
 		return
 	if not plan.is_empty():
 		_retarget(living, golems)
