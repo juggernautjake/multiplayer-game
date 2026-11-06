@@ -30,6 +30,17 @@ const DUEL_HALF := Vector2(0.55, 0.4)
 const DUEL_H := 1.7
 const ALTAR_C := Vector2(0.0, 42.0)
 const ARENA_R := 20.0
+## v0.12.0 the Storm Altar's button is solid (for anyone at level 3, who sees it risen): a drum ALTAR_BTN_R wide whose
+## top is at ALTAR_UP, or ALTAR_DOWN while pressed (the whole boss fight). `altar_pressed` is set by Net on the server
+## every tick and on clients from the boss state, so client prediction stands you on the same top.
+const ALTAR_BTN_R := 2.6
+const ALTAR_UP := 0.6
+const ALTAR_DOWN := 0.2
+static var altar_pressed := false
+
+
+static func altar_top() -> float:
+	return ALTAR_DOWN if altar_pressed else ALTAR_UP
 const VAULT_HALF := 1.8
 const VAULT_H := 2.6
 const VAULT_DOOR := Vector3(55.8, 0.0, 38.0)   # the middle of the door, on the vault's +x face (facing away from the spawn)

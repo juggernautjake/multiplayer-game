@@ -16,6 +16,7 @@ var rune_mats: Array = []
 var stone_light: OmniLight3D
 var button: Node3D
 var button_mat: StandardMaterial3D
+var press := 0.0
 var rim_mat: StandardMaterial3D
 var altar_light: OmniLight3D
 var swirl: Node3D
@@ -225,7 +226,17 @@ func _process(delta: float) -> void:
 		lvl_seen = lvl
 	rise = move_toward(rise, 1.0 if risen else 0.0, delta / 2.5)
 	var boss_up := _boss_up()
-	button.position.y = lerpf(-0.55, 0.0, rise) + (randf_range(-0.02, 0.02) if rise > 0.0 and rise < 1.0 else 0.0)
+	# v0.12.0: pressed (the whole fight) it sinks with a clunk and stays down, then slowly rises again after
+	var want_press := 1.0 if WorldLayout.altar_pressed else 0.0
+	if want_press > 0.5 and press < 0.5 and rise > 0.5:
+		var at := Vector3(WorldLayout.ALTAR_C.x, 0.4, WorldLayout.ALTAR_C.y)
+		Synth.play(self, Synth.fx("slam"), 2.0)
+		Synth.play(self, Synth.fx("hoof"), 4.0)
+		MotionFx.land(get_parent(), at, 2.0)
+		Fx.burst(get_parent(), at, Vector3.UP, Color("8fb4ff"), 30, 5.0, 0.06)
+		altar_light.light_energy = 12.0
+	press = move_toward(press, want_press, delta / (0.25 if want_press > 0.5 else 3.0))
+	button.position.y = lerpf(-0.55, 0.0, rise) - (WorldLayout.ALTAR_UP - WorldLayout.ALTAR_DOWN) * press * rise + (randf_range(-0.02, 0.02) if rise > 0.0 and rise < 1.0 else 0.0)
 	var glow := rise * (0.6 + 0.4 * sin(t * 4.0))
 	button_mat.emission_energy_multiplier = glow * 0.8
 	rim_mat.albedo_color = Color("8fb4ff")

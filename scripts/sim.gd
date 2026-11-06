@@ -259,6 +259,7 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 			s.grounded = true
 	var hv := Vector2(s.vel.x, s.vel.z)
 	_collide_boxes(s, prev_y)
+	_collide_altar(s, prev_y)
 	_collide_dummies(s)
 	if thrown and hv.length() > 4.0:   # ricochet off pillars, trunks and posts instead of sliding along them
 		var nv := Vector2(s.vel.x, s.vel.z)
@@ -491,6 +492,32 @@ static func _collide_boxes(s: PlayerState, prev_y: float) -> void:
 			if into < 0.0:
 				s.vel.x -= n.x * into
 				s.vel.z -= n.y * into
+
+
+## v0.12.0 the Storm Altar's button: a solid drum for anyone at level 3 (below that it lies sunk in the ground).
+## Coming down onto it you stand on its top; walking into its side pushes you out.
+static func _collide_altar(s: PlayerState, prev_y: float) -> void:
+	if maxi(s.staff_lvl, s.wand_lvl) < 3:
+		return
+	var c := WorldLayout.ALTAR_C
+	var d := Vector2(s.pos.x - c.x, s.pos.y * 0.0 + s.pos.z - c.y)
+	var r := WorldLayout.ALTAR_BTN_R
+	if d.length() >= r + RADIUS * 0.5:
+		return
+	var top := WorldLayout.altar_top()
+	if prev_y >= top - 0.01 and s.pos.y <= top + 0.01 and s.vel.y <= 0.0 and d.length() < r:
+		s.pos.y = top   # standing on it
+		s.vel.y = 0.0
+		s.grounded = true
+	elif s.pos.y < top - 0.01 and s.pos.y < prev_y + 0.5 and not (prev_y >= top - 0.01 and d.length() < r):
+		var n := d.normalized() if d.length() > 1e-4 else Vector2(1, 0)
+		var out := c + n * (r + RADIUS * 0.5)
+		s.pos.x = out.x
+		s.pos.z = out.y
+		var into := s.vel.x * n.x + s.vel.z * n.y
+		if into < 0.0:
+			s.vel.x -= n.x * into
+			s.vel.z -= n.y * into
 
 
 ## The practice dummies are solid: upright posts of radius DUMMY_RADIUS you can walk right up to but not through.

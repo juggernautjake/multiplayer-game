@@ -1918,6 +1918,7 @@ func _toast(id: int, text: String) -> void:
 
 ## Landing on the Storm Altar (from a jump), at level 3 or more, with no boss about: Thunderhorn comes.
 func _server_altar() -> void:
+	WorldLayout.altar_pressed = boss != null or defeated   # v0.12.0: held down the whole fight
 	for p: ServerPlayer in players.values():
 		if p.npc:
 			continue
@@ -1927,10 +1928,14 @@ func _server_altar() -> void:
 			continue
 		if Vector2(p.state.pos.x - WorldLayout.ALTAR_C.x, p.state.pos.z - WorldLayout.ALTAR_C.y).length() > ALTAR_R:
 			continue
+		if p.state.pos.y < WorldLayout.ALTAR_UP - 0.05 and maxi(p.state.staff_lvl, p.state.wand_lvl) >= 3:
+			continue   # v0.12.0: only landing ON the button presses it, not walking into it
 		if maxi(p.state.staff_lvl, p.state.wand_lvl) < 3:
 			_toast(p.id, "The Storm Altar answers only to level 3")
 			continue
 		summon_boss()
+		WorldLayout.altar_pressed = true
+		_fx("altar_press", [Vector3(WorldLayout.ALTAR_C.x, WorldLayout.ALTAR_UP, WorldLayout.ALTAR_C.y)])
 
 
 func summon_boss() -> void:
@@ -2140,5 +2145,7 @@ func boss_end(kind: String) -> void:
 
 @rpc("authority", "call_remote", "unreliable_ordered", 5)
 func boss_state(tick: int, data: Array) -> void:
+	if not multiplayer.is_server():
+		WorldLayout.altar_pressed = not data.is_empty()
 	boss_changed.emit(tick, data)
 

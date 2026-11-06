@@ -854,3 +854,9 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   thrown up where it is nearest you, a ripple running ahead and a rumble (whoosh + slam) timed to its arrival.
 - Level up (v0.12.0, `MagicFx._level_up`): the light column is a child of the player's avatar, so it rides along for
   ~2.2 s and fades over 1.4 s (with its own light).
+- Storm Altar button (v0.12.0): a solid drum (`WorldLayout.ALTAR_BTN_R` 2.6 m, top at `ALTAR_UP` 0.6 m, `ALTAR_DOWN`
+  0.2 m while pressed) for players at level 3 (`Sim._collide_altar`: land on its top, pushed out of its side; the
+  same in client prediction). Only landing on top summons Thunderhorn (`Net._server_altar` checks the feet are up on
+  it). `WorldLayout.altar_pressed` (server: boss present or the defeat screen; clients: from the boss state) holds it
+  down for the whole fight; ArenaView sinks it with a clunk, dust and a flash and lets it rise slowly afterwards.
+  Test: npc_test `_altar_button`.

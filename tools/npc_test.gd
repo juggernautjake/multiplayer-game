@@ -175,6 +175,7 @@ func _initialize() -> void:
 	net.ask_restart()
 	check(not net.defeated and a.state.dead == 0 and b.state.dead == 0 and net.boss == null, "and both start again")
 	_golem_credit(net, a, b)
+	_altar_button(net, a)
 	print("%d failed" % bad)
 	quit(bad)
 
@@ -217,3 +218,34 @@ func _golem_credit(net: Net, a: Net.ServerPlayer, b: Net.ServerPlayer) -> void:
 	var tgt = q2.ai._pick_target(net, q2)
 	check(tgt != null and tgt.id == -1000 - g3.id, "a challenger fights a golem that gets in its face")
 	net.boss = null
+
+
+## v0.12.0: the Storm Altar's button is solid; only landing on top presses it; it stays down for the fight.
+func _altar_button(net: Net, a: Net.ServerPlayer) -> void:
+	net.boss = null
+	net.defeated = false
+	for id in net.players.keys().duplicate():
+		if net.players[id].npc:
+			net.players.erase(id)
+	a.state = Sim.spawn_state(0)
+	a.state.staff_lvl = 3
+	var c := Vector3(WorldLayout.ALTAR_C.x, 0, WorldLayout.ALTAR_C.y)
+	a.state.pos = c + Vector3(WorldLayout.ALTAR_BTN_R + 1.5, 0, 0)
+	var closest := INF
+	for k in 90:   # walking into its side
+		Sim.step(a.state, Sim.PlayerInput.new(k, Sim.Btn.LEFT, 0.0, 0.0, Weapons.STAFF, 0, 0.0, 0.0))
+		net._server_altar()
+		closest = minf(closest, Vector2(a.state.pos.x - c.x, a.state.pos.z - c.z).length())
+	check(net.boss == null and closest >= WorldLayout.ALTAR_BTN_R, "walking into the button's side doesn't press it (kept %.2f m from its middle)" % closest)
+	a.state.pos = c + Vector3(0, 2.5, 0)   # dropping onto it from a jump
+	a.state.vel = Vector3.ZERO
+	a.state.grounded = false
+	a.air = true
+	for k in 60:
+		Sim.step(a.state, Sim.PlayerInput.new(k, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, 0.0))
+		net._server_altar()
+	check(net.boss != null and WorldLayout.altar_pressed, "landing on top presses it: Thunderhorn comes")
+	check(absf(a.state.pos.y - WorldLayout.ALTAR_DOWN) < 0.02 and a.state.grounded, "standing on the pressed button (feet at %.2f m)" % a.state.pos.y)
+	net.boss = null
+	net._server_altar()
+	check(not WorldLayout.altar_pressed, "after the fight it comes back up")
