@@ -895,3 +895,20 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
 - Tools: `tools/boss_pose_shots.gd` (`model`: still poses and face close-ups; `gait`: 8-frame strips per motion
   through a real BossView), `tools/boss_anim_review.gd` (every motion in slow motion under an orbiting camera with
   labels; records with `--write-movie`, writes `segments.txt`).
+- `boss_pose_shots.gd dazed` (v0.12.0): the stun meter's 7 s daze as an 8-frame strip (run with `--fixed-fps 60`).
+
+## Thunderhorn: stun meter, dodging, horn beam (v0.12.0, Group B)
+
+- Stun meter (`Boss.stunned`, `_daze`, `S.DAZED`; replaces "stuns only stagger, shorter each time"): each wand Stun
+  that catches him adds 1 (`stun_m`); at `STUN_NEED` 10 he is dazed for `STUN_TICKS` 420 (7 s). The meter holds
+  `STUN_HOLD` 180 ticks (3 s) after a hit, then drains a point every `STUN_DRAIN` 90 ticks (1.5 s); it stays full while
+  he's down and empties as he gets up. Dazed: normal damage, no attacks, no static field, no moving, no big-hit
+  stagger. It interrupts anything: a charge or the rush stops dead (with a skid), the beam goes out, a howl stops
+  launching orbs; filled while he's in the air (`daze_pending`) he lands (the landing ring still goes out) and drops,
+  and when he gets up the rest of the Storm Leap sequence is dropped: back to his normal attacks. It is the only way
+  to stop a charge or the rush now: frost no longer slows them (they ignore `slow`). Synced: `extra[8]` (the meter,
+  0..10) and status bit 64 (dazed). BossView: a thin gold bar under the health bar with a notch per hit and
+  "STUN n/10" (flashing "DAZED n s" while down), a toast at 8 and 9, a "THUNDERHORN IS DAZED!" banner, then the
+  animation (`S.DAZED` in `_process`): a stagger, the legs buckle (`crouch` 2, legs tucked, rolled onto his side),
+  head low and swaying, lids drooping, tongue out, a ring of stars and gold sparks round his head (`_update_daze`),
+  then 1.3 s of struggling up. Fx: `boss_stun_hit` [pos, meter], `boss_dazed`, `boss_get_up`.

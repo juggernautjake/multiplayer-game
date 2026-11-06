@@ -65,6 +65,10 @@ var hud: CanvasLayer
 var bar_fill: ColorRect
 var bar_name: Label
 var bar_status: Label
+var stun_bg: ColorRect           # v0.12.0 the stun meter under the health bar
+var stun_fill: ColorRect
+var stun_label: Label
+var _stars: Node3D               # v0.12.0 stars circling his head while he's dazed
 var banner: Label
 var banner_t := 0.0
 var _storm_t := 999.0
@@ -189,6 +193,9 @@ func _despawn() -> void:
 		model.free_trails()
 		root.queue_free()
 		root = null
+	if _stars != null:
+		_stars.queue_free()
+		_stars = null
 	for n in [beam, marker, path]:
 		if n:
 			(n as Node).queue_free()
@@ -312,10 +319,12 @@ func _process(delta: float) -> void:
 			on["hoof_FR"] = 1.0
 			hot = 0.5
 		Boss.S.STOMP, Boss.S.SLAMS:
-			var period := 0.4 if state == Boss.S.STOMP else 0.6667
-			var off := 0.0 if state == Boss.S.STOMP else 0.5
-			var cyc := fposmod(t - off + period * 0.5, period) / period
-			rear = ((1.0 if state == Boss.S.SLAMS else 0.75) * maxf(0.0, sin(cyc * PI)) if t > 0.15 else maxf(0.0, 1.0 - t * 7.0))
+			if state == Boss.S.SLAMS:   # v0.12.0: up for 0.5 s before each wave (at 0.5, 1.75 and 3.0 s), down hard on it
+				var ph := fposmod(t - 0.5 + 0.55, Boss.WAVE_GAP * Config.DT)
+				rear = (clampf(ph / 0.5, 0.0, 1.0) if ph < 0.55 else maxf(0.0, 1.0 - (ph - 0.55) * 5.0)) if t < 3.1 else 0.0
+			else:
+				var cyc := fposmod(t + 0.2, 0.4) / 0.4
+				rear = 0.75 * maxf(0.0, sin(cyc * PI)) if t > 0.15 else maxf(0.0, 1.0 - t * 7.0)
 			p.brow = -1.0
 			p.jaw = 0.4
 			p.head_up = 0.2
@@ -348,6 +357,9 @@ func _process(delta: float) -> void:
 			col = Color("c8c0ff")
 			hot = 1.2
 		Boss.S.ROAR:
+			p.head_dip = 0.4 * clampf(t / 0.35, 0.0, 1.0) * (1.0 - clampf((t - 0.45) / 0.15, 0.0, 1.0))   # v0.12.0 the tell
+			p.flare = clampf(t / 0.5, 0.0, 1.0)
+			t = maxf(t - (Boss.ROAR_AT - 15) * Config.DT, 0.0)   # the roar itself, timed to the server's
 			rear = 0.45 * sin(clampf(t / 0.9, 0.0, 1.0) * PI)
 			p.brow = 1.0
 			p.lid = 0.0
@@ -492,6 +504,28 @@ func _process(delta: float) -> void:
 			p.bob = sin(t * 9.0) * 0.07
 			p.flare = 0.7 + 0.3 * sin(t * 9.0)
 			p.jaw = 0.25
+		Boss.S.DAZED:   # v0.12.0 the stun meter filled: stagger, legs buckle, down on his knees and side, dazed, up
+			var up_at := Boss.STUN_TICKS * Config.DT - 1.4
+			var k := clampf((t - 0.25) / 0.55, 0.0, 1.0)   # buckling
+			var g := clampf((t - up_at) / 1.3, 0.0, 1.0)    # struggling up
+			var down := k * (1.0 - g * g * (3.0 - 2.0 * g))
+			var strain := sin(clampf((t - up_at) / 1.3, 0.0, 1.0) * PI)
+			rear = 0.3 * maxf(0.0, 1.0 - t / 0.3) * minf(1.0, t / 0.1)   # the first stagger
+			p.crouch = 2.0 * down + 0.2 * strain
+			tuck = 0.75 * down
+			p.pitch = 0.12 * down
+			p.roll = 0.42 * down + sin(t * 10.0) * 0.06 * strain + sin(t * 9.0) * 0.08 * (1.0 - k)
+			p.head_dip = 0.75 * down - 0.2 * strain
+			p.head_yaw = sin(t * 1.6) * 0.35 * down
+			p.thrash = sin(t * 2.3) * 0.12 * down
+			p.brow = 0.7
+			p.lid = 0.75 * down
+			p.jaw = 0.35 * down
+			p.tongue = 0.7 * down
+			p.flare = 0.4 + 0.4 * strain
+			shake = 0.05 * (1.0 - k) + 0.02 * strain
+			col = GOLD
+			hot = 0.15
 		Boss.S.DEATH:
 			var k := clampf(t / 1.2, 0.0, 1.0)
 			p.crouch = 1.6 * k
@@ -544,6 +578,7 @@ func _process(delta: float) -> void:
 	_update_beam(col)
 	_update_marker()
 	_update_path(col)
+	_update_daze(delta)
 	# fading out as he dies
 	if state == Boss.S.DEATH:
 		var k := clampf((state_t - 1.2) / 1.6, 0.0, 1.0)
@@ -1605,6 +1640,26 @@ func _on_fx(kind: String, a: Array) -> void:
 		"boss_flinch":
 			flinch = 0.6
 			_flash = 0.4
+		"boss_stun_hit":   # v0.12.0 a Stun caught him: a notch on the meter
+			flinch = maxf(flinch, 0.35)
+			Fx.burst(main, (a[0] as Vector3) + Vector3(0, 5, 0), Vector3.UP, Color("ffe46b"), 10, 3.0, 0.04)
+			if int(a[1]) >= Boss.STUN_NEED - 2 and int(a[1]) < Boss.STUN_NEED and main.has_method("toast"):
+				main.toast("Thunderhorn is reeling: %d more Stun%s!" % [Boss.STUN_NEED - int(a[1]), "" if Boss.STUN_NEED - int(a[1]) == 1 else "s"])
+		"boss_dazed":   # the meter filled: he goes down
+			_banner("THUNDERHORN IS DAZED!", GOLD, 2.4)
+			_flash = 1.0
+			fx._flash_light((a[0] as Vector3) + Vector3(0, 4, 0), GOLD, 8.0, 18.0, 0.5)
+			Fx.burst(main, (a[0] as Vector3) + Vector3(0, 5, 0), Vector3.UP, GOLD, 30, 6.0, 0.06)
+			_sound("roar2", a[0], 2.0)
+			_sound("slam", a[0], 4.0, 0.6)
+			get_tree().create_timer(0.7).timeout.connect(func():
+				if alive:
+					MotionFx.land(main, a[0], 3.5)
+					fx._shake_near_scaled(a[0], 0.6))
+		"boss_get_up":
+			_snort()
+			_sound("roar0", a[0], 0.0)
+			MotionFx.land(main, a[0], 2.0)
 		"boss_death":   # he bellows, comes apart into cloud and lightning
 			_sound("roar3", a[0], 6.0)
 			for i in 6:
@@ -1614,6 +1669,40 @@ func _on_fx(kind: String, a: Array) -> void:
 		"boss_leave":
 			fx._smoke(a[0], 12, 3.0, 4.0, 0.6)
 			fx._bolt(a[0])
+
+
+## v0.12.0 dazed: a ring of stars and sparks circling his head, little arcs crackling over him.
+func _update_daze(delta: float) -> void:
+	var on := state == Boss.S.DAZED and state_t < Boss.STUN_TICKS * Config.DT - 0.5
+	if on and _stars == null:
+		_stars = Node3D.new()
+		main.add_child(_stars)
+		for i in 6:
+			var st := MeshInstance3D.new()
+			var sm := PrismMesh.new()
+			sm.size = Vector3(0.5, 0.5, 0.14)
+			st.mesh = sm
+			st.material_override = MagicFx._glow_mat(Color("ffe46b") if i % 2 == 0 else Color("fff6d0"), 5.0)
+			var a := TAU * i / 6.0
+			st.position = Vector3(cos(a) * 1.6, sin(a * 2.0) * 0.15, sin(a) * 1.6)
+			_stars.add_child(st)
+	if _stars == null:
+		return
+	if not on:
+		_stars.queue_free()
+		_stars = null
+		return
+	var head: Node3D = model.anchors["eye_l"]
+	var h2: Node3D = model.anchors["eye_r"]
+	_stars.global_position = (head.global_position + h2.global_position) * 0.5 + Vector3(0, 1.3, 0)
+	_stars.rotation.y += delta * 3.2
+	for c in _stars.get_children():
+		(c as Node3D).rotation.y = -_stars.rotation.y + state_t * 4.0
+	if randf() < delta * 10.0:
+		var c0 := root.position + Vector3(randf_range(-2.5, 2.5), randf_range(1.0, 4.0), randf_range(-3, 3))
+		_arc(c0, c0 + Vector3(randf_range(-1.2, 1.2), randf_range(-0.8, 0.8), randf_range(-1.2, 1.2)), GOLD, 0.1)
+	if randf() < delta * 4.0:
+		Fx.burst(main, _stars.global_position, Vector3.UP, GOLD, 4, 2.0, 0.03)
 
 
 ## A ring of air blasting out from a roar: dust kicked up along it.
@@ -1660,7 +1749,7 @@ func _build_hud() -> void:
 	var box := Control.new()
 	box.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	box.offset_top = 8
-	box.offset_bottom = 80
+	box.offset_bottom = 96
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(box)
 	bar_name = Label.new()
@@ -1697,11 +1786,43 @@ func _build_hud() -> void:
 		tick.anchor_bottom = 1.0
 		tick.offset_right = 2
 		bg.add_child(tick)
+	# v0.12.0 the stun meter: a thin gold bar under the health bar, a notch per hit (10 = dazed 7 s)
+	stun_bg = ColorRect.new()
+	stun_bg.color = Color(0, 0, 0, 0.55)
+	stun_bg.anchor_left = 0.42
+	stun_bg.anchor_right = 0.72
+	stun_bg.offset_top = 55
+	stun_bg.offset_bottom = 65
+	box.add_child(stun_bg)
+	stun_fill = ColorRect.new()
+	stun_fill.color = Color("ffd84a")
+	stun_fill.anchor_bottom = 1.0
+	stun_fill.offset_left = 1
+	stun_fill.offset_top = 1
+	stun_fill.offset_bottom = -1
+	stun_bg.add_child(stun_fill)
+	for i in range(1, Boss.STUN_NEED):
+		var notch := ColorRect.new()
+		notch.color = Color(0, 0, 0, 0.7)
+		notch.anchor_left = float(i) / Boss.STUN_NEED
+		notch.anchor_right = float(i) / Boss.STUN_NEED
+		notch.anchor_bottom = 1.0
+		notch.offset_right = 1
+		stun_bg.add_child(notch)
+	stun_label = Label.new()
+	stun_label.anchor_left = 0.725
+	stun_label.anchor_right = 0.97
+	stun_label.offset_top = 50
+	stun_label.add_theme_font_size_override("font_size", 14)
+	stun_label.add_theme_constant_override("outline_size", 5)
+	stun_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	stun_label.add_theme_color_override("font_color", Color("ffe48a"))
+	box.add_child(stun_label)
 	bar_status = Label.new()
 	bar_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	bar_status.anchor_left = 0.42
 	bar_status.anchor_right = 0.97
-	bar_status.offset_top = 54
+	bar_status.offset_top = 68
 	bar_status.add_theme_font_size_override("font_size", 18)
 	bar_status.add_theme_constant_override("outline_size", 6)
 	bar_status.add_theme_color_override("font_outline_color", Color.BLACK)
@@ -1738,6 +1859,20 @@ func _update_hud(enraged: bool) -> void:
 		st.append("[ENRAGED]")
 	if flags & 32:
 		st.append("[STORM]")
+	if flags & 64:
+		st.append("[DAZED]")
+	# v0.12.0 the stun meter: fills a notch per Stun hit; full and flashing while he's dazed
+	var sm := float(extra[8]) if extra.size() > 8 else 0.0
+	var dazed := flags & 64 != 0
+	stun_fill.anchor_right = clampf(sm / Boss.STUN_NEED, 0.0, 1.0)
+	stun_fill.offset_right = -1
+	var fl := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.015)
+	stun_fill.color = Color("fff4b0").lerp(Color("ffb020"), fl) if dazed else Color("ffd84a")
+	if dazed:
+		stun_label.text = "DAZED %.0f s" % maxf(Boss.STUN_TICKS * Config.DT - state_t, 0.0)
+	else:
+		stun_label.text = "STUN %d/%d" % [int(sm + 0.001), Boss.STUN_NEED] if sm > 0.0 else "STUN"
+	stun_bg.modulate.a = 1.0 if (sm > 0.0 or dazed) else 0.45
 	if state in Boss.SEQ:
 		st.append("[STORM LEAP]")
 	bar_status.text = "   ".join(st)

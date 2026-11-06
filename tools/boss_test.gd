@@ -198,6 +198,7 @@ func _initialize() -> void:
 	for dodge in [true, false]:
 		net.summon_boss()
 		var b: Boss = net.boss
+		b.rng.seed = 12345   # deterministic (it used to fail now and then: see below)
 		b.state = Boss.S.SLAMS
 		b.t = 30 + 2 * Boss.WAVE_GAP + 39
 		b.yaw = 0.0   # facing -Z
@@ -223,7 +224,9 @@ func _initialize() -> void:
 				land = a.state.pos
 			if a.state.down > 0:
 				downed += 1
-			if net.boss == null or (b.state == Boss.S.IDLE and k > 300):
+			# stop as soon as the rush is over: before, a random next attack (a charge, called lightning) after the
+			# recovery could land and make the dodge look like a miss now and then
+			if net.boss == null or (b.state == Boss.S.IDLE and k > 300) or (b.state == Boss.S.RECOVER and launched_at < 0 and dodge):
 				break
 		if dodge:
 			check(a.state.hp == hp0 and launched_at < 0, "a side-dash as he comes: missed")
@@ -264,12 +267,128 @@ func _initialize() -> void:
 			stun_t += 1
 	check(stun_t < 15, "a stunned, low-health player is mostly left alone (%d of 60 picks)" % stun_t)
 
+	_stun_meter_tests(net)
 	_throw_tests()
 	_maximin_tests()
 	_tree_tests()
 	_home_tests()
 	print("%d failed" % bad)
 	quit(bad)
+
+
+## v0.12.0 the stun meter: 9 Stun hits don't, the 10th dazes him 7 s; it holds, drains, interrupts anything (the
+## charge, the Storm Leap in the air), is the only thing that stops a charge, is sent to clients, and fog (the wand's)
+## doesn't change who he goes after.
+func _tick_n(b: Boss, n: int, ppl: Array, from := 0) -> void:
+	for k in n:
+		b.tick(from + k, ppl, [])
+		b.hits.clear(); b.fx.clear(); b.zaps.clear(); b.launches.clear(); b.strikes.clear(); b.slows.clear()
+		b.felled.clear(); b.splats.clear()
+
+
+func _stun_meter_tests(net: Net) -> void:
+	var c := Boss.arena_c()
+	var me := [[1, c + Vector3(0, 0, 14), true, false, 100]]
+	var b := Boss.new(c, 1, 3)
+	b.state = Boss.S.IDLE
+	b.last_leap = 0
+	for i in 9:
+		b.stunned(i)
+	check(b.state != Boss.S.DAZED and is_equal_approx(b.stun_m, 9.0), "9 Stun hits: not dazed (meter %.0f/10)" % b.stun_m)
+	_tick_n(b, Boss.STUN_HOLD - 5, me)
+	check(is_equal_approx(b.stun_m, 9.0), "the meter holds for 3 s after a hit")
+	_tick_n(b, 5 + Boss.STUN_DRAIN * 3, me)
+	check(b.stun_m < 6.6 and b.stun_m > 5.4, "then drains a point every 1.5 s (%.2f after 4.5 s more)" % b.stun_m)
+	_tick_n(b, Boss.STUN_DRAIN * 8, me)
+	check(b.stun_m == 0.0, "and empties when nobody keeps stunning him")
+	for i in 10:
+		b.stunned(i)
+	check(b.state == Boss.S.DAZED, "the 10th hit dazes him")
+	var hp0 := b.hp
+	b.hurt(40, 1, "")
+	check(b.hp == hp0 - 40, "dazed, he takes normal damage")
+	b.rings.clear(); b.balls.clear(); b.orbs.clear()   # (what was already flying)
+	var p0 := b.pos
+	var hits := 0
+	for k in Boss.STUN_TICKS - 2:
+		b.tick(k, [[1, c + Vector3(0, 0, 3.5), true, false, 100]], [])
+		hits += b.hits.size()
+		b.hits.clear(); b.fx.clear(); b.zaps.clear(); b.launches.clear(); b.strikes.clear(); b.slows.clear()
+	check(b.state == Boss.S.DAZED and hits == 0 and b.pos.distance_to(p0) < 0.01, "(%s, %d hits, moved %.2f m) for 7 s" % [Boss.S.keys()[b.state], hits, b.pos.distance_to(p0)] + "  he does nothing (no attacks, no static field, no moving), even with someone right next to him")
+	_tick_n(b, 3, me)
+	check(b.state != Boss.S.DAZED and b.stun_m == 0.0, "then he gets up, the meter empty (%.1f s)" % (Boss.STUN_TICKS / 60.0))
+	# the only way to stop a charge: fill the meter during the wind-up or the gallop
+	var ch := Boss.new(c, 1, 5)
+	ch.state = Boss.S.IDLE
+	ch._attack("charge", c + Vector3(0, 0, -20))
+	_tick_n(ch, 60, [[1, c + Vector3(0, 0, -20), true, false, 100]])
+	check(ch.state == Boss.S.CHARGE, "(a charge under way)")
+	ch.frosted()
+	var at := ch.pos
+	_tick_n(ch, 6, [[1, c + Vector3(0, 0, -20), true, false, 100]])
+	check(ch.pos.distance_to(at) > Boss.GALLOP * 0.09, "frost doesn't slow a charge any more (%.1f m in 0.1 s)" % ch.pos.distance_to(at))
+	for i in 10:
+		ch.stunned(i)
+	at = ch.pos
+	_tick_n(ch, 30, [[1, c + Vector3(0, 0, -20), true, false, 100]])
+	check(ch.state == Boss.S.DAZED and ch.pos.distance_to(at) < 0.01, "a full meter stops the charge dead")
+	# the Storm Leap: filled in the air, he lands and drops; the rest of the sequence is dropped
+	var lp := Boss.new(c, 1, 6)
+	lp.state = Boss.S.IDLE
+	lp._start_leap(me)
+	_tick_n(lp, 100, me)
+	check(lp.state == Boss.S.LEAP and lp.pos.y > 1.0, "(in the air)")
+	for i in 10:
+		lp.stunned(i)
+	check(lp.state == Boss.S.LEAP, "filled mid-leap: he still lands first")
+	_tick_n(lp, lp.leap_air, me)
+	check(lp.state == Boss.S.DAZED and lp.pos.y == 0.0, "then drops, dazed, where he landed")
+	_tick_n(lp, Boss.STUN_TICKS + 2, me)
+	check(not lp.in_sequence(), "and gets up into his normal attacks (the leap sequence is over)")
+	# synced: the meter and the dazed flag go out with his state
+	var pk := Boss.new(c, 1, 7)
+	pk.state = Boss.S.IDLE
+	for i in 4:
+		pk.stunned(i)
+	var d := pk.pack()
+	check(is_equal_approx(float(d[13][8]), 4.0), "his state carries the meter (%s)" % str(d[13][8]))
+	for i in 6:
+		pk.stunned(i)
+	check(int(pk.pack()[8]) & 64 != 0, "and the dazed flag")
+	# fog (the wand's, when it's in the game) doesn't change who he goes after
+	var seq := []
+	for fogged in [false, true]:
+		net.summon_boss()
+		net.boss.state = Boss.S.IDLE
+		net.boss.rng.seed = 77
+		net.server_tick = 50000
+		net.defeated = false
+		var a: Net.ServerPlayer = net.players[1]
+		a.state = Sim.spawn_state(1)
+		a.state.pos = net.boss.pos + Vector3(5, 0, 10)
+		if fogged and "fogs" in net:
+			var fog_script = load("res://scripts/fog.gd")
+			net.set("fogs", [fog_script.make(1, a.state.pos, 1, net.server_tick, {"duration": 100000})])
+		var picks := []
+		for k in 600:
+			net.server_tick += 1
+			a.state.hp = Sim.MAX_HP   # (kept alive: this is about his choices)
+			a.state.dead = 0
+			net._server_boss()
+			if net.boss == null:
+				break
+			picks.append([net.boss.target, net.boss.state])
+		seq.append(picks)
+		if "fogs" in net:
+			net.set("fogs", [])
+		net.boss = null
+	var first_diff := -1
+	for i in mini(seq[0].size(), seq[1].size()):
+		if seq[0][i] != seq[1][i] and first_diff < 0:
+			first_diff = i
+			print("diverge at %d: %s vs %s" % [i, str(seq[0][i]), str(seq[1][i])])
+	check(seq[0] == seq[1], "fog over the player changes nothing about his targeting or attacks%s" % ("" if "fogs" in net else " (fog not in this build: trivially)"))
+	net.boss = null
 
 
 ## v0.12.0: a charge throws you hard: far, bouncing, skidding, off a trunk, never out of the world; then you get up.

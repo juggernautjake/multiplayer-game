@@ -3,6 +3,8 @@
 ## model: BossModel alone, standing / roaring / charging poses from four sides (bull_<pose>_<view>.png).
 ## gait:  a real BossView fed made-up server states: walk, trot, gallop, a turn, a skid, pawing, the stomp's rearing,
 ##        the gore, a roar; pictures every few frames (gait_<n>_<what>.png), the camera following from the side.
+## dazed: (v0.12.0) the stun meter's 7 s daze: the collapse, the dazed sway and the struggle up (strip_dazed.png, and
+##        a 3/4 front close-up strip strip_dazed_front.png).
 extends SceneTree
 
 var out := "user://"
@@ -132,7 +134,9 @@ const PLAN := [[1.6, "IDLE", 0.0, 0.0, "idle", ""], [2.4, "WALK", 4.5, 0.0, "wal
 	[1.4, "LEAP_WIND", 0.0, 0.0, "jumpwind", ""], [1.0, "LEAP", 0.0, 0.0, "jump", ""], [0.8, "LEAP_LAND", 0.0, 0.0, "land", ""],
 	[0.45, "GORE_WIND", 0.0, 0.0, "gorewind", ""], [0.4, "GORE", 0.0, 0.0, "gore", ""], [1.1, "ROAR", 0.0, 0.0, "roar", ""],
 	[0.9, "STAGGER", 0.0, 0.0, "stagger", ""], [0.8, "IDLE", 0.0, 0.0, "end", ""]]
+const DAZED_PLAN := [[7.2, "DAZED", 0.0, 0.0, "dazed", "boss_dazed"], [0.6, "IDLE", 0.0, 0.0, "end", ""]]
 const STRIP_N := 8
+var plan: Array = PLAN
 var _strip: Array = []
 var _last := ""
 
@@ -141,10 +145,12 @@ func _gait_tick() -> void:
 	var dt := 1.0 / 60.0
 	_gt += dt
 	var tot := 0.0
-	var cur: Array = PLAN[-1]
+	var cur: Array = plan[-1]
 	var into := 0.0
 	var done := true
-	for s in PLAN:
+	if mode == "dazed":
+		plan = DAZED_PLAN
+	for s in plan:
 		if _gt < tot + float(s[0]):
 			cur = s
 			into = _gt - tot
@@ -180,7 +186,11 @@ func _gait_tick() -> void:
 	var side := Vector3(cos(_yaw), 0, -sin(_yaw))
 	var at := (view.root.position if view.root else _pos) + Vector3(0, 3.2, 0)
 	at.y = 3.2 + y * 0.5
-	cam.look_at_from_position(at - side * 15.0 + fwd * 2.0 + Vector3(0, 0.5, 0), at)
+	if mode == "dazed":   # three-quarter front, a little lower
+		at.y = 2.6
+		cam.look_at_from_position(at - side * 11.0 + fwd * 9.0 + Vector3(0, 0.2, 0), at)
+	else:
+		cam.look_at_from_position(at - side * 15.0 + fwd * 2.0 + Vector3(0, 0.5, 0), at)
 	var d := float(cur[0])
 	var k := int(floor(into / d * STRIP_N))
 	if k < STRIP_N and _strip.size() == k:

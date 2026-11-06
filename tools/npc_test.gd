@@ -123,11 +123,7 @@ func _initialize() -> void:
 	var t2 := Boss.new(Vector3.ZERO, 1)
 	t2.state = Boss.S.IDLE
 	t2.stunned(1000)
-	var first := 45 - t2.t
-	t2.state = Boss.S.IDLE
-	t2.stunned(1010)
-	var second := 45 - t2.t
-	check(t2.state == Boss.S.STAGGER and first == 45 and second < first, "a stun only staggers him, shorter each time (%d, then %d ticks)" % [first, second])
+	check(t2.state == Boss.S.IDLE and t2.stun_m == 1.0, "v0.12.0: a stun adds a point to his stun meter (no stagger; boss_test has the rest)")
 	# a gravity well can't pull him
 	net.summon_boss()
 	net.boss.state = Boss.S.IDLE

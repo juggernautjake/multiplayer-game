@@ -29,6 +29,22 @@
 ## player (Sim.ZAP_STACK). 6 stacks (5 while he is enraged) = stunned for 7 s (Sim.STATIC_STUN). The meter holds 2.5 s
 ## after the last hit, then drains a stack every 3.3 s. A held shield blocks the orbs (they bounce off) and adds nothing.
 ##
+## STUN METER (v0.12.0, replaces the old "stuns only stagger, shorter each time" rule): every wand Stun that catches
+## him adds 1 (stunned()); at STUN_NEED (10) he is DAZED for STUN_TICKS (7 s): he staggers, his legs buckle, he goes
+## down on his knees and side, dazed (head swaying, stars, sparks), then struggles up. He takes normal damage and does
+## nothing (no attacks, no static field). The meter holds STUN_HOLD (3 s) after the last hit, then drains a point every
+## STUN_DRAIN ticks (1.5 s); it empties when he gets up. Nothing is immune: a charge, the rush, a beam, the Storm Leap
+## (in the air he lands first, then drops; the rest of the sequence is dropped and he goes back to his normal attacks).
+## It is the ONLY way to stop a charge or the rush (no spell stops them any more; frost no longer slows them): fill it
+## during the wind-up, the pawing or the gallop itself. Sent as extra[8]; BossView draws it under his health bar.
+##
+## DODGING (v0.12.0 audit; boss_test `_dodge_tests` runs a skilled-dodger bot against each): every attack has a tell
+## (WIND states, never under MIN_TELL 0.4 s even enraged with two players) and one clear answer: side-dash the charge,
+## rush and gore; jump the rings and waves; leave the marked spot (called lightning, the leap's landing); outrun, dash
+## or take cover from orbs and ball lightning; back off from the tail lash, the roar and the static field (its edge is
+## drawn); move out of the beam's sweep, get under it near him or jump it near its far end. A dash's i-frames (Sim
+## dash_ticks) cover every one of his hits (`_dodging`: the hit is dropped, the attack counts as dodged).
+##
 ## STORM LEAP (v0.11.0), the signature sequence:
 ##   LEAP_WIND 1.5 s  he crouches, lightning gathers, a charge-up roar; a glowing marker shows where he will land, far
 ##                    across the arena (never within 6 m of a player)
@@ -112,7 +128,16 @@ const ORB_SLOW_R := 30.0
 const ORB_DMG := 6
 enum S { ENTER, IDLE, WALK, CHARGE_WIND, CHARGE, STOMP_WIND, STOMP, BEAM_WIND, BEAM, CALL, ROAR, BALLS, STAGGER, DEATH,
 	STRAFE, BACKOFF, HOP, TURN, GORE_WIND, GORE, TAIL_WIND, TAIL, PHASE, LEAP_WIND, LEAP, LEAP_LAND, HOWL, SLAMS, PAW,
-	RUSH, RECOVER, LUNGE, TREE, HOME }
+	RUSH, RECOVER, LUNGE, TREE, HOME, DAZED }
+## v0.12.0 the stun meter (header)
+const STUN_NEED := 10
+const STUN_TICKS := 420
+const STUN_HOLD := 180
+const STUN_DRAIN := 90
+const MIN_TELL := 24             # v0.12.0: no wind-up shorter than 0.4 s, enraged or not
+var stun_m := 0.0
+var stun_hold := 0
+var daze_pending := false        # filled in mid-air: he drops as he lands
 const SEQ := [S.LEAP_WIND, S.LEAP, S.LEAP_LAND, S.HOWL, S.SLAMS, S.PAW, S.RUSH, S.RECOVER]
 const MOVES := [S.STRAFE, S.BACKOFF, S.HOP, S.TURN, S.LUNGE]
 
@@ -172,7 +197,6 @@ var big_hit_t := -100000
 var rings: Array = []            # [radius, hit ids, centre, speed, damage, kind]
 var balls: Array = []            # [pos, vel, life, static]
 var orbs: Array = []             # [pos, vel, target, life, age, spent]
-var stuns: Array = []
 var rng := RandomNumberGenerator.new()
 var done := false
 # what the server applies this tick (Net reads and clears them)
@@ -273,7 +297,7 @@ func hurt(amount: int, from: int, spell: String) -> int:
 		_go(S.DEATH)
 		orbs.clear()
 		fx.append(["boss_death", [pos]])
-	elif dmg >= 60 and not in_sequence() and state not in [S.PHASE, S.STAGGER] and total_t - big_hit_t > 600:
+	elif dmg >= 60 and not in_sequence() and state not in [S.PHASE, S.STAGGER, S.DAZED] and total_t - big_hit_t > 600:
 		big_hit_t = total_t   # a really big hit staggers him (once in 10 s)
 		_go(S.STAGGER)
 		t = 15
@@ -283,18 +307,37 @@ func hurt(amount: int, from: int, spell: String) -> int:
 	return dmg
 
 
-## A stun only staggers him, shorter every time within 10 s (half, a quarter...); the Storm Leap shrugs it off.
-func stunned(now: int) -> void:
-	stuns = stuns.filter(func(x): return now - int(x) < 600)
-	stuns.append(now)
-	if state in [S.ENTER, S.DEATH, S.PHASE] or (in_sequence() and state != S.RUSH):
+## v0.12.0 a wand Stun caught him: one point on the stun meter; at STUN_NEED he is dazed for 7 s (header).
+func stunned(_now: int) -> void:
+	if state in [S.ENTER, S.DEATH, S.DAZED]:
 		return
-	var ticks := int(45.0 * pow(0.5, stuns.size() - 1))
-	if ticks >= 6:
-		rep = 0
-		_go(S.STAGGER)
-		t = 45 - ticks
-		fx.append(["boss_stagger", [pos]])
+	stun_m = minf(stun_m + 1.0, float(STUN_NEED))
+	stun_hold = STUN_HOLD
+	fx.append(["boss_stun_hit", [pos, int(stun_m)]])
+	if stun_m >= STUN_NEED:
+		if state == S.LEAP:
+			daze_pending = true
+		else:
+			_daze()
+
+
+## Down he goes, whatever he was doing (the meter stays full while he's down and empties as he gets up).
+func _daze() -> void:
+	daze_pending = false
+	if state in [S.CHARGE, S.RUSH]:
+		fx.append(["boss_skid", [pos, yaw]])
+	rep = 0
+	plan.clear()
+	orb_plan = 0
+	tree_target = -1
+	pos.y = 0.0
+	_go(S.DAZED)
+	fx.append(["boss_dazed", [pos, yaw]])
+
+
+## A wind-up of `base` ticks: shorter enraged and with two or more, never under MIN_TELL.
+func _wind(base: int) -> int:
+	return maxi(int(base * windup_k()), MIN_TELL)
 
 
 func frosted() -> void:
@@ -332,10 +375,18 @@ func tick(now: int, people: Array, golems: Array) -> void:
 	if state == S.DEATH:
 		done = t > 180
 		return
+	if state != S.DAZED and stun_m > 0.0:   # v0.12.0 the stun meter holds, then drains
+		if stun_hold > 0:
+			stun_hold -= 1
+		else:
+			stun_m = maxf(stun_m - 1.0 / STUN_DRAIN, 0.0)
 	var living := people.filter(func(p): return p[2])
 	_track(living)
-	# the static field: a shock to anyone right next to him, twice a second
-	if now % 30 == 0 and state not in [S.ENTER, S.LEAP]:
+	var n_hits := hits.size()
+	var n_zaps := zaps.size()
+	var n_launch := launches.size()
+	# the static field: a shock to anyone right next to him, twice a second (not while he's dazed)
+	if now % 30 == 0 and state not in [S.ENTER, S.LEAP, S.DAZED]:
 		for p in living:
 			var d := _flat(p[1] - pos)
 			if d.length() < RADIUS + 1.4 and (p[1] as Vector3).y < pos.y + 3.0:
@@ -421,17 +472,18 @@ func tick(now: int, people: Array, golems: Array) -> void:
 		S.CHARGE_WIND:   # head down, a hoof scraping: then he goes
 			if t == 1:
 				via_tree = _tree_on_line(tp)
-			if tp != null and t < int(34 * wk):
+			var cw := _wind(50)   # v0.12.0: never under MIN_TELL; the aim locks 16 ticks before he goes
+			if tp != null and t < cw - 16:
 				_turn_to(via_tree if via_tree != null else tp, 0.14)   # v0.12.0: lined up through a tree when he can
 			if t % 18 == 9:
 				fx.append(["boss_scrape", [pos, yaw]])
-			if t >= int(50 * wk):
+			if t >= cw:
 				charge_dir = Vector2(-sin(yaw), -cos(yaw))
 				charge_hit = {}
 				fx.append(["boss_charge", [pos, yaw]])
 				_go(S.CHARGE)
 		S.CHARGE:
-			_step(charge_dir * GALLOP * speed_k())
+			_step(charge_dir * GALLOP * (1.3 if enraged else 1.0))   # v0.12.0: frost no longer slows a charge
 			for p in living:
 				var d := _flat(p[1] - pos)
 				if (d.length() < RADIUS + 1.4 or _on_spike(d, charge_dir)) and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
@@ -454,11 +506,12 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				if rep > 0:
 					rep -= 1
 					_go(S.CHARGE_WIND)
-					t = int(16 * wk)   # a shorter wind-up for the next one
+					t = _wind(50) - maxi(int(34 * wk), 30)   # a shorter wind-up for the next one (0.5 s at least)
+					fx.append(["boss_charge_wind", [pos, yaw, rep]])
 				else:
 					_after()
 		S.STOMP_WIND:   # he rears up
-			if t >= int(40 * wk):
+			if t >= _wind(48):
 				_slam(9.0, 13)
 				_go(S.STOMP)
 		S.STOMP:
@@ -472,7 +525,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 		S.BEAM_WIND:    # the horns crackle and glow
 			if tp != null:
 				_turn_to(tp, 0.1)
-			if t >= int(45 * wk):
+			if t >= _wind(60):
 				var sweep := deg_to_rad(110.0 if variant == 0 else 150.0)
 				var side := 1.0 if rng.randf() < 0.5 else -1.0
 				beam_from = yaw - side * sweep * 0.5
@@ -489,9 +542,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			if t % 6 == 0:
 				var dir := Vector2(-sin(beam_a), -cos(beam_a))
 				for p in living:
-					var rel := _flat(p[1] - pos)
-					var along := rel.dot(dir)
-					if along > RADIUS and along < 24.0 and absf(rel.cross(dir)) < 1.3 and (p[1] as Vector3).y < 2.6:
+					if beam_hits(pos, beam_a, p[1]):   # v0.12.0: the drawn beam, from the orb to the ground
 						hits.append([p[0], 7 if enraged else 5, Vector3(dir.x, 0, dir.y), 3.0])
 			if t >= length:
 				_after()
@@ -512,7 +563,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			if t >= 60:
 				_after()
 		S.ROAR:
-			if t == 15:
+			if t == ROAR_AT:   # v0.12.0: a longer wind-up (it was 0.25 s)
 				fx.append(["boss_roar", [pos, 1 if enraged else 2]])
 				for p in living:
 					var dd := (p[1] as Vector3).distance_to(pos)
@@ -520,7 +571,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 						slows.append([p[0], 120])
 					if variant > 0 and dd < 13.0:
 						zaps.append([p[0], 0, (p[1] as Vector3) - pos, bool(p[3])])   # the static roar
-			if t >= 60:
+			if t >= ROAR_AT + 45:
 				_after()
 		S.BALLS:
 			if t == 20:
@@ -534,7 +585,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 		S.GORE_WIND:   # the head drops and swings back to one side
 			if tp != null:
 				_turn_to(tp, 0.16)
-			if t >= int(26 * wk):
+			if t >= _wind(32):
 				fx.append(["boss_gore", [pos, yaw]])
 				_go(S.GORE)
 		S.GORE:
@@ -547,7 +598,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			if t >= 24:
 				_after()
 		S.TAIL_WIND:   # the body coils, the tail lifts
-			if t >= int(24 * wk):
+			if t >= _wind(30):
 				fx.append(["boss_tail", [pos, yaw, move_side]])
 				_go(S.TAIL)
 		S.TAIL:
@@ -598,6 +649,8 @@ func tick(now: int, people: Array, golems: Array) -> void:
 						hits.append([p[0], 22, Vector3(d.x, 0, d.y), 12.0])
 				rings.append([RADIUS, {}, Vector3(pos.x, 0, pos.z), WAVE_V, 18, 1, wave_max(pos)])   # v0.12.0: map-wide
 				_go(S.LEAP_LAND)
+				if daze_pending:   # v0.12.0: the meter filled in the air: he lands and drops
+					_daze()
 		S.LEAP_LAND:
 			if t >= 40:
 				orb_total = homing_count(maxi(living.size(), 1))
@@ -652,7 +705,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				fx.append(["boss_rush", [pos, yaw]])
 				_go(S.RUSH)
 		S.RUSH:
-			_step(charge_dir * RUSH_V * (0.6 if slow > 0 else 1.0))
+			_step(charge_dir * RUSH_V)   # v0.12.0: nor the rush (only the stun meter stops them)
 			for p in living:
 				var d := _flat(p[1] - pos)
 				if (d.length() < RADIUS + 1.3 or _on_spike(d, charge_dir)) and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
@@ -706,6 +759,35 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				fx.append(["boss_pant", [pos]])
 			if t >= 70:
 				_end_leap()
+		S.DAZED:   # v0.12.0 stunned by the meter: down, dazed, then struggling up
+			if t >= STUN_TICKS:
+				stun_m = 0.0
+				stun_hold = 0
+				fx.append(["boss_get_up", [pos]])
+				_go(S.IDLE)
+				moved = true
+	_dodging(living, n_hits, n_zaps, n_launch)
+
+
+## v0.12.0: a dash's i-frames cover every one of his hits this tick (the attack already counts them as hit, so the
+## same charge, ring or swing won't catch them a moment later).
+func _dodging(living: Array, n_hits: int, n_zaps: int, n_launch: int) -> void:
+	var dashing := {}
+	for p in living:
+		if _p_dash(p):
+			dashing[int(p[0])] = p[1]
+	if dashing.is_empty():
+		return
+	for i in range(hits.size() - 1, n_hits - 1, -1):
+		if dashing.has(int(hits[i][0])):
+			fx.append(["boss_dodged", [dashing[int(hits[i][0])]]])
+			hits.remove_at(i)
+	for i in range(zaps.size() - 1, n_zaps - 1, -1):
+		if dashing.has(int(zaps[i][0])) and not bool(zaps[i][3]):
+			zaps.remove_at(i)
+	for i in range(launches.size() - 1, n_launch - 1, -1):
+		if dashing.has(int(launches[i][0])):
+			launches.remove_at(i)
 
 
 ## v0.12.0 the arena is his home. After a far leap he works his way back while he fights: in the moments between
@@ -866,6 +948,30 @@ func _want_tree(living: Array) -> bool:
 ## v0.12.0: challengers and corrupted minions caught in a charge or the rush are hurt and thrown like players
 ## (`bystanders`: [[id, pos]] from Net; he never picks them as targets).
 var bystanders: Array = []
+
+
+## v0.12.0 the horn beam's geometry, shared with BossView so the drawn beam IS the hitbox: it comes out of the orb
+## just ahead of the nose spike's tip (BEAM_ORB metres ahead along the beam's heading, BEAM_ORB_Y up) and slants down
+## to the ground BEAM_REACH ahead of his centre; BEAM_R is the radius of its glow. A player (a capsule from 0.4 to
+## 1.4 m up, radius Sim.RADIUS) is hit when it touches that segment. Close in under the orb it passes over your head;
+## near its far end you can jump it; past BEAM_REACH it never reaches.
+const BEAM_ORB := 6.6
+const BEAM_ORB_Y := 3.1
+const BEAM_REACH := 24.0
+const BEAM_R := 0.75
+const ROAR_AT := 36
+
+
+static func beam_ends(at: Vector3, a: float) -> Array:
+	var d := Vector3(-sin(a), 0, -cos(a))
+	var g := Vector3(at.x, 0, at.z)
+	return [g + d * BEAM_ORB + Vector3(0, at.y + BEAM_ORB_Y, 0), g + d * BEAM_REACH + Vector3(0, minf(at.y, 0.0), 0)]
+
+
+static func beam_hits(at: Vector3, a: float, p: Vector3) -> bool:
+	var e := beam_ends(at, a)
+	var g := Geometry3D.get_closest_points_between_segments(e[0], e[1], p + Vector3(0, 0.4, 0), p + Vector3(0, 1.4, 0))
+	return (g[0] as Vector3).distance_to(g[1]) < BEAM_R + Sim.RADIUS
 
 
 ## v0.12.0: is a point (d: flat offset from his centre) on the nose spike, HORN_REACH ahead along `dir`?
@@ -1337,7 +1443,7 @@ func _tick_balls(living: Array) -> void:
 		if near != null:
 			var want := (((near[1] as Vector3) + Vector3(0, 1.1, 0)) - (b[0] as Vector3)).normalized() * 6.5
 			b[1] = (b[1] as Vector3).lerp(want, 0.03)
-			if nd < 1.0:
+			if nd < 1.0 and not _p_dash(near):   # v0.12.0: a dash slips through
 				if b[3]:
 					zaps.append([near[0], 10, b[1], bool(near[3])])
 				else:
@@ -1416,7 +1522,7 @@ func _tick_orbs(living: Array) -> void:
 						o[3] = mini(int(o[3]), 50)
 						zaps.append([p[0], ORB_DMG, -n, true])
 						break
-				elif op.distance_to(at + Vector3(0, 1.0, 0)) < 0.75:
+				elif op.distance_to(at + Vector3(0, 1.0, 0)) < 0.75 and not _p_dash(p):   # v0.12.0: a dash slips through
 					zaps.append([p[0], ORB_DMG, ov, false])
 					fx.append(["boss_orb_pop", [op]])
 					o[3] = 0
@@ -1439,15 +1545,15 @@ func _flat(v: Vector3) -> Vector2:
 
 ## His state, flat, for the network: [state, t, x, y, z, yaw, hp, max hp, status bits, beam angle, rings, balls, orbs,
 ## extra]. Rings: [r, cx, cz, kind]; balls: [pos, static]; orbs: positions as one PackedVector3Array; extra: [leap x,
-## leap z, variant, phase, target, rush target, rep]. Status bits: 1 staggered, 2 slowed, 4 burning, 8 enraged,
-## 16 untouchable (arriving), 32 storm.
+## leap z, variant, phase, target, rush target, rep, leap air ticks, stun meter (v0.12.0, 0..STUN_NEED)]. Status bits:
+## 1 staggered, 2 slowed, 4 burning, 8 enraged, 16 untouchable (arriving), 32 storm, 64 dazed (v0.12.0).
 func pack() -> Array:
 	var flags := (1 if state == S.STAGGER else 0) | (2 if slow > 0 else 0) | (4 if burn > 0 else 0) | (8 if enraged else 0) \
-		| (16 if state == S.ENTER else 0) | (32 if storm else 0)
+		| (16 if state == S.ENTER else 0) | (32 if storm else 0) | (64 if state == S.DAZED else 0)
 	var ov := PackedVector3Array()
 	for o in orbs:
 		ov.append(o[0])
 	return [state, t, pos.x, pos.y, pos.z, yaw, hp, max_hp, flags, beam_a,
 		rings.map(func(r): return [float(r[0]), (r[2] as Vector3).x, (r[2] as Vector3).z, int(r[5])]),
 		balls.map(func(b): return [b[0], b[3]]), ov,
-		[leap_to.x, leap_to.z, variant, phase, target, rush_target, rep, leap_air]]
+		[leap_to.x, leap_to.z, variant, phase, target, rush_target, rep, leap_air, snappedf(stun_m, 0.01)]]
