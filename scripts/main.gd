@@ -409,6 +409,7 @@ func _process(_delta: float) -> void:
 		p.y = maxf(p.y, 0.3)  # don't dip under the ground
 		cam.position = p
 		cam.look_at(focus, Vector3.UP)
+		_chase_cam()
 
 	_update_projectiles(frac)
 	_update_items(_delta)
@@ -829,6 +830,24 @@ func _bot_duel() -> Array:
 ## of the arena, kept on its feet, casting at him now and then; takes him down to half (enraged) and a quarter (the
 ## storm), then beats him -- and pictures the victory and the prize. With --defeat it falls instead: the defeat screen,
 ## then a key, and the restart.
+## v0.12.0 demo (--bot boss --leap --chase): through the Storm Leap the camera follows Thunderhorn from behind and
+## above instead of our player, to watch the whole bound.
+func _chase_cam() -> void:
+	if bot_mode != "boss" or not _args().has("chase") or net.boss == null or boss_view == null or boss_view.root == null:
+		return
+	var b := net.boss
+	if b.state not in [Boss.S.LEAP_WIND, Boss.S.LEAP, Boss.S.LEAP_LAND, Boss.S.HOWL]:
+		return
+	var at: Vector3 = boss_view.root.position
+	var d := Vector3(b.leap_to.x - b.leap_from.x, 0, b.leap_to.z - b.leap_from.z)
+	if b.state == Boss.S.LEAP_WIND:
+		d = Vector3(b.leap_to.x - b.pos.x, 0, b.leap_to.z - b.pos.z)
+	d = d.normalized() if d.length() > 0.1 else Vector3.FORWARD
+	var side := d.cross(Vector3.UP)
+	cam.position = at - d * 20.0 + side * 9.0 + Vector3(0, 7.0, 0)
+	cam.look_at(at + d * 10.0 + Vector3(0, 3.0, 0), Vector3.UP)
+
+
 func _bot_boss() -> Array:
 	bot_t += 1
 	if net.predicted == null or not net.players.has(net.my_id):
@@ -902,9 +921,10 @@ func _bot_boss() -> Array:
 		if bt == 330:
 			boss.last_leap = -100000
 			boss._start_leap([[net.my_id, me, true, false, 100]])
-		if bt % 10 == 0 and bt > 240:
+		var every := int(_args().get("every", 10))   # v0.12.0 demo: --every, --from, --until
+		if bt % every == 0 and bt > int(_args().get("from", 240)):
 			snap.call("leap_%04d_%s" % [bt, Boss.S.keys()[boss.state]])
-		if bt > 1800:
+		if bt > int(_args().get("until", 1800)):
 			get_tree().quit()
 	# his health, scripted: full for 30 s, then half (enraged) for 20 s, then a quarter (the storm) for 20 s, then done
 	var floor_k := 1.0 if bt < 1800 else (0.45 if bt < 3000 else (0.2 if bt < 4200 else 0.0))

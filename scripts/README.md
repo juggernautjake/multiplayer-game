@@ -831,3 +831,18 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   bucks, 5 m) apples near him (`APPLE_CD` 4 s, shorter under pressure). Felled trees topple in EcoView and bear no
   fruit; `Ecology.restore_trees` stands them up again on summoning, victory and restart. Splats fade after ~5 s.
   Tests: boss_test `_tree_tests`.
+- Far Storm Leap (v0.12.0, Jacob: "very far across the map"): `leap_candidates(from)` is now a 5 m grid over the
+  whole 400 x 400 m map, `LEAP_EDGE` (10 m) inside its edge, within `LEAP_MAX_D` (200 m) of the take-off and clear of
+  obstacles; `maximin_spot(points, from)` picks the one furthest from the nearest living player (ties: nearer the
+  arena, then grid order). In practice he bounds ~200 m. `leap_arc(d)`: apex 34 -> 75 m and 2.25 -> 3.4 s in the air
+  as the distance grows to 200 m (`leap_h`, `leap_air`; `leap_air` is sent as the 8th `extra`). The view adds a 120 m
+  gold light pillar over the landing spot and an edge-of-screen arrow with the distance (to the landing spot during the
+  leap, to him while he's far and off screen). Homing orbs launched from far away get enough life to cross the map and
+  cruise at `ORB_FAR_V` (30 m/s) until `ORB_SLOW_R` (30 m) from their target, then the usual dodgeable 15 m/s.
+- Going home: between attacks (idle, walk, strafe, back-off, turn, recover, tree, stagger) he drifts back toward the
+  arena at up to `HOME_DRIFT` (16 m/s, scaled by how far out he is); attacks, targets and trees are chosen as always.
+  With no living player within `HOME_NEAR` (40 m) he gallops home (`S.HOME`). Test: boss_test `_home_tests` (from
+  ~180 m out he's back within ~32 m of the arena centre in 45 s of fighting, with as many attacks as at home).
+- Demo: `--bot boss --leap --chase` follows him with the camera through the leap (`Main._chase_cam`); `--every N`,
+  `--from T`, `--until T` control the leap pictures. Record a video with Godot's movie maker, e.g.
+  `<godot> --path . --write-movie leap.avi --fixed-fps 30 -- --host --port 7793 --give-all --bot boss --leap --chase --every 100000 --until 1000`.

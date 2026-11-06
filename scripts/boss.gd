@@ -76,8 +76,12 @@ const HEAD_Y := 4.7
 const WALK := 6.0
 const GALLOP := 19.0
 const RUSH_V := 24.0
-const LEAP_H := 34.0             # v0.12.0: super high (was 14 m)
-const LEAP_AIR := 135            # 2.25 s in the air (was 1.4 s)
+const LEAP_H := 34.0             # v0.12.0: the apex of the shortest leap (was 14 m); see leap_arc()
+const LEAP_AIR := 135            # ticks in the air of the shortest leap (was 84)
+const LEAP_MAX_D := 200.0        # v0.12.0: he can bound up to 200 m, anywhere on the map
+const LEAP_EDGE := 10.0          # landing candidates keep this far inside the world's edge
+var leap_h := LEAP_H             # this leap's apex and air time (leap_arc of its distance)
+var leap_air := LEAP_AIR
 const LEAP_HP := [0.8, 0.55, 0.3]
 const LEAP_MAX := 5
 const LEAP_GAP := 1500           # ticks between the starts of two sequences
@@ -87,10 +91,12 @@ const ORB_VMAX := 15.0
 const ORB_ACC := 5.0
 const ORB_TURN := 2.8            # rad/s
 const ORB_LIFE := 330
+const ORB_FAR_V := 30.0          # v0.12.0 cruise speed while more than ORB_SLOW_R from the target
+const ORB_SLOW_R := 30.0
 const ORB_DMG := 6
 enum S { ENTER, IDLE, WALK, CHARGE_WIND, CHARGE, STOMP_WIND, STOMP, BEAM_WIND, BEAM, CALL, ROAR, BALLS, STAGGER, DEATH,
 	STRAFE, BACKOFF, HOP, TURN, GORE_WIND, GORE, TAIL_WIND, TAIL, PHASE, LEAP_WIND, LEAP, LEAP_LAND, HOWL, SLAMS, PAW,
-	RUSH, RECOVER, LUNGE, TREE }
+	RUSH, RECOVER, LUNGE, TREE, HOME }
 const SEQ := [S.LEAP_WIND, S.LEAP, S.LEAP_LAND, S.HOWL, S.SLAMS, S.PAW, S.RUSH, S.RECOVER]
 const MOVES := [S.STRAFE, S.BACKOFF, S.HOP, S.TURN, S.LUNGE]
 
@@ -328,6 +334,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 	var tp = _target_pos(living, golems)
 	var wk := windup_k()
 	_trees_and_apples(living)
+	_drift_home(living)
 	match state:
 		S.ENTER:
 			if t >= 150:
@@ -560,13 +567,13 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				var dl := _flat(leap_to - pos)
 				if dl.length() > 0.1:
 					yaw = atan2(-dl.x, -dl.y)
-				fx.append(["boss_leap", [pos, leap_to, LEAP_AIR]])
+				fx.append(["boss_leap", [pos, leap_to, leap_air]])
 				_go(S.LEAP)
 		S.LEAP:
-			var u := clampf(float(t) / LEAP_AIR, 0.0, 1.0)
+			var u := clampf(float(t) / leap_air, 0.0, 1.0)
 			pos = leap_from.lerp(leap_to, u)
-			pos.y = 4.0 * LEAP_H * u * (1.0 - u)
-			if t >= LEAP_AIR:
+			pos.y = 4.0 * leap_h * u * (1.0 - u)
+			if t >= leap_air:
 				pos = leap_to
 				fx.append(["boss_leap_land", [pos]])
 				for p in living:   # right under him
@@ -649,6 +656,14 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			if t >= 70 or (t > 20 and past) or _flat(pos - arena_c()).length() > WorldLayout.ARENA_R + 7.0:
 				fx.append(["boss_skid", [pos, yaw]])
 				_go(S.RECOVER)
+		S.HOME:   # v0.12.0: nobody near him, far from home: he gallops back to the arena
+			var hd := _flat(arena_c() - pos)
+			_turn_to(arena_c(), 0.1)
+			_step(hd.normalized() * GALLOP * 0.75 * speed_k())
+			if t % 24 == 0:
+				fx.append(["boss_hoof", [pos, true]])
+			if hd.length() < WorldLayout.ARENA_R * 0.6 or _nearest_living(living) < HOME_NEAR * 0.75:
+				_after_move()
 		S.TREE:   # v0.12.0: he goes for a tree, lowers his horns and splinters it
 			if tree_target < 0 or not _tree_alive(tree_target) or t > 360:
 				tree_target = -1
@@ -675,6 +690,33 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				fx.append(["boss_pant", [pos]])
 			if t >= 70:
 				_end_leap()
+
+
+## v0.12.0 the arena is his home. After a far leap he works his way back while he fights: in the moments between
+## attacks (idle, walking, strafing, backing off, turning, recovering) he drifts homeward, faster the further he is
+## (up to HOME_DRIFT m/s); his attacks, targets and trees are chosen as always. With nobody within HOME_NEAR (40 m)
+## he gallops home outright (S.HOME). No leash, no teleport; he walks through pillars and trunks, so nothing traps him.
+const HOME_NEAR := 40.0
+const HOME_DRIFT := 16.0
+
+
+func _far_from_home() -> float:
+	return maxf(_flat(pos - arena_c()).length() - WorldLayout.ARENA_R, 0.0)
+
+
+func _nearest_living(living: Array) -> float:
+	var m := INF
+	for p in living:
+		m = minf(m, _flat((p[1] as Vector3) - pos).length())
+	return m
+
+
+func _drift_home(_living: Array) -> void:
+	var far := _far_from_home()
+	if far <= 0.0 or state not in [S.IDLE, S.WALK, S.STRAFE, S.BACKOFF, S.TURN, S.RECOVER, S.TREE, S.STAGGER]:
+		return
+	var hd := _flat(arena_c() - pos).normalized()
+	_step(hd * HOME_DRIFT * clampf(far / 30.0, 0.35, 1.0))
 
 
 ## v0.12.0 Thunderhorn knows apples heal. Net fills `trees` ([tree index, position] of the standing trees round the
@@ -865,6 +907,9 @@ func _choose(living: Array, golems: Array) -> void:
 		_start_leap(living)
 		return
 	if _want_tree(living):
+		return
+	if _far_from_home() > 0.0 and _nearest_living(living) > HOME_NEAR:
+		_go(S.HOME)
 		return
 	if not plan.is_empty():
 		_retarget(living, golems)
@@ -1064,31 +1109,35 @@ func _start_leap(living: Array) -> void:
 	plan.clear()
 	rep = 0
 	leap_to = _leap_spot(living)
+	var arc := leap_arc(_flat(leap_to - pos).length())
+	leap_h = arc[0]
+	leap_air = int(arc[1])
 	_go(S.LEAP_WIND)
-	fx.append(["boss_leap_wind", [pos, leap_to, 90 + LEAP_AIR]])
+	fx.append(["boss_leap_wind", [pos, leap_to, 90 + leap_air]])
 
 
-## Where he lands (v0.12.0): the point of the arena furthest from every living player. Candidates are a grid
-## (`LEAP_GRID` m) over the arena's disc less `LEAP_MARGIN`, minus anything within `RADIUS + 1` of a pillar or trunk
-## (`WorldLayout.boxes()`); each scores its distance to the NEAREST living player, and the highest score wins
-## (maximin). Ties (within 1 cm) go to the candidate nearer the arena's centre, then the first in grid order, so it is
-## deterministic. With nobody alive: the centre.
-const LEAP_GRID := 1.5
-const LEAP_MARGIN := 3.0
+## Where he lands (v0.12.0, Jacob: "very far across the map"): the point of the whole map furthest from every living
+## player, no more than LEAP_MAX_D (200 m) from where he takes off. Candidates are a LEAP_GRID (5 m) grid over the
+## world (400 x 400 m) kept LEAP_EDGE inside its edge and within 200 m of the take-off, minus anything within
+## RADIUS + 1 m of an obstacle (`WorldLayout.boxes()`: pillars, trunks, the tower, the vault, the altar, the stone).
+## Each scores its distance to the NEAREST living player; the highest wins (maximin). Ties within 1 cm go to the one
+## nearer the arena's centre, then grid order: deterministic on the server. With nobody alive: the arena's centre.
+const LEAP_GRID := 5.0
+const LEAP_MARGIN := 3.0   # (kept for the arena's own spots)
 
 
-static func leap_candidates() -> Array:
-	var c := arena_c()
-	var r := WorldLayout.ARENA_R - LEAP_MARGIN
+static func leap_candidates(from: Vector3) -> Array:
+	var lim := Config.WORLD_HALF - LEAP_EDGE
 	var out := []
-	var n := int(r / LEAP_GRID)
+	var n := int(lim / LEAP_GRID)
+	var boxes := WorldLayout.boxes()
 	for i in range(-n, n + 1):
 		for j in range(-n, n + 1):
-			var q := c + Vector3(i * LEAP_GRID, 0, j * LEAP_GRID)
-			if Vector2(q.x - c.x, q.z - c.z).length() > r:
+			var q := Vector3(i * LEAP_GRID, 0, j * LEAP_GRID)
+			if Vector2(q.x - from.x, q.z - from.z).length() > LEAP_MAX_D:
 				continue
 			var blocked := false
-			for b: WorldLayout.Box in WorldLayout.boxes():
+			for b: WorldLayout.Box in boxes:
 				var nx := clampf(q.x, b.cx - b.hx, b.cx + b.hx)
 				var nz := clampf(q.z, b.cz - b.hz, b.cz + b.hz)
 				if Vector2(q.x - nx, q.z - nz).length() < RADIUS + 1.0:
@@ -1107,14 +1156,14 @@ static func min_dist(q: Vector3, pts: Array) -> float:
 	return m
 
 
-static func maximin_spot(pts: Array) -> Vector3:
+static func maximin_spot(pts: Array, from: Vector3) -> Vector3:
 	var c := arena_c()
 	if pts.is_empty():
 		return c
 	var best := c
 	var best_s := -INF
 	var best_c := INF
-	for q: Vector3 in leap_candidates():
+	for q: Vector3 in leap_candidates(from):
 		var s := min_dist(q, pts)
 		var dc := Vector2(q.x - c.x, q.z - c.z).length()
 		if s > best_s + 0.01 or (absf(s - best_s) <= 0.01 and dc < best_c):
@@ -1124,11 +1173,18 @@ static func maximin_spot(pts: Array) -> Vector3:
 	return best
 
 
+## The arc for a leap of d metres: [apex (m), ticks in the air]. 34 m / 2.25 s for a short one, growing to
+## 75 m / 3.4 s for a 200 m bound.
+static func leap_arc(d: float) -> Array:
+	var k := clampf((d - 20.0) / (LEAP_MAX_D - 20.0), 0.0, 1.0)
+	return [lerpf(LEAP_H, 75.0, k), int(lerpf(LEAP_AIR, 205.0, k))]
+
+
 func _leap_spot(living: Array) -> Vector3:
 	var pts := []
 	for p in living:
 		pts.append(p[1] as Vector3)
-	return maximin_spot(pts)
+	return maximin_spot(pts, Vector3(pos.x, 0, pos.z))
 
 
 # ================================================================ targeting
@@ -1277,7 +1333,9 @@ func _launch_orb(living: Array, i: int) -> void:
 	var a := rng.randf() * TAU
 	var from := pos + Vector3(rng.randf_range(-1.5, 1.5), HEIGHT - 0.8, rng.randf_range(-1.5, 1.5))
 	var v := Vector3(cos(a) * 3.0, 7.0, sin(a) * 3.0)
-	orbs.append([from, v, int(p[0]), ORB_LIFE, 0, false])
+	# v0.12.0 after a far leap: enough life to cross the distance (at the far cruise speed), never less than before
+	var far := _flat((p[1] as Vector3) - pos).length()
+	orbs.append([from, v, int(p[0]), maxi(ORB_LIFE, int(far / ORB_FAR_V * 60.0) + 240), 0, false])
 	orb_sent[int(p[0])] = int(orb_sent.get(int(p[0]), 0)) + 1
 
 
@@ -1302,7 +1360,10 @@ func _tick_orbs(living: Array) -> void:
 						nd = dd
 						tgt = p
 				o[2] = int(tgt[0])
-			var sp := minf(ORB_V0 + ORB_ACC * float(o[4]) * Config.DT, ORB_VMAX)
+			# v0.12.0: far from its target (after a far leap) it cruises faster, then slows to the usual dodgeable
+			# top speed for the last ORB_SLOW_R metres
+			var top := ORB_FAR_V if tgt != null and (tgt[1] as Vector3).distance_to(op) > ORB_SLOW_R else ORB_VMAX
+			var sp := minf(ORB_V0 + ORB_ACC * float(o[4]) * Config.DT * (3.0 if top > ORB_VMAX else 1.0), top)
 			if int(o[4]) <= 24 or tgt == null:   # launching: up and out, slowing
 				ov = ov * 0.96 + Vector3(0, -0.15, 0)
 			else:
@@ -1368,4 +1429,4 @@ func pack() -> Array:
 	return [state, t, pos.x, pos.y, pos.z, yaw, hp, max_hp, flags, beam_a,
 		rings.map(func(r): return [float(r[0]), (r[2] as Vector3).x, (r[2] as Vector3).z, int(r[5])]),
 		balls.map(func(b): return [b[0], b[3]]), ov,
-		[leap_to.x, leap_to.z, variant, phase, target, rush_target, rep]]
+		[leap_to.x, leap_to.z, variant, phase, target, rush_target, rep, leap_air]]

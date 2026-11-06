@@ -243,6 +243,7 @@ func _initialize() -> void:
 	_throw_tests()
 	_maximin_tests()
 	_tree_tests()
+	_home_tests()
 	print("%d failed" % bad)
 	quit(bad)
 
@@ -307,27 +308,34 @@ func _throw_tests() -> void:
 		check(thrown_p and thrown_n, "%s: the player and a challenger in his path are both thrown" % ("the charge" if st == Boss.S.CHARGE else "the rush"))
 
 
-## v0.12.0: the Storm Leap lands at the point furthest from every living player (maximin over the grid).
+## v0.12.0: the Storm Leap lands at the point of the whole map furthest from every living player (maximin over the
+## grid), within 200 m of his take-off; the arc grows with the distance.
 func _maximin_tests() -> void:
 	var c := Boss.arena_c()
-	var cands := Boss.leap_candidates()
-	check(cands.size() > 100, "a grid of landing candidates over the arena (%d)" % cands.size())
+	var cands := Boss.leap_candidates(c)
+	check(cands.size() > 1000, "a grid of landing candidates over the whole map (%d)" % cands.size())
 	var cases := [[c], [c + Vector3(8, 0, 3)], [c + Vector3(-12, 0, -10)], [c + Vector3(5, 0, 0), c + Vector3(-5, 0, 0)],
-		[c + Vector3(0, 0, 14), c + Vector3(10, 0, -10)], [c + Vector3(-15, 0, 2), c + Vector3(15, 0, 2)]]
+		[c + Vector3(0, 0, 14), c + Vector3(10, 0, -10)], [c + Vector3(-60, 0, 2), c + Vector3(80, 0, 40)]]
 	var all_ok := true
 	var inside := true
+	var far := true
 	for pts in cases:
-		var q := Boss.maximin_spot(pts)
+		var q := Boss.maximin_spot(pts, c)
 		var m := Boss.min_dist(q, pts)
 		for o in cands:
 			if Boss.min_dist(o, pts) > m + 0.011:
 				all_ok = false
-		inside = inside and Vector2(q.x - c.x, q.z - c.z).length() <= WorldLayout.ARENA_R - Boss.LEAP_MARGIN + 0.01
-		print("players %s -> lands %s, %.1f m from the nearest" % [str(pts.map(func(p): return Vector2(snappedf(p.x - c.x, 0.1), snappedf(p.z - c.z, 0.1)))), str(Vector2(q.x - c.x, q.z - c.z)), m])
-	check(all_ok, "with 1 and 2 players anywhere, no candidate is further from the nearest player than his pick")
-	check(inside, "and the pick is always inside the arena, short of the edge")
-	check(Boss.maximin_spot([c]) == Boss.maximin_spot([c]), "the same answer every time (deterministic)")
-	check(Boss.LEAP_H >= 30.0 and Boss.LEAP_AIR * Config.DT >= 2.0, "he leaps super high (%d m, %.1f s in the air)" % [int(Boss.LEAP_H), Boss.LEAP_AIR * Config.DT])
+		var lim := Config.WORLD_HALF - Boss.LEAP_EDGE + 0.01
+		inside = inside and absf(q.x) <= lim and absf(q.z) <= lim and Vector2(q.x - c.x, q.z - c.z).length() <= Boss.LEAP_MAX_D + 0.01
+		far = far and Vector2(q.x - c.x, q.z - c.z).length() > 100.0
+		var arc := Boss.leap_arc(Vector2(q.x - c.x, q.z - c.z).length())
+		print("players %s -> lands %s (%.0f m away), %.0f m from the nearest player; apex %.0f m, %.1f s" % [str(pts.map(func(p): return Vector2(snappedf(p.x, 0.1), snappedf(p.z, 0.1)))), str(Vector2(q.x, q.z)), Vector2(q.x - c.x, q.z - c.z).length(), m, arc[0], int(arc[1]) / 60.0])
+	check(all_ok, "with 1 and 2 players anywhere, no candidate on the map is further from the nearest player than his pick")
+	check(inside, "the pick is always on the map, inside the edge, and within %d m of the take-off" % int(Boss.LEAP_MAX_D))
+	check(far, "and it really is far: over 100 m every time")
+	check(Boss.maximin_spot([c], c) == Boss.maximin_spot([c], c), "the same answer every time (deterministic)")
+	var big := Boss.leap_arc(200.0)
+	check(float(big[0]) >= 60.0 and int(big[1]) * Config.DT >= 3.0, "a 200 m bound is enormous (%d m up, %.1f s in the air)" % [int(big[0]), int(big[1]) * Config.DT])
 
 
 ## v0.12.0: he knows apples heal: fells trees now and then (more when they're low), charges through trees, tramples
@@ -399,6 +407,50 @@ func _tree_tests() -> void:
 		b3.splats.clear(); b3.fx.clear(); b3.hits.clear()
 	check(stomped, "an apple near him gets stomped to mush")
 	check(b3.apple_cd > 0, "then a cooldown before the next stomp")
+
+
+## v0.12.0: after a far leap he works his way home while still fighting a player who keeps near him.
+func _attacks_in(b: Boss, ticks: int, follow: bool) -> Array:
+	var attacks := 0
+	var was := -1
+	var start := Vector2(b.pos.x, b.pos.z).distance_to(Vector2(Boss.arena_c().x, Boss.arena_c().z))
+	var me := b.pos + Vector3(0, 0, 12)
+	for k in ticks:
+		if follow:
+			var off := me - b.pos
+			if Vector2(off.x, off.z).length() > 14.0:
+				me = b.pos + Vector3(off.x, 0, off.z).normalized() * 12.0
+		b.tick(k, [[1, me, true, false, 100]], [])
+		if b.state != was and Boss.S.keys()[b.state].ends_with("WIND"):
+			attacks += 1
+		was = b.state
+		b.hp = b.max_hp
+		b.hits.clear(); b.fx.clear(); b.zaps.clear(); b.launches.clear(); b.strikes.clear(); b.slows.clear(); b.felled.clear(); b.splats.clear()
+		b.last_leap = k   # no new leaps during this test
+	var end := Vector2(b.pos.x, b.pos.z).distance_to(Vector2(Boss.arena_c().x, Boss.arena_c().z))
+	return [start, end, attacks]
+
+
+func _home_tests() -> void:
+	var c := Boss.arena_c()
+	var home := Boss.new(c, 1, 9)
+	home.state = Boss.S.IDLE
+	var base := _attacks_in(home, 45 * 60, false)
+	var away := Boss.new(c + Vector3(-140, 0, -120), 1, 9)
+	away.state = Boss.S.IDLE
+	var back := _attacks_in(away, 45 * 60, true)
+	print("from %.0f m out: %.0f m from the arena after 45 s; %d attacks (%d in the arena)" % [back[0], back[1], back[2], base[2]])
+	check(back[1] < WorldLayout.ARENA_R + 15.0, "after a far leap he is back near the arena within 45 s of fighting (%.0f m)" % back[1])
+	check(back[2] >= base[2] * 0.7, "and keeps attacking on the way (%d vs %d attacks)" % [back[2], base[2]])
+	var lone := Boss.new(c + Vector3(150, 0, -100), 1, 9)
+	lone.state = Boss.S.IDLE
+	var went_home := false
+	for k in 30 * 60:
+		lone.tick(k, [[1, c + Vector3(0, 0, 5), true, false, 100]], [])
+		went_home = went_home or lone.state == Boss.S.HOME
+		lone.hits.clear(); lone.fx.clear(); lone.zaps.clear(); lone.launches.clear(); lone.strikes.clear(); lone.slows.clear()
+		lone.last_leap = k
+	check(went_home and Vector2(lone.pos.x - c.x, lone.pos.z - c.z).length() < WorldLayout.ARENA_R + 10.0, "with nobody near him he gallops home")
 
 
 ## Ten orbs at one player: standing still, or sprinting in a circle and dashing now and then. -> hits.
