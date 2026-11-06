@@ -40,8 +40,12 @@ const DATA := [
 	# magic: hold attack to cast the selected spell (R picks the spell) if you have the mana. cast: the whole casting
 	# move in ticks; windup: ticks until the spell goes off; cooldown: extra ticks before the next cast; cost: mana.
 	{ "kind": "magic", "slow": 0.5, "uses": "mana", "spells": [   # the wizard's staff, on top of the tower: uses mana
+		# v0.8.2: everyone inside the strike takes the full damage (no falloff); then it chains: from each one hit to
+		# the nearest enemy not yet hit within chain_range (body to body), half the damage each jump, every chain_every
+		# ticks, at most chain_max jumps, stopping when the damage would fall below 2; a shield soaks a jump and ends it
 		{ "name": "Lightning", "cost": 34, "windup": 16, "cast": 34, "cooldown": 30, "range": 40.0,
-		  "radius": 3.0, "max_damage": 28, "min_damage": 8, "knock": 5.0, "delay": 24 },
+		  "radius": 3.0, "max_damage": 28, "min_damage": 8, "knock": 5.0, "delay": 24, "falloff": false,
+		  "chain_range": 6.0, "chain_max": 5, "chain_every": 5 },
 		{ "name": "Fireball", "cost": 22, "windup": 12, "cast": 28, "cooldown": 12, "speed": 26.0, "gravity": 3.0,
 		  "radius": 3.4, "max_damage": 24, "min_damage": 6, "knock": 6.5 },
 		# held: up while the button is held down (Jacob 2026-11-04); raising it costs a little mana, then none, but
@@ -141,6 +145,8 @@ static func area_damage(sp: Dictionary, dist: float) -> int:
 	var r := float(sp.radius)
 	if dist > r:
 		return 0
+	if not bool(sp.get("falloff", true)):   # lightning: the full damage anywhere inside the strike
+		return int(sp.max_damage)
 	return int(round(lerpf(float(sp.max_damage), float(sp.min_damage), clampf(dist / r, 0.0, 1.0))))
 
 

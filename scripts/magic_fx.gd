@@ -112,6 +112,8 @@ func _on_fx(kind: String, a: Array) -> void:
 			_warn_ring(a[0], float(a[1]) * Config.DT)
 		"lightning":
 			_bolt(a[0])
+		"chain":
+			_chain(a[0], a[1], float(a[2]) / maxf(float(a[3]), 1.0))
 		"explode":
 			_explosion(a[0], float(a[1]))
 		"cast":
@@ -1520,4 +1522,35 @@ func _cracks(at: Vector3, r: float, n: int) -> void:
 	tw.tween_interval(3.0)
 	tw.tween_property(m, "albedo_color:a", 0.0, 1.5)
 	tw.tween_callback(mi.queue_free)
+
+
+## Chain lightning (v0.8.2): a jagged arc leaping from one target to the next, thinner and dimmer as the damage
+## halves (k: this jump's share of the strike's damage), crackling twice; sparks, a small flash and a crackle on the
+## one it lands on.
+func _chain(a: Vector3, b: Vector3, k: float) -> void:
+	k = clampf(k, 0.1, 1.0)
+	var mid := (a + b) * 0.5 + Vector3(0, a.distance_to(b) * 0.15, 0)
+	var path := _fractal(a, mid, 3, 0.22)
+	path.append_array(_fractal(mid, b, 3, 0.22).slice(1))
+	var glow := _ribbons([[path, 0.3 * k + 0.06]], Color("6f9cff"), 2.0)
+	var core := _ribbons([[path, 0.08 * k + 0.025]], Color("eef4ff"), 4.0 + 6.0 * k)
+	for mi: MeshInstance3D in [glow, core]:
+		var m: StandardMaterial3D = mi.material_override
+		m.albedo_color.a = (0.5 if mi == glow else 1.0) * (0.45 + 0.55 * k)
+		var tw := mi.create_tween()
+		tw.tween_property(m, "albedo_color:a", 0.1, 0.04)
+		tw.tween_property(m, "albedo_color:a", (0.5 if mi == glow else 1.0) * (0.45 + 0.55 * k), 0.03)
+		tw.tween_property(m, "albedo_color:a", 0.0, 0.18)
+		tw.tween_callback(mi.queue_free)
+	Fx.burst(main, b, Vector3.UP, Color("e8f6ff"), int(8 + 14 * k), 3.0 + 4.0 * k, 0.035)
+	_flash_light(b, Color("cfe4ff"), 2.0 + 3.0 * k, 3.0 + 3.0 * k, 0.15)
+	var crackle := []   # little arcs round the one it hit
+	for i in 3:
+		var c0 := b + Vector3(randf_range(-0.35, 0.35), randf_range(-0.7, 0.5), randf_range(-0.35, 0.35))
+		crackle.append([_fractal(c0, c0 + Vector3(randf_range(-0.4, 0.4), randf_range(-0.4, 0.4), randf_range(-0.4, 0.4)), 2, 0.35), 0.025])
+	var cr := _ribbons(crackle, Color("d8e8ff"), 6.0)
+	var ctw := cr.create_tween()
+	ctw.tween_property(cr.material_override, "albedo_color:a", 0.0, 0.2)
+	ctw.tween_callback(cr.queue_free)
+	_shake_near_scaled(b, 0.06 + 0.1 * k)
 

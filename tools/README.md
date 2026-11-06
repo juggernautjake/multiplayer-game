@@ -245,6 +245,19 @@ then shattering and letting the rest through; kills levelling the staff and wand
 area; a meteor and its burning ground; a gravity well dragging someone in and bursting; an arcane storm's bolts; your
 own blasts never hurting you; the staff being one of a kind.
 
+## make_costumes.py
+
+`python tools/make_costumes.py` (also run by make_garb_sheets.py): paints Pip's seven costumes over both sheets frame
+by frame (`assets/pip/garb/<sheet>-<look>.png`) and their accent sheets (`-accent.png`: only the accent pixels, as
+grey shades, tinted with the player's colour in the game). Each frame is read for his head, torso, legs, boots, arms
+and hands, then garments are painted over those regions in 3-4 tone ramps lit from the upper left, with his dark
+outline on every new edge. Looks: brawler, knight, barbarian, ranger, scout, wizard, shadow (the hooded robe).
+
+## carry_sheet.py
+
+`python tools/carry_sheet.py <folder>`: contact sheets of Pip carrying each weapon in all 8 directions (idle, walk,
+run, dash, air), placed by the same rules as the game. For checking the carried weapons by eye.
+
 ## make_garb_sheets.py
 
 `python tools/make_garb_sheets.py`: paints the wizard garb onto Pip's sheets frame by frame (`assets/pip/garb/`:

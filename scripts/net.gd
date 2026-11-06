@@ -1387,8 +1387,10 @@ func _ray_cyl(o: Vector3, d: Vector3, c: Vector3, r: float, h: float) -> float:
 
 ## Area damage round a point (lightning, a fireball's blast): the closer to the centre, the harder it hits (full
 ## damage at the centre down to the spell's minimum at its edge), and the further it throws. Shields soak it.
-func _blast(center: Vector3, sp: Dictionary, owner: int, src := Weapons.STAFF) -> void:
+## -> the enemies it struck (ids as _damage takes them: players, -(dummy + 1), -1000 - golem), for chain lightning.
+func _blast(center: Vector3, sp: Dictionary, owner: int, src := Weapons.STAFF) -> Array:
 	dmg_src = src
+	var hit := []
 	var r := float(sp.radius)
 	for q: ServerPlayer in players.values():
 		if q.state.dead > 0 or q.id == owner:
@@ -1398,16 +1400,21 @@ func _blast(center: Vector3, sp: Dictionary, owner: int, src := Weapons.STAFF) -
 		var dmg := Weapons.area_damage(sp, d)
 		if dmg > 0:
 			var dir := body - center
+			if can_hurt(owner, q.id):
+				hit.append(q.id)
 			_damage(q.id, dmg, owner, Vector3(dir.x, 0, dir.z), float(sp.knock) * (1.0 - 0.5 * d / r))
 	for i in WorldLayout.DUMMIES.size():
 		var d := _dist_to_body(center, WorldLayout.DUMMIES[i])
 		var dmg := Weapons.area_damage(sp, d)
 		if dmg > 0:
+			hit.append(-(i + 1))
 			_damage(-(i + 1), dmg, owner, WorldLayout.DUMMIES[i] - center, 0.0)
 	for g: Golems.G in golems.list.values().duplicate():
 		var d := _dist_to_body(center, g.pos)
 		var dmg := Weapons.area_damage(sp, d)
 		if dmg > 0:
+			if g.owner != owner:
+				hit.append(-1000 - g.id)
 			_damage(-1000 - g.id, dmg, owner, g.pos - center, 0.0)
 	if ecology:
 		for i in WorldLayout.TREES.size():
@@ -1416,6 +1423,73 @@ func _blast(center: Vector3, sp: Dictionary, owner: int, src := Weapons.STAFF) -
 				ecology.hit_tree(i, Weapons.area_damage(sp, 0.0), server_tick, tp - center)
 		ecology.blast_fruit(center, r, server_tick)
 	dmg_src = -1
+	return hit
+
+
+## Chain lightning (v0.8.2): one jump. e = [tick, "chain", where, caster, from (the one it's jumping from), the damage
+## it hit them with, everyone hit by this cast, jumps so far]. It jumps to the nearest enemy of the caster not yet hit,
+## within chain_range of `from` (body to body), for half the damage; a shield soaks it and the branch ends there.
+func _chain_jump(e: Array, owner: int) -> void:
+	var sp := Weapons.spell(Weapons.STAFF, 0)
+	var from = _target_feet(int(e[4]))
+	var dmg := maxi(int(round(float(e[5]) / 2.0)), 1)
+	var jumps := int(e[7]) + 1
+	if from == null or dmg < 2 or jumps > int(sp.chain_max):
+		return
+	var seen: Dictionary = e[6]
+	var best := 0
+	var best_d := float(sp.chain_range)
+	for t in _chain_candidates(e[3]):
+		if seen.has(t):
+			continue
+		var at = _target_feet(t)
+		if at == null:
+			continue
+		var d := (at as Vector3).distance_to(from)
+		if d < best_d:
+			best_d = d
+			best = t
+	if best == 0:
+		return
+	seen[best] = true
+	var to: Vector3 = _target_feet(best)
+	var shielded := _shield_up(best)
+	_fx("chain", [from + Vector3(0, 1.1, 0), to + Vector3(0, 1.1, 0), dmg, int(sp.max_damage)])
+	dmg_src = Weapons.STAFF
+	_damage(best, dmg, owner, to - from, 2.0)
+	dmg_src = -1
+	if not shielded:
+		pending_spells.append([server_tick + int(sp.chain_every), "chain", to, e[3], best, dmg, seen, jumps])
+
+
+## Who chain lightning may jump to: the same rules as everything else: players the caster may hurt (PvP), other
+## summoners' golems and titans, practice dummies; never the caster or their own golems.
+func _chain_candidates(caster: int) -> Array:
+	var out := []
+	for q: ServerPlayer in players.values():
+		if q.id != caster and q.state.dead == 0 and can_hurt(caster, q.id):
+			out.append(q.id)
+	for g: Golems.G in golems.list.values():
+		if g.owner != caster and g.state != Golems.State.DIE:
+			out.append(-1000 - g.id)
+	for i in WorldLayout.DUMMIES.size():
+		out.append(-(i + 1))
+	return out
+
+
+func _target_feet(t: int):
+	if t > 0:
+		return players[t].state.pos if players.has(t) and players[t].state.dead == 0 else null
+	if t <= -1000:
+		var g = golems.list.get(-1000 - t, null)
+		return g.pos if g != null and g.state != Golems.State.DIE else null
+	if -t - 1 < WorldLayout.DUMMIES.size():
+		return WorldLayout.DUMMIES[-t - 1]
+	return null
+
+
+func _shield_up(t: int) -> bool:
+	return t > 0 and players.has(t) and players[t].state.shield > 0
 
 
 ## Distance from a point to a standing body (an upright segment from its feet to 1.8 m up).
@@ -1432,7 +1506,16 @@ func _server_spells() -> void:
 			match str(e[1]):
 				"lightning":
 					_fx("lightning", [e[2]])
-					_blast(e[2], Weapons.spell(Weapons.STAFF, 0), owner, Weapons.STAFF)
+					var lsp := Weapons.spell(Weapons.STAFF, 0)
+					var struck := _blast(e[2], lsp, owner, Weapons.STAFF)
+					var seen := {}   # everyone hit by this cast (each at most once)
+					for t in struck:
+						seen[t] = true
+					for t in struck:   # each one struck starts a chain at half the damage
+						if not _shield_up(t):
+							pending_spells.append([server_tick + int(lsp.chain_every), "chain", e[2], e[3], t, int(lsp.max_damage), seen, 0])
+				"chain":
+					_chain_jump(e, owner)
 				"spike":
 					_fx("spike", [e[2]])
 					_blast(e[2], Weapons.spell(Weapons.WAND, 3), owner, Weapons.WAND)

@@ -19,7 +19,13 @@
 class_name WizardGarb
 extends Node3D
 
-enum Kind { NONE, WIZARD, SHADOW, BOTH }
+enum Kind { NONE, WIZARD, SHADOW, BOTH, BRAWLER, KNIGHT, BARBARIAN, RANGER, SCOUT }
+## v0.9.0: every weapon has its own costume, worn while it's the one in your hand (synced: the equipped weapon is in
+## every snapshot, so everyone sees the same). LOOK names Pip's costume sheets (tools/make_costumes.py).
+const COSTUME := { Weapons.FISTS: Kind.BRAWLER, Weapons.SWORD: Kind.KNIGHT, Weapons.CLUB: Kind.BARBARIAN,
+	Weapons.BOW: Kind.RANGER, Weapons.SLING: Kind.SCOUT, Weapons.STAFF: Kind.WIZARD, Weapons.WAND: Kind.SHADOW }
+const LOOK := { Kind.BRAWLER: "brawler", Kind.KNIGHT: "knight", Kind.BARBARIAN: "barbarian", Kind.RANGER: "ranger",
+	Kind.SCOUT: "scout", Kind.WIZARD: "wizard", Kind.SHADOW: "shadow", Kind.BOTH: "wizard" }
 
 const GREY := Color("6d6f73")
 const GREY_CLOAK := Color("5c5f63")
@@ -34,19 +40,11 @@ const HAT_N := 6
 const TAIL_N := 3
 
 
-## Which garb this player wears, from what they carry.
+## Which costume this player wears: the one for the weapon in their hand.
 static func kind_for(st: Sim.PlayerState) -> int:
 	if st == null:
 		return Kind.NONE
-	var staff := (st.owned >> Weapons.STAFF) & 1 == 1
-	var wand := (st.owned >> Weapons.WAND) & 1 == 1
-	if staff and wand:
-		return Kind.BOTH
-	if staff:
-		return Kind.WIZARD
-	if wand:
-		return Kind.SHADOW
-	return Kind.NONE
+	return COSTUME.get(st.weapon, Kind.BRAWLER)
 
 
 ## The robe's colour for a kind (the figure recolours its tunic, sleeves and trousers to match).
@@ -122,11 +120,18 @@ func set_kind(k: int) -> void:
 	_have_tail = false
 	_hat_built_for = -1.0
 	_hood_built_for = -1.0
+	_sheets = {}
+	_chains = {}
+	_satchel = null
 	if k == Kind.NONE:
 		return
-	_robe_mesh = _cloth_node()
-	if wizard(k):
+	if k in [Kind.WIZARD, Kind.BOTH, Kind.SHADOW, Kind.BARBARIAN]:
+		_robe_mesh = _cloth_node()   # the robe, or the barbarian's kilt
+	if wizard(k) or k == Kind.RANGER:
 		_cloak_mesh = _cloth_node()
+	if k == Kind.KNIGHT:
+		for id in ["tabard_front", "tabard_back"]:
+			_sheets[id] = { "mesh": _cloth_node(), "have": false }
 
 
 func _cloth_node() -> ImmediateMesh:
@@ -166,13 +171,32 @@ func update(delta: float, f: Dictionary) -> void:
 		_have_tail = false
 		return
 	var dt := clampf(delta, 0.001, 1.0 / 30.0)
-	_robe(f, dt)
-	if wizard(kind):
-		_cloak(f, dt)
-		_hat(f, dt)
-		_rope(f)
-	else:
-		_hood_up(f, dt)
+	match kind:
+		Kind.WIZARD, Kind.BOTH:
+			_robe(f, dt)
+			_cloak(f, dt)
+			_hat(f, dt)
+			_rope(f)
+		Kind.SHADOW:
+			_robe(f, dt)
+			_hood_up(f, dt)
+		Kind.BARBARIAN:   # the hide kilt: the robe's cloth from the waist to the knees
+			_robe(f, dt)
+		Kind.RANGER:
+			_cloak(f, dt)
+		Kind.KNIGHT:      # the tabard: a panel hanging in front and one behind, to the knees
+			for id in ["tabard_front", "tabard_back"]:
+				var pins: Array = f[id]
+				_sheet(id, pins[0], pins[1], float(f.tabard_len), f, dt, f.accent)
+		Kind.BRAWLER:     # the sash's ends and the headband's tails
+			_chain("sash_a", f.sash_at, f.sash_dir, 4, 0.07, 0.035, f.accent, dt, f)
+			_chain("sash_b", (f.sash_at as Vector3) + (f.sash_side as Vector3) * 0.05, f.sash_dir, 3, 0.07, 0.03, f.accent, dt, f)
+			_chain("band_a", f.band_at, f.band_dir, 3, 0.06, 0.02, f.accent, dt, f)
+			_chain("band_b", (f.band_at as Vector3) + (f.band_side as Vector3) * 0.04, f.band_dir, 3, 0.055, 0.018, f.accent, dt, f)
+		Kind.SCOUT:       # the bandana's knot tails, and the satchel bouncing on the hip
+			_chain("knot_a", f.band_at, f.band_dir, 2, 0.06, 0.02, f.accent, dt, f)
+			_chain("knot_b", (f.band_at as Vector3) + (f.band_side as Vector3) * 0.04, f.band_dir, 2, 0.055, 0.018, f.accent, dt, f)
+			_satchel_bounce(f, dt)
 
 
 # ================================================================ the robe
@@ -244,7 +268,7 @@ func _robe(f: Dictionary, dt: float) -> void:
 				if p.y < ground + 0.02:
 					p.y = ground + 0.02
 				_p[k] = p
-	_draw_loop(_robe_mesh, _p, rows, pinned, robe_color(kind), true)
+	_draw_loop(_robe_mesh, _p, rows, pinned, f.get("robe_col", robe_color(kind)), true)
 
 
 ## Keep `p` `want` from `above`, no more than ~60 degrees out from hanging straight down.
@@ -366,7 +390,8 @@ func _cloak(f: Dictionary, dt: float) -> void:
 	var rings: Array = f.rings
 	var top: Array = rings[0]
 	var rows := 6
-	var hang_len := ((top[0] as Vector3).y - float(f.ground)) * 0.86   # ends a little above the hem
+	# a fixed length (from the shoulders to near the feet), never down to the ground: mid-jump it used to stretch
+	var hang_len := ((top[0] as Vector3).y - float(f.get("feet_y", f.ground))) * 0.86
 	var seg := hang_len / float(rows - 1)
 	var basis: Basis = top[1]
 	var up := basis.y.normalized()
@@ -397,11 +422,11 @@ func _cloak(f: Dictionary, dt: float) -> void:
 			var k := i * CLOAK_COLS + c
 			var u := float(i) / float(rows - 1)
 			var p: Vector3 = _cp[k]
-			var v := step * 0.985 + ((p - _co[k]) - step) * 0.86   # lighter than the robe: it swings more
+			var v := step * 0.99 + ((p - _co[k]) - step) * 0.8   # a little lighter than the robe: it swings a bit more
 			_co[k] = p
 			var rest := _cloak_top(top, c) - up * seg * i + back * (0.05 + 0.02 * i)
-			var acc := Vector3(0, -12.0, 0) + (rest - p) * lerpf(14.0, 6.0, u)
-			acc += back * billow * (1.1 + 0.8 * sin(_t * 4.0 + c)) * u   # billows out behind when moving fast
+			var acc := Vector3(0, -12.0, 0) + (rest - p) * lerpf(24.0, 11.0, u)
+			acc += back * billow * (0.45 + 0.3 * sin(_t * 4.0 + c)) * u   # billows out a little behind when moving fast
 			_cp[k] = p + v + acc * dt * dt
 	var cols: Array = f.get("colliders", [])
 	for it in 3:
@@ -429,7 +454,7 @@ func _cloak(f: Dictionary, dt: float) -> void:
 				if p.y < float(f.ground) + 0.03:
 					p.y = float(f.ground) + 0.03
 				_cp[k] = p
-	_draw_sheet(_cloak_mesh, _cp, rows, CLOAK_COLS, GREY_CLOAK)
+	_draw_sheet(_cloak_mesh, _cp, rows, CLOAK_COLS, f.get("cloak_col", GREY_CLOAK))
 
 
 var _cloak_prev := Vector3.ZERO
@@ -688,3 +713,133 @@ func _hood_up(f: Dictionary, dt: float) -> void:
 				_tail_p[k] = a + d.normalized() * seg
 	for k in TAIL_N - 1:
 		_place(_tail_segs[k], _tail_p[k], _tail_p[k + 1])
+
+
+# ================================================================ v0.9.0: tabards, tails, the satchel
+var _sheets := {}     # id -> { mesh, have, p, o }: hanging panels (the knight's tabard)
+var _chains := {}     # id -> { p, o, segs }: short swinging tails (sash ends, headband tails, the bandana's knot)
+var _satchel: MeshInstance3D
+var _sat_off := Vector3.ZERO
+var _sat_v := Vector3.ZERO
+const SHEET_COLS := 5
+const SHEET_ROWS := 5
+
+
+## A cloth panel pinned along its top edge from `left` to `right`, hanging `length` down: heavy, damped, its rows
+## kept their length (it never stretches, on a jump either), springing back toward hanging straight, pushed in front
+## of striding legs.
+func _sheet(id: String, left: Vector3, right: Vector3, length: float, f: Dictionary, dt: float, col: Color) -> void:
+	var sh: Dictionary = _sheets[id]
+	var up := (f.up as Vector3) if f.has("up") else Vector3.UP
+	up = Vector3.UP
+	var seg := length / float(SHEET_ROWS - 1)
+	var n := SHEET_ROWS * SHEET_COLS
+	if not sh.have or (sh.p[0] as Vector3).distance_to(left) > 2.5:
+		var p := PackedVector3Array()
+		p.resize(n)
+		for i in SHEET_ROWS:
+			for c in SHEET_COLS:
+				p[i * SHEET_COLS + c] = left.lerp(right, float(c) / (SHEET_COLS - 1)) - up * seg * i
+		sh.p = p
+		sh.o = p.duplicate()
+		sh.have = true
+	var P: PackedVector3Array = sh.p
+	var O: PackedVector3Array = sh.o
+	var step := left - P[0]
+	for c in SHEET_COLS:
+		var top := left.lerp(right, float(c) / (SHEET_COLS - 1))
+		P[c] = top
+		O[c] = top
+		for i in range(1, SHEET_ROWS):
+			var k := i * SHEET_COLS + c
+			var q: Vector3 = P[k]
+			var v := step * 0.99 + ((q - O[k]) - step) * 0.8
+			O[k] = q
+			var rest := top - up * seg * i
+			P[k] = q + v + ((rest - q) * 20.0 + Vector3(0, -12.0, 0)) * dt * dt
+	var cols: Array = f.get("colliders", [])
+	var anchor: Vector3 = (left + right) * 0.5
+	for it in 3:
+		for c in SHEET_COLS:
+			for i in range(1, SHEET_ROWS):
+				var k := i * SHEET_COLS + c
+				var q := _hang(P[k - SHEET_COLS], P[k], seg, up)
+				if c < SHEET_COLS - 1:
+					var w := left.distance_to(right) / (SHEET_COLS - 1)
+					var e: Vector3 = P[k + 1] - q
+					if e.length() > 1e-5:
+						var corr := e * (0.5 * (e.length() - w) / e.length()) * 0.5
+						q += corr
+						P[k + 1] = (P[k + 1] as Vector3) - corr
+				for cc in cols:
+					q = _push_from_leg(q, cc[0], cc[1], float(cc[2]) + 0.02, anchor - up * 0.3)
+				P[k] = q
+	sh.p = P
+	sh.o = O
+	_draw_sheet(sh.mesh, P, SHEET_ROWS, SHEET_COLS, col)
+
+
+## A short tail (a sash end, a headband tail): a chain of `n` points from `start`, resting along `dir`, each
+## springing back toward its place (looser toward the tip), its links kept their length. Drawn as tapering segments.
+func _chain(id: String, start: Vector3, dir: Vector3, n: int, seg: float, r: float, col: Color, dt: float, f: Dictionary) -> void:
+	if not _chains.has(id):
+		var segs := []
+		var mat := _cloth_mat(col)
+		for k in n:
+			var mi := MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.bottom_radius = r * (1.0 - 0.5 * float(k) / n) + 0.003
+			cm.top_radius = r * (1.0 - 0.5 * float(k + 1) / n) + 0.003
+			cm.height = 1.0
+			cm.radial_segments = 6
+			cm.rings = 1
+			mi.mesh = cm
+			mi.material_override = mat
+			add_child(mi)
+			segs.append(mi)
+		_chains[id] = { "p": [], "o": [], "segs": segs, "have": false }
+	var ch: Dictionary = _chains[id]
+	var d := dir.normalized()
+	if not ch.have or (ch.p[0] as Vector3).distance_to(start) > 2.5:
+		ch.p = []
+		ch.o = []
+		for k in n + 1:
+			ch.p.append(start + d * seg * k)
+			ch.o.append(start + d * seg * k)
+		ch.have = true
+	var step := start - (ch.p[0] as Vector3)
+	ch.p[0] = start
+	ch.o[0] = start
+	for k in range(1, n + 1):
+		var q: Vector3 = ch.p[k]
+		var v := step * 0.98 + ((q - (ch.o[k] as Vector3)) - step) * 0.86
+		ch.o[k] = q
+		var stiff := lerpf(140.0, 40.0, float(k) / n)
+		ch.p[k] = q + v + (((start + d * seg * k) - q) * stiff + Vector3(0, -9.0, 0)) * dt * dt
+	for it in 2:
+		for k in range(1, n + 1):
+			var a: Vector3 = ch.p[k - 1]
+			var e: Vector3 = (ch.p[k] as Vector3) - a
+			if e.length() > 1e-5:
+				ch.p[k] = a + e.normalized() * seg
+	for k in n:
+		_place(ch.segs[k], ch.p[k], ch.p[k + 1])
+
+
+## The scout's satchel: a leather bag on the hip that bounces on a spring as he moves.
+func _satchel_bounce(f: Dictionary, dt: float) -> void:
+	if _satchel == null:
+		_satchel = MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.16, 0.14, 0.07)
+		_satchel.mesh = bm
+		_satchel.material_override = _cloth_mat(Color("7a5236"))
+		add_child(_satchel)
+	var vel: Vector3 = f.get("vel", Vector3.ZERO)
+	var bob := Vector3(0, -absf(sin(_t * 9.0)) * 0.03 * clampf(Vector2(vel.x, vel.z).length() / 6.0, 0.0, 1.0), 0)
+	_sat_v += ((bob - _sat_off) * 160.0 - _sat_v * 9.0) * dt
+	_sat_v += -Vector3(vel.x, 0, vel.z) * 0.0   # (the body's motion is already in its anchor)
+	_sat_off += _sat_v * dt
+	_sat_off = _sat_off.limit_length(0.06)
+	_satchel.global_transform = Transform3D(f.satchel_basis, (f.satchel_at as Vector3) + _sat_off)
+

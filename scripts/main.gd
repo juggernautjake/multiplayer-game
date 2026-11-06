@@ -619,6 +619,16 @@ func _bot_show() -> Array:
 	var me := net.predicted.pos
 	var owned := net.predicted.owned
 	var magic := Weapons.STAFF if (owned >> Weapons.STAFF) & 1 else Weapons.WAND
+	if _args().has("cycle") and t >= 60:   # every weapon (so every costume) in turn, standing then walking; the camera circles
+		var k := (t - 60) / 70
+		if k >= 7 * 2:
+			get_tree().quit()
+			return [0, cam_yaw, 0.0, weapon_slot]
+		weapon_slot = [Weapons.FISTS, Weapons.SWORD, Weapons.CLUB, Weapons.BOW, Weapons.SLING, Weapons.STAFF, Weapons.WAND][k % 7]
+		cam_yaw = (t - 60) * 0.012
+		cam_dist = 5.0
+		_shot_show(t)
+		return [Sim.Btn.FORWARD if k >= 7 and (t / 35) % 2 == 0 else 0, cam_yaw + (0.0 if k < 7 else PI), 0.0, weapon_slot]
 	if _args().has("carry") and t >= 60:   # every weapon in turn, walking and standing, the camera circling
 		var ws := [Weapons.SWORD, Weapons.CLUB, Weapons.BOW, Weapons.SLING, Weapons.STAFF, Weapons.WAND]
 		var k := (t - 60) / 120
@@ -626,11 +636,18 @@ func _bot_show() -> Array:
 			get_tree().quit()
 			return [0, cam_yaw, 0.0, weapon_slot]
 		weapon_slot = ws[k]
-		cam_yaw = (t - 60) * 0.03
-		cam_dist = 6.0
-		var walk := (t / 40) % 2 == 0
+		cam_dist = 4.6   # the default play camera
+		# 40 ticks each: walking away from the camera (his back to us), toward it, across it (side on), standing
+		var ph := ((t - 60) % 120) / 40
+		cam_yaw = 0.0
 		_shot_show(t)
-		return [Sim.Btn.FORWARD if walk else 0, cam_yaw + PI, 0.0, weapon_slot]
+		match ph:
+			0:
+				return [Sim.Btn.FORWARD, cam_yaw, 0.0, weapon_slot]
+			1:
+				return [Sim.Btn.BACK, cam_yaw, 0.0, weapon_slot]
+			_:
+				return [Sim.Btn.RIGHT, cam_yaw, 0.0, weapon_slot]
 	if t < 60:
 		cam_yaw = 0.0
 	elif t < 180 and _args().has("orbit"):   # standing still while the camera goes all the way round (front, side, back)

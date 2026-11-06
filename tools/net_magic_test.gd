@@ -213,5 +213,68 @@ func _initialize() -> void:
 			last_hp = b.state.hp
 		b.state.vel = Vector3.ZERO
 	check(strikes >= 5 and net.storms.is_empty(), "the storm rains bolts on someone under it (%d hits in 5 s), then clears" % strikes)
+
+	# v0.8.2: chain lightning (nothing left over from the tests above: burning ground, storms, wells)
+	net.pending_spells.clear()
+	net.storms.clear()
+	net.wells.clear()
+	for id in [3, 4, 5, 6, 7]:
+		net._server_add_player(id, "P%d" % id)
+	var line := [net.players[3], net.players[4], net.players[5]]
+	for i in 3:
+		line[i].state.pos = Vector3(120 + 4.0 * i, 0, 120)
+		line[i].pvp = true
+	var far: Net.ServerPlayer = net.players[6]      # 8 m past the end of the line: out of the chain's reach
+	far.state.pos = Vector3(136, 0, 120)
+	far.pvp = true
+	var nopvp: Net.ServerPlayer = net.players[7]    # PvP off: never chained
+	nopvp.state.pos = Vector3(122, 0, 123)
+	nopvp.pvp = false
+	a.state.pos = Vector3(118, 0, 117)              # the caster, close by: never chained
+	var mine := net.golems.spawn(1, Vector3(126, 0, 122), 0.0, net.server_tick - 100)   # the caster's own golem
+	mine.state = Golems.State.IDLE
+	mine.stun = 100000   # it stands still (it would otherwise go and fight them)
+	b.state.pos = Vector3(300, 0, 300)
+	for q in net.players.values():
+		q.state.hp = Sim.MAX_HP
+		q.state.shield = 0
+		q.state.dead = 0
+	var run_cast := func(at: Vector3):
+		net.pending_spells.append([net.server_tick, "lightning", at, 1])
+		for t in 60:
+			net._server_spells()
+			net.server_tick += 1
+	run_cast.call(line[0].state.pos)
+	var got := line.map(func(q): return Sim.MAX_HP - q.state.hp)
+	check(got == [28, 14, 7], "lightning on the first of three in a line 4 m apart: 28, then it chains for 14 and 7 (%s)" % str(got))
+	check(far.state.hp == Sim.MAX_HP, "one 8 m further on is out of the chain's reach")
+	check(a.state.hp == Sim.MAX_HP and nopvp.state.hp == Sim.MAX_HP and mine.hp == Golems.HP, "never the caster, their own golem, or someone with PvP off")
+	# a shield soaks the jump and ends that branch
+	for q in net.players.values():
+		q.state.hp = Sim.MAX_HP
+	line[1].state.shield = 2
+	line[1].state.mana = 500
+	run_cast.call(line[0].state.pos)
+	check(line[1].state.hp == Sim.MAX_HP and line[1].state.mana < 500 and line[2].state.hp == Sim.MAX_HP, "a shielded one soaks the jump (mana) and the chain stops there")
+	line[1].state.shield = 0
+	# two inside the strike both take the full damage (no falloff for lightning)
+	for q in net.players.values():
+		q.state.hp = Sim.MAX_HP
+	line[1].state.pos = line[0].state.pos + Vector3(2.4, 0, 0)
+	line[2].state.pos = Vector3(200, 0, 200)
+	run_cast.call(line[0].state.pos)
+	check(Sim.MAX_HP - line[0].state.hp == 28 and Sim.MAX_HP - line[1].state.hp == 28, "two inside the strike both take the full 28 (%d, %d)" % [Sim.MAX_HP - line[0].state.hp, Sim.MAX_HP - line[1].state.hp])
+	# golems and the titan never count toward magic levels (only players do)
+	var kills0: Array = a.kills.duplicate()
+	var lv0 := [a.state.staff_lvl, a.state.wand_lvl]
+	for src in [Weapons.STAFF, Weapons.WAND]:
+		for titan in [false, true]:
+			var g := net.golems.spawn(2, Vector3(80, 0, 80), 0.0, net.server_tick - 100, titan)
+			g.state = Golems.State.IDLE
+			net.dmg_src = src
+			net._damage(-1000 - g.id, 500, 1, Vector3(1, 0, 0), 0.0)
+			net.dmg_src = -1
+			check(g.state == Golems.State.DIE, "%s kills another player's %s" % [Weapons.NAMES[src], "titan" if titan else "golem"])
+	check(a.kills == kills0 and [a.state.staff_lvl, a.state.wand_lvl] == lv0, "killing golems and the titan doesn't count toward levels (kills still %s)" % str(a.kills))
 	print("%d failed" % bad)
 	quit(bad)

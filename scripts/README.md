@@ -685,3 +685,19 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   retry in `host()`.
 - **weapons.gd:** `SHIELD_RADIUS` 1.5, `SHIELD_CENTER_Y` 1.1, `SHIELD_BOUNCE`.
 - **main.gd:** `_leave_game`, `_on_proj_bounce`, the `archery` bot, `--orbit`, `--carry`, `--leave-at`.
+
+## v0.9.0
+
+- **Costumes:** `WizardGarb.kind_for` gives the costume for the equipped weapon (`COSTUME`, `LOOK`); new kinds
+  BRAWLER, KNIGHT, BARBARIAN, RANGER, SCOUT. WizardGarb dispatches per costume: the robe's ring cloth (robes, the
+  barbarian's kilt), the cloak (wizard, ranger: `cloak_col`), `_sheet` (hanging panels: the knight's tabard front and
+  back), `_chain` (swinging tails: sash ends, headband tails, the bandana's knot), `_satchel_bounce`. figure_avatar.gd:
+  `COLS` (each costume's colours on the body's own parts), `_build_costume_parts` / `SHOWN` / `_cpart` (rigid pieces,
+  built once and shown per costume), the accent from the player's colour, a puff on every swap. avatar.gd (Pip):
+  `garb_textures` (the costume's sheets and accent sheets), `_accent` (the accent sprite, tinted, just in front).
+- **Chain lightning:** net.gd `_blast` returns who it struck; `_chain_jump`, `_chain_candidates`, `_target_feet`,
+  `_shield_up`; magic_fx.gd `_chain`. weapons.gd: Lightning's `falloff: false`, `chain_range`, `chain_max`,
+  `chain_every`; `area_damage` honours `falloff`.
+- **Pip's carried weapon:** 12 cm toward the camera (was 3 cm) with a sorting offset, 2 px out from his middle, ahead
+  of him side on.
+- **Cloth length:** the robe's and cloak's lengths come from the feet (`feet_y`), not the ground.

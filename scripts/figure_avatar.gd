@@ -134,6 +134,7 @@ func set_pvp(on: bool) -> void:
 
 func _init(player_name: String, color: Color, show_name: bool, _outfit := 0) -> void:
 	_name = player_name
+	_accent_col = color.lightened(0.15)
 	model = Node3D.new()
 	add_child(model)
 	var tunic := color
@@ -243,8 +244,8 @@ func _init(player_name: String, color: Color, show_name: bool, _outfit := 0) -> 
 	for sd in ["r", "l"]:   # bell sleeves, shown with a robe
 		var sl := MeshInstance3D.new()
 		var cm := CylinderMesh.new()
-		cm.top_radius = 0.065
-		cm.bottom_radius = 0.13
+		cm.top_radius = 0.16      # the cuff: wide at the wrist (the +y end), narrow up the forearm
+		cm.bottom_radius = 0.085
 		cm.height = 1.0
 		cm.radial_segments = 10
 		sl.mesh = cm
@@ -892,9 +893,12 @@ func _arm(side: String, shoulder: Vector3, target: Vector3, pole: Vector3) -> Ve
 	var hand: Vector3 = r[1]
 	_joints["elbow_" + side] = elbow
 	_joints["hand_" + side] = hand
-	_place_seg("upper_" + side, shoulder, elbow, 0.068)
-	_place_seg("fore_" + side, elbow, hand, 0.05)
-	_place_ball("elbow_" + side, elbow, Vector3.ONE * 0.105)
+	# in a robe, the arm is inside a sleeve: a wider tube over the upper arm and the forearm, a full elbow, ending in
+	# the bell cuff at the wrist (in _dress) that the hand comes out of
+	var robed := _garb_kind != WizardGarb.Kind.NONE
+	_place_seg("upper_" + side, shoulder, elbow, 0.092 if robed else 0.068)
+	_place_seg("fore_" + side, elbow, hand - (hand - elbow).normalized() * 0.03, 0.082 if robed else 0.05)
+	_place_ball("elbow_" + side, elbow, Vector3.ONE * (0.18 if robed else 0.105))
 	# the hand: a slightly flat mitten along the forearm, the thumb on its inner side
 	var along := (hand - elbow).normalized()
 	if side == "r":
@@ -1101,46 +1105,185 @@ static func _trail(parent: Node, pos: Vector3, yaw: float, weapon: int, mv: Dict
 
 
 # ================================================================ the wizard garb
-const ROBE_PARTS := ["chest", "waist", "hem", "upper_r", "upper_l", "shoulder_r", "shoulder_l", "trap_r", "trap_l", "pelvis",
+const ROBE_PARTS := ["chest", "waist", "hem", "upper_r", "upper_l", "fore_r", "fore_l", "elbow_r", "elbow_l", "shoulder_r", "shoulder_l", "trap_r", "trap_l", "pelvis",
 	"thigh_r", "thigh_l", "shin_r", "shin_l", "knee_r", "knee_l"]
 const SHADED_PARTS := ["head", "nose", "ear_l", "ear_r", "neck"]
+const SKIN_C := Color("f1c9a5")
+## v0.9.0: what each costume does to the body's own parts (the rest keep their colours).
+const TORSO := ["chest", "waist", "hem", "shoulder_r", "shoulder_l", "trap_r", "trap_l"]
+const ARMS := ["upper_r", "upper_l", "fore_r", "fore_l", "elbow_r", "elbow_l"]
+const LEGS := ["pelvis", "thigh_r", "thigh_l", "shin_r", "shin_l", "knee_r", "knee_l"]
+const HANDS := ["hand_r", "hand_l", "thumb_r", "thumb_l"]
+const FEET := ["boot_r", "boot_l", "foot_r", "foot_l"]
+static var COLS := {
+	WizardGarb.Kind.BRAWLER: { "torso": Color("5c4030"), "arms": SKIN_C, "legs": Color("4a3f38"), "hands": Color("ece6d8") },
+	WizardGarb.Kind.KNIGHT: { "torso": Color("9aa0aa"), "arms": Color("8a909a"), "legs": Color("3f3a36") },
+	WizardGarb.Kind.BARBARIAN: { "torso": SKIN_C, "arms": SKIN_C, "legs": Color("6a4a32"), "feet": Color("8a6240") },
+	WizardGarb.Kind.RANGER: { "torso": Color("8a5c38"), "arms": Color("4c6038"), "legs": Color("4c5a38") },
+	WizardGarb.Kind.SCOUT: { "torso": Color("b88a40"), "arms": Color("e8e2d0"), "legs": Color("4a4038") },
+}
+var _costume_parts := {}   # name -> MeshInstance3D: the costumes' rigid pieces, built once, shown per costume
+var _accent_col := Color.WHITE
+
+
+## The rigid pieces of every costume, made once (and only shown with their costume): shoulder guards, a mail coif and
+## a tabard emblem (knight); a fur mantle with tufts, fur boot tops and a harness (barbarian); a bracer and the hood
+## down round the neck (ranger); a headband (brawler); a bandana cap (scout).
+func _build_costume_parts() -> void:
+	var specs := {
+		"pauldron_r": ["sphere", Color("c8ced8"), Vector3(0.17, 0.12, 0.17)], "pauldron_l": ["sphere", Color("c8ced8"), Vector3(0.17, 0.12, 0.17)],
+		"coif": ["hemi", Color("a8aeb8"), Vector3(0.37, 0.37, 0.37)], "emblem": ["box", Color("e8c050"), Vector3(0.08, 0.08, 0.02)],
+		"mantle": ["torus", Color("8a6240"), Vector3(0.34, 0.16, 0.26)], "boot_fur_r": ["torus", Color("a07a52"), Vector3(0.1, 0.06, 0.1)],
+		"boot_fur_l": ["torus", Color("a07a52"), Vector3(0.1, 0.06, 0.1)], "strap_a": ["box", Color("4a3424"), Vector3(0.05, 0.62, 0.03)],
+		"strap_b": ["box", Color("4a3424"), Vector3(0.05, 0.62, 0.03)], "bracer": ["cyl", Color("5a3e2a"), Vector3(0.12, 0.12, 0.12)],
+		"collar": ["torus", Color("4c5a38"), Vector3(0.26, 0.12, 0.22)], "headband": ["torus", Color.WHITE, Vector3(0.36, 0.06, 0.36)],
+		"bandana": ["hemi", Color.WHITE, Vector3(0.36, 0.34, 0.36)], "sash": ["torus", Color.WHITE, Vector3(0.36, 0.1, 0.27)],
+	}
+	for nm in specs:
+		var sp: Array = specs[nm]
+		var mi := MeshInstance3D.new()
+		match sp[0]:
+			"sphere":
+				var m := SphereMesh.new()
+				m.radius = 0.5
+				m.height = 1.0
+				mi.mesh = m
+			"hemi":
+				var m := SphereMesh.new()
+				m.radius = 0.5
+				m.height = 0.5
+				m.is_hemisphere = true
+				mi.mesh = m
+			"box":
+				mi.mesh = BoxMesh.new()
+			"cyl":
+				var m := CylinderMesh.new()
+				m.top_radius = 0.5
+				m.bottom_radius = 0.5
+				m.height = 1.0
+				mi.mesh = m
+			"torus":
+				var m := TorusMesh.new()
+				m.inner_radius = 0.38
+				m.outer_radius = 0.5
+				m.rings = 20
+				m.ring_segments = 8
+				mi.mesh = m
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = sp[1]
+		mat.roughness = 0.4 if nm in ["pauldron_r", "pauldron_l", "coif"] else 0.95
+		mat.metallic = 0.6 if nm in ["pauldron_r", "pauldron_l", "coif"] else 0.0
+		mi.material_override = mat
+		mi.set_meta("size", sp[2])
+		mi.visible = false
+		model.add_child(mi)
+		_costume_parts[nm] = mi
+	for nm in ["headband", "bandana", "sash"]:   # in the player's colour
+		(_costume_parts[nm].material_override as StandardMaterial3D).albedo_color = _accent_col
+
+
+const SHOWN := {
+	WizardGarb.Kind.KNIGHT: ["pauldron_r", "pauldron_l", "coif", "emblem"],
+	WizardGarb.Kind.BARBARIAN: ["mantle", "boot_fur_r", "boot_fur_l", "strap_a", "strap_b"],
+	WizardGarb.Kind.RANGER: ["bracer", "collar"],
+	WizardGarb.Kind.BRAWLER: ["headband", "sash"],
+	WizardGarb.Kind.SCOUT: ["bandana"],
+}
+
+
+func _cpart(nm: String, at: Vector3, basis: Basis) -> void:
+	var mi: MeshInstance3D = _costume_parts[nm]
+	mi.transform = Transform3D(basis * Basis.from_scale(mi.get_meta("size")), at)
 
 
 func _dress(delta: float, st: Sim.PlayerState, pelvis: Vector3, low: Basis, neck: Vector3, head: Vector3, head_basis: Basis,
 		hip_r: Vector3, hip_l: Vector3, dead: bool, chest := Vector3.ZERO, spine := Basis.IDENTITY) -> void:
 	var k := WizardGarb.kind_for(st)
+	var robe_kind := k == WizardGarb.Kind.WIZARD or k == WizardGarb.Kind.SHADOW or k == WizardGarb.Kind.BOTH
+	if _costume_parts.is_empty():
+		_build_costume_parts()
 	if k != _garb_kind:
+		var first := _garb_kind == 0
 		_garb_kind = k
-		_garb.set_kind(k)
+		_garb.set_kind(k)   # (the cloth starts again from hanging at rest)
 		var robe := WizardGarb.robe_color(k)
-		for nm in ROBE_PARTS:   # the robe's cloth over the tunic, sleeves and trousers (or the clothes back)
+		var scheme: Dictionary = COLS.get(k, {})
+		for nm in ROBE_PARTS + HANDS + FEET:   # the costume over the body's own parts (or their own colours back)
 			var mc: Array = _mats[_base_col[nm]]
 			var orig: Color = (mc[0] as StandardMaterial3D).get_meta("orig", mc[1])
 			(mc[0] as StandardMaterial3D).set_meta("orig", orig)
-			mc[1] = orig if k == WizardGarb.Kind.NONE else (robe.darkened(0.06) if nm.begins_with("upper") or nm.begins_with("shoulder") else robe)
+			var c := orig
+			if robe_kind and nm in ROBE_PARTS:
+				c = robe.darkened(0.06) if nm.begins_with("upper") or nm.begins_with("shoulder") else robe
+			elif nm in TORSO and scheme.has("torso"):
+				c = scheme.torso
+			elif nm in ARMS and scheme.has("arms"):
+				c = scheme.arms if not (nm.begins_with("fore") or nm.begins_with("elbow")) or k != WizardGarb.Kind.SCOUT else SKIN_C   # rolled sleeves
+			elif nm in LEGS and scheme.has("legs"):
+				c = scheme.legs
+			elif nm in HANDS and scheme.has("hands"):
+				c = scheme.hands
+			elif nm in FEET and scheme.has("feet"):
+				c = scheme.feet
+			mc[1] = c
 		for nm in SHADED_PARTS:   # in the dark robe's cowl, the face is in shadow
 			var mc: Array = _mats[_base_col[nm]]
 			var orig: Color = (mc[0] as StandardMaterial3D).get_meta("orig", mc[1])
 			(mc[0] as StandardMaterial3D).set_meta("orig", orig)
 			mc[1] = orig.darkened(0.5) if k == WizardGarb.Kind.SHADOW else orig
-		for nm in ["belt", "buckle"]:   # no belt line breaking the robe
-			(parts[nm] as MeshInstance3D).visible = k == WizardGarb.Kind.NONE
+		for nm in ["belt", "buckle"]:   # no belt line breaking a robe
+			(parts[nm] as MeshInstance3D).visible = not robe_kind
 		for sd in _sleeves:
 			var sl: MeshInstance3D = _sleeves[sd][0]
-			sl.visible = k != WizardGarb.Kind.NONE
+			sl.visible = robe_kind
 			(sl.material_override as StandardMaterial3D).albedo_color = robe.darkened(0.04)
+		var shown: Array = SHOWN.get(k, [])
+		for nm in _costume_parts:
+			(_costume_parts[nm] as MeshInstance3D).visible = nm in shown
+		if not first and get_parent() != null and model.visible:   # a puff as it changes: sparkles for magic, dust
+			Fx.burst(get_parent(), position + Vector3(0, 1.1, 0), Vector3.UP, Color("c9a8ff") if robe_kind else Color("e8dcc0"), 26, 3.2, 0.045)
+			MotionFx.puff(get_parent(), position + Vector3(0, 0.3, 0), 6, 1.2)
 	if k == WizardGarb.Kind.NONE:
 		return
-	# long bell sleeves from the elbows, hanging and swinging behind the forearm (the wand hand comes out clear)
-	for sd in _sleeves:
-		var sl: MeshInstance3D = _sleeves[sd][0]
-		var el: Vector3 = _joints.get("elbow_" + sd, Vector3.ZERO)
-		var hd: Vector3 = _joints.get("hand_" + sd, Vector3.ZERO)
-		var along := (hd - el).normalized() if hd.distance_to(el) > 0.01 else Vector3.DOWN
-		var want := (along * 0.6 + Vector3.DOWN * 0.55).normalized()
-		var hang: Vector3 = (_sleeves[sd][1] as Vector3).lerp(want, clampf(delta * 7.0, 0.0, 1.0)).normalized()
-		_sleeves[sd][1] = hang
-		sl.transform = WizardGarb._xf(el - along * 0.03, el + along * 0.05 + hang * 0.24)
+	# the rigid pieces, on the body
+	match k:
+		WizardGarb.Kind.KNIGHT:
+			for sd in [["r", 1.0], ["l", -1.0]]:
+				_cpart("pauldron_" + sd[0], chest + spine * Vector3(0.2 * float(sd[1]), 0.06, 0.0), spine * Basis(Vector3.BACK, -0.35 * float(sd[1])))
+			_cpart("coif", head + head_basis * Vector3(0, -0.01, 0.01), head_basis)
+			_cpart("emblem", chest + spine * Vector3(0, -0.02, -0.235), spine)
+		WizardGarb.Kind.BARBARIAN:
+			_cpart("mantle", chest + spine * Vector3(0, 0.07, 0.01), spine)
+			for sd in ["r", "l"]:
+				var an: Vector3 = _joints.get("ankle_" + sd, Vector3.ZERO)
+				var kn: Vector3 = _joints.get("knee_" + sd, Vector3.ZERO)
+				_cpart("boot_fur_" + sd, an + (kn - an).normalized() * 0.15, WizardGarb._basis_y((kn - an).normalized()))
+			_cpart("strap_a", chest + spine * Vector3(0, -0.08, -0.205), spine * Basis(Vector3.BACK, 0.6))
+			_cpart("strap_b", chest + spine * Vector3(0, -0.08, 0.205), spine * Basis(Vector3.BACK, -0.6))
+		WizardGarb.Kind.RANGER:
+			var el: Vector3 = _joints.get("elbow_l", Vector3.ZERO)
+			var hd: Vector3 = _joints.get("hand_l", Vector3.ZERO)
+			var ax := (hd - el).normalized() if hd.distance_to(el) > 0.01 else Vector3.DOWN
+			var bb := WizardGarb._basis_y(ax)
+			_costume_parts.bracer.transform = Transform3D(Basis(bb.x * 0.12, bb.y * 0.14, bb.z * 0.12), hd - ax * 0.09)
+			_cpart("collar", neck + spine * Vector3(0, -0.07, 0.03), spine)
+		WizardGarb.Kind.BRAWLER:
+			_cpart("headband", head + head_basis * Vector3(0, 0.07, 0), head_basis)
+			_cpart("sash", pelvis + low * Vector3(0, 0.09, 0), low)
+		WizardGarb.Kind.SCOUT:
+			_cpart("bandana", head + head_basis * Vector3(0, 0.02, 0.01), head_basis)
+	# long bell sleeves (the robes) from the elbows, hanging and swinging behind the forearm
+	if robe_kind:
+		for sd in _sleeves:
+			var sl: MeshInstance3D = _sleeves[sd][0]
+			var el: Vector3 = _joints.get("elbow_" + sd, Vector3.ZERO)
+			var hd: Vector3 = _joints.get("hand_" + sd, Vector3.ZERO)
+			var along := (hd - el).normalized() if hd.distance_to(el) > 0.01 else Vector3.DOWN
+			var want := (along * 0.85 + Vector3.DOWN * 0.3).normalized()
+			var hang: Vector3 = (_sleeves[sd][1] as Vector3).lerp(want, clampf(delta * 6.0, 0.0, 1.0)).normalized()   # weighty lag
+			_sleeves[sd][1] = hang
+			var fl := hd.distance_to(el)
+			sl.transform = WizardGarb._xf(el + along * fl * 0.45, hd + along * 0.02 + (hang - along).normalized() * 0.05 * (hang - along).length())
 	var mt := model.global_transform
 	var mb := mt.basis.orthonormalized()
 	var up := (mb * head_basis * Vector3.UP).normalized()
@@ -1151,32 +1294,50 @@ func _dress(delta: float, st: Sim.PlayerState, pelvis: Vector3, low: Basis, neck
 		var hip := hip_r if sd == "r" else hip_l
 		cols.append([mt * hip, mt * (_joints.get("knee_" + sd, hip) as Vector3), 0.19])
 		cols.append([mt * (_joints.get("knee_" + sd, hip) as Vector3), mt * (_joints.get("ankle_" + sd, hip) as Vector3) + Vector3(0, -0.05, 0), 0.17])
-	# the robe: rings from the neck down. The top four ride the body (round the base of the neck, over the shoulders,
-	# the chest, the waist); the four below hang straight down from the waist to just brushing the floor
 	var sb := mb * spine
 	var wb := mb * low
 	var waist_c := mt * (pelvis + low * Vector3(0, 0.12, 0))
 	var hang_b := Basis(Vector3.UP, rotation.y)
-	var floor_y := ground + 0.03
+	var feet_y := (mt * Vector3.ZERO).y + 0.03   # lengths are fixed (to the feet), never down to the ground
 	var rings := [
 		[mt * (chest + spine * Vector3(0, 0.12, 0.0)), sb, 0.12, 0.11],
 		[mt * (chest + spine * Vector3(0, 0.03, 0.01)), sb, 0.29, 0.21],
 		[mt * (chest + spine * Vector3(0, -0.13, 0.0)), sb, 0.28, 0.22],
 		[waist_c, wb, 0.25, 0.21]]
-	var hang_h := waist_c.y - floor_y
-	for i in 6:
-		var u := float(i + 1) / 6.0
-		rings.append([Vector3(waist_c.x, waist_c.y - hang_h * u, waist_c.z), hang_b, lerpf(0.27, 0.42, u), lerpf(0.24, 0.38, u)])
-	var arm_cols := []   # forearms and hands: the robe stays inside them
+	var pinned := 4
+	var hang_h := maxf(waist_c.y - feet_y, 0.5)
+	if k == WizardGarb.Kind.BARBARIAN:   # the kilt: from the waist to the knees
+		rings = [[waist_c, wb, 0.25, 0.21]]
+		pinned = 1
+		for i in 3:
+			var u := float(i + 1) / 3.0
+			rings.append([Vector3(waist_c.x, waist_c.y - hang_h * 0.5 * u, waist_c.z), hang_b, lerpf(0.27, 0.34, u), lerpf(0.23, 0.29, u)])
+	else:
+		for i in 6:
+			var u := float(i + 1) / 6.0
+			rings.append([Vector3(waist_c.x, waist_c.y - hang_h * u, waist_c.z), hang_b, lerpf(0.27, 0.42, u), lerpf(0.24, 0.38, u)])
+	var arm_cols := []   # forearms and hands: cloth stays inside them
 	for sd in ["r", "l"]:
 		var el: Vector3 = _joints.get("elbow_" + sd, Vector3.ZERO)
 		var hd: Vector3 = _joints.get("hand_" + sd, Vector3.ZERO)
 		arm_cols.append([mt * el, mt * (hd + (hd - el).normalized() * 0.08), 0.09])
+	var right := (mb * low * Vector3.RIGHT).normalized()
+	var down := Vector3.DOWN
+	var back := (mb * head_basis * Vector3.BACK).normalized()
 	_garb.update(delta, {
-		"rings": rings, "pinned": 4, "colliders": cols, "arm_colliders": arm_cols, "ground": ground, "vel": _vel,
+		"rings": rings, "pinned": pinned, "feet_y": feet_y, "colliders": cols, "arm_colliders": arm_cols, "ground": ground, "vel": _vel,
 		"head_top": mt * (head + head_basis * Vector3(0, 0.15, 0.01)), "head_c": mt * head, "head_r": 0.17,
 		"up": up, "face": face, "neck": mt * neck, "hat_h": 0.72, "hat_r": 0.2, "brim_r": 0.42,
-		"own": not label.visible, "visible": model.visible })
+		"own": not label.visible, "visible": model.visible, "accent": _accent_col,
+		"robe_col": Color("b89870") if k == WizardGarb.Kind.BARBARIAN else WizardGarb.robe_color(k),
+		"cloak_col": Color("56603e") if k == WizardGarb.Kind.RANGER else WizardGarb.GREY_CLOAK,
+		"tabard_front": [mt * (chest + spine * Vector3(-0.13, 0.04, -0.215)), mt * (chest + spine * Vector3(0.13, 0.04, -0.215))],
+		"tabard_back": [mt * (chest + spine * Vector3(0.13, 0.04, 0.215)), mt * (chest + spine * Vector3(-0.13, 0.04, 0.215))],
+		"tabard_len": maxf((mt * chest).y - feet_y - 0.45, 0.4),
+		"sash_at": mt * (pelvis + low * Vector3(0.16, 0.08, -0.12)), "sash_dir": (down * 0.9 + right * 0.2).normalized(), "sash_side": right,
+		"band_at": mt * (head + head_basis * Vector3(0, 0.07, 0.17)), "band_dir": (back * 0.6 + down * 0.8).normalized(),
+		"band_side": right,
+		"satchel_at": mt * (pelvis + low * Vector3(0.24, -0.04, 0.02)), "satchel_basis": mb * low })
 
 
 ## Where the staff's (or wand's) orb is now, for the shield pouring out of it; null without one.

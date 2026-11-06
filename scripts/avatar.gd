@@ -55,6 +55,8 @@ var _ghost_t := 0.0
 var _step_d := 0.0             # metres since the last footfall puff
 var _fall_v := 0.0             # how fast he was falling just before landing
 var _shot_seen := -1
+var _accent: Sprite3D
+var _color := Color.WHITE
 var _carry: Sprite3D          # the weapon he carries (assets/pip/carry), held at his hand in every frame
 var _garb_kind := 0
 var _outfit := 0
@@ -88,7 +90,8 @@ var _name := ""
 ## drawn into every frame.
 static func garb_textures(look: String) -> Array:
 	if not _outfit_tex.has(look):
-		_outfit_tex[look] = [load("res://assets/pip/garb/pip-spritesheet-%s.png" % look), load("res://assets/pip/garb/pip-weapons-%s.png" % look)]
+		_outfit_tex[look] = [load("res://assets/pip/garb/pip-spritesheet-%s.png" % look), load("res://assets/pip/garb/pip-weapons-%s.png" % look),
+			load("res://assets/pip/garb/pip-spritesheet-%s-accent.png" % look), load("res://assets/pip/garb/pip-weapons-%s-accent.png" % look)]
 	return _outfit_tex[look]
 
 
@@ -157,6 +160,20 @@ func _init(player_name: String, color: Color, show_name: bool, outfit := 0) -> v
 	hp_bar.position.y = 2.12
 	hp_bar.visible = show_name
 	add_child(hp_bar)
+	_color = color
+	_accent = Sprite3D.new()   # the costume's accent colour pieces, tinted with his colour (v0.9.0)
+	_accent.pixel_size = PIXEL
+	_accent.region_enabled = true
+	_accent.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	_accent.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	_accent.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	_accent.shaded = false
+	_accent.double_sided = true
+	_accent.centered = true
+	_accent.offset = sprite.offset
+	_accent.modulate = Color(color.r * 1.25, color.g * 1.25, color.b * 1.25)
+	_accent.visible = false
+	model.add_child(_accent)
 	_carry = Sprite3D.new()   # the weapon he carries, in his hand in every frame
 	_carry.pixel_size = PIXEL
 	_carry.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
@@ -165,6 +182,8 @@ func _init(player_name: String, color: Color, show_name: bool, outfit := 0) -> v
 	_carry.shaded = false
 	_carry.double_sided = true
 	_carry.visible = false
+	_carry.sorting_offset = 1.0
+	_carry.render_priority = 1
 	model.add_child(_carry)
 	_show()
 
@@ -369,6 +388,12 @@ func _show(cam: Camera3D = null) -> void:
 	sprite.region_rect = Rect2(f * _cell.x, a.row * _cell.y, _cell.x, _cell.y)
 	var by_dir: Dictionary = _anims.get(_anim, _anims["idle"])
 	sprite.flip_h = MIRROR.has(dir) and by_dir.has(MIRROR[dir])
+	if _accent:   # the costume's accent, in this player's colour, exactly over the same frame
+		_accent.visible = _tex.size() > 2
+		if _accent.visible:
+			_accent.texture = _tex[2 + int(a.sheet)]
+			_accent.region_rect = sprite.region_rect
+			_accent.flip_h = sprite.flip_h
 
 
 ## v0.8.1: the weapon he has out is in his hand in every frame (not only while he attacks), drawn in his own pixel
@@ -421,6 +446,11 @@ func _update_prop(delta: float) -> void:
 	if hx < 0.0:
 		hx = _anchor.x + (-8.0 if use_left else 8.0)
 		hy = _anchor.y - 14.0
+	# v0.8.2: held beside him, not across his body: a couple of pixels out from his middle on the hand's side (from
+	# behind, the staff used to sit across his back)
+	hx += 2.0 if hx >= _anchor.x else -2.0
+	if cell_dir == "E":   # side on: carried a little ahead of him, not across his face
+		hx = maxf(hx, _anchor.x) + 5.0
 	var mirror_view := sprite.flip_h
 	if mirror_view:
 		hx = _cell.x - 1 - hx
@@ -460,7 +490,9 @@ func _update_prop(delta: float) -> void:
 		lift = 0.05 * sin(Time.get_ticks_msec() * 0.03)
 	var px := (hx - _anchor.x) * PIXEL * sprite.scale.x
 	var py := (_anchor.y - hy) * PIXEL * sprite.scale.y
-	_carry.position = sprite.position + right * (px + side) + Vector3(0, py + lift, 0) + toward * 0.03
+	# in front of him: a clear 12 cm toward the camera (it used to be 3 cm, which could lose the depth test to his body
+	# sprite at some camera angles and put the weapon behind him), and sorted after him too
+	_carry.position = sprite.position + right * (px + side) + Vector3(0, py + lift, 0) + toward * 0.12
 	_carry.visible = true
 
 
@@ -495,6 +527,14 @@ func _procedural(delta: float, speed: float) -> void:
 	sprite.scale = Vector3((1.0 / sqrt(_sq)) + dash_k, _sq - dash_k * 0.6, 1.0)
 	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
 	sprite.position = Vector3(sprite.position.x, 0, 0) + fwd * _nudge
+	if _accent and _accent.visible:   # just in front of the sprite, so it wins the depth test
+		var toward := Vector3(0, 0, 1)
+		if _cam:
+			toward = _cam.global_transform.basis.z
+			toward.y = 0.0
+			toward = toward.normalized() if toward.length() > 0.01 else Vector3(0, 0, 1)
+		_accent.scale = sprite.scale
+		_accent.position = sprite.position + toward * 0.004
 	# dust from running feet and the dash's afterimages
 	var parent := get_parent()
 	if parent == null or not model.visible:
@@ -571,13 +611,15 @@ static func _mean_x(im: Image, x0: int, y0: int, ya: int, yb: int) -> float:
 func _dress(_delta: float, cam: Camera3D) -> void:
 	var k := WizardGarb.kind_for(state)
 	if k != _garb_kind:
+		var first := _garb_kind == 0
 		_garb_kind = k
-		# v0.8.1: the garb is drawn into his sheets (no 3D cloth on Pip): the staff's look wins when he has both
-		if k == WizardGarb.Kind.NONE:
-			_tex = outfit_textures(_outfit)
-		else:
-			_tex = garb_textures("shadow" if k == WizardGarb.Kind.SHADOW else "wizard")
+		# v0.9.0: his costume is painted into his sheets: one per weapon, switching with the weapon in his hand
+		_tex = garb_textures(WizardGarb.LOOK.get(k, "brawler")) if k != WizardGarb.Kind.NONE else outfit_textures(_outfit)
 		_show(cam)
+		if not first and get_parent() != null and model.visible:   # a puff as it changes: sparkles for magic, dust
+			var magic := k == WizardGarb.Kind.WIZARD or k == WizardGarb.Kind.SHADOW
+			Fx.burst(get_parent(), position + Vector3(0, 1.0, 0), Vector3.UP, Color("c9a8ff") if magic else Color("e8dcc0"), 22, 3.0, 0.045)
+			MotionFx.puff(get_parent(), position + Vector3(0, 0.3, 0), 6, 1.2)
 
 
 ## Where the staff's (or wand's) orb is now (for the shield pouring out of it); null without one.

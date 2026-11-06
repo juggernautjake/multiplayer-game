@@ -100,7 +100,7 @@ Pick a weapon (6 staff, 7 wand), pick a spell with **R**, hold the left mouse bu
 
 | Level | Staff (mana) | Wand (recharge) |
 |---|---|---|
-| 1 | **Lightning** (34): a warning ring, then a bolt from the sky; area damage 28 at the centre down to 8 at 3 m | **Golem** (10 s): a small, fast stone golem (8 m/s, faster than walking, slower than sprinting) that chases your enemies from 25 m and hits on the move; up to 6, loyal to you |
+| 1 | **Lightning** (34): a warning ring, then a bolt from the sky: 28 to everyone in the 3 m strike (0.9.0: no falloff), then it **chains** to the nearest enemy not yet hit within 6 m for half (14, 7, 4), up to 5 jumps; a shield soaks a jump and ends that branch | **Golem** (10 s): a small, fast stone golem (8 m/s, faster than walking, slower than sprinting) that chases your enemies from 25 m and hits on the move; up to 6, loyal to you |
 | 1 | **Fireball** (22): a burning orb that bursts on contact: 24 at the centre down to 6 at 3.4 m | **Teleport** (4 s): blink to what the crosshair is on, up to 18 m (five dashes), onto tops or into the air |
 | 1 | **Shield** (10, held): hold the button to keep the bubble up (the staff raised overhead); hits on it cost mana (1.5 a point from weapons, 2 from spells, 25 for a stun); out of mana, it **shatters** | **Stun** (5 s): a bolt that bursts in a 2.5 m ring where it lands; everyone caught is held for 3 s |
 | 2 (3 kills) | **Frost Nova** (30): a ring of ice from you, 6 m: damage, a shove, and half speed for 2 s | **Earth Spikes** (6 s): stone spikes stab up one after another in a line toward the crosshair |
@@ -111,14 +111,24 @@ Kills with the staff or wand (with **PvP** on: P) level that weapon up: after 3,
 is always strongest at the centre and falls off toward the edge; you never hurt yourself. Players only hurt each other
 when both have PvP on; dummies and golems can always be hit.
 
-**Wizard garb (0.8.1).** Whoever carries the staff dresses as a wandering wizard: a long, worn grey robe from the
-shoulders to the floor, a grey cloak down the back, a loose rope belt and a tall, wide-brimmed, soft pointed hat with
-a crooked tip. Whoever carries the wand wears one heavy, dark, floor-length robe with a deep hood that shadows the
-face. With both, the wizard's look wins. On the 3D figure the robe is simulated cloth with thickness and a weighted
-hem: the top rides the shoulders and chest, the rest hangs in long folds, lags on turns, swings on stops and billows a
-little on a dash; striding legs push it out in front and the arms keep it inside them, so nothing pokes through. Pip
-wears it painted into his sprite sheets, frame by frame (`tools/make_garb_sheets.py`). Your own hat is see-through
-on the 3D figure so it never hides the crosshair. It's worked out on every PC from what you carry: no network traffic.
+**Costumes (0.9.0).** What you wear changes with the weapon in your hand, for everyone to see (it follows the weapon
+in every snapshot), with a puff as it swaps: sparkles for the staff and wand, dust for the rest. Each costume has an
+accent in your own player colour, so two players in the same costume can tell each other apart.
+
+| Weapon | Costume | Accent (your colour) |
+|---|---|---|
+| Fists | **Brawler**: a sleeveless leather vest, hand wraps, a sash, a headband (its tails and the sash's ends swing) | headband, sash |
+| Sword | **Knight**: a mail shirt, a tabard front and back with an emblem, shoulder guards, a mail coif (the tabard is cloth) | tabard |
+| Club | **Barbarian**: bare chest, a fur mantle, a leather harness, a hide kilt (cloth), fur-topped boots | kilt belt (Pip) |
+| Bow | **Ranger**: a leather jerkin, a green-brown cloak (cloth), the hood down round the neck, bracers, a quiver | scarf (Pip) |
+| Slingshot | **Scout**: a short vest over a white shirt with rolled sleeves, a bouncing satchel, a bandana | bandana |
+| Staff | **Wizard**: a long, worn grey robe, a grey cloak, a rope belt, a tall soft pointed hat | hat band (Pip) |
+| Wand | **Hooded robe**: one heavy dark robe from a deep peaked hood to the floor, the face in its shadow | trims (Pip) |
+
+On the 3D figure the cloth (robes, cloaks, the tabard, the kilt, tails) is simulated with fixed lengths (it never
+stretches, even mid-jump), weight and thickness, kept clear of the legs and arms; sleeves are tubes round the arms with a
+bell cuff the hand comes out of. Pip's costumes are painted into his sprite sheets frame by frame
+(`tools/make_costumes.py`), with the accent as a second, tinted sprite over him.
 
 **The shield (0.8.1).** The bubble pours out of the staff's raised orb and covers you head to foot. It's a
 see-through force field (it bends what's behind it a little, with a glowing rim and a shimmer), and arrows, stones and
@@ -126,8 +136,9 @@ fireballs **bounce off it**: the holder pays mana as before, and a bounced shot 
 once, then bursts on its next contact, never inside. Every hit sends a ripple across the dome from where it struck,
 as big as the hit. Out of mana, it still shatters and lets the rest through.
 
-**Pip carries his weapon (0.8.1).** The sword, club, bow, slingshot, staff or wand is in his hand in every frame,
-following his hand (the attack frames already show it).
+**Pip carries his weapon (0.8.1, fixed in 0.9.0).** The sword, club, bow, slingshot, staff or wand is in his hand in
+every frame and every direction, beside him and in front of him (from behind too), the staff rising above his head;
+the attack frames already show the weapon.
 
 **How it looks (0.8.0).** Every spell has its own casting gesture (a pull-back and thrust for the fireball, the staff
 raised to the sky for lightning, driven into the ground for the frost nova, the wand circling over the ground to
@@ -503,3 +514,17 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
 - **Pip carries his weapon** at all times.
 - **Leaving and hosting again** in the same session works: leaving used to keep the old connection open, so hosting
   again failed with "port 7777 is being used" (`Net.shutdown`, `tools/rehost_test.gd`).
+
+## What's new in 0.9.0
+
+- **Costumes for every weapon** (see "Costumes" above), on Pip and the 3D figure, swapping as you switch weapons.
+- **Chain lightning:** the staff's Lightning hits everyone in its strike for the full 28, then jumps from each one hit
+  to the nearest enemy within 6 m for half the damage (28, 14, 7, 4), every 5 ticks, at most 5 jumps; the same enemies
+  as everything else (PvP players, other summoners' golems, practice dummies), never you or your own golems; a shield
+  soaks a jump and stops that branch; kills count for the staff (golems never do).
+- **Pip's weapon in front of him** in every direction (it could fall behind his body sprite), held beside him from
+  behind, ahead of him side on; the staff taller.
+- **3D figure:** the robe and cloak keep their length when jumping (they used to stretch toward the ground); sleeves
+  are tubes round the arms with bell cuffs; the hooded robe for Pip redrawn (a peaked cowl framing the face).
+- **Tests:** chain lightning (28/14/7 down a line, out of range, never the caster or their golem or PvP-off players,
+  shields end a branch, two in the strike both take 28); golem and titan kills never count toward levels.

@@ -1,4 +1,6 @@
-"""Draw the wizard garb into Pip's sprite sheets (v0.8.1), frame by frame, so it lines up with every animation.
+"""Where Pip's hands are in every frame, the weapons he carries, and (by running tools/make_costumes.py) his costumes.
+
+(v0.8.1 drew the wizard garb here; v0.9.0 moved the costumes to make_costumes.py.)
 
     python tools/make_garb_sheets.py
 
@@ -347,20 +349,11 @@ def make(sheet):
     for an in meta["animations"]:
         view_of[int(an["row"])] = an["dir"]
         frames_of[int(an["row"])] = int(an["frames"])
-    hand_map = {}
-    for look in LOOKS:
-        out = src.copy()
-        for row, view in view_of.items():
-            for f in range(frames_of[row]):
-                y0, x0 = row * CELL, f * CELL
-                cellv = out[y0:y0 + CELL, x0:x0 + CELL].copy()
-                if look == "wizard":
-                    hand_map["%d:%d" % (row, f)] = hands(src[y0:y0 + CELL, x0:x0 + CELL].copy(), view)
-                draw_frame(cellv, look, view, sheet == "pip-weapons")
-                out[y0:y0 + CELL, x0:x0 + CELL] = cellv
-        os.makedirs(OUT, exist_ok=True)
-        Image.fromarray(out).save(os.path.join(OUT, "%s-%s.png" % (sheet, look)))
-        print("wrote garb/%s-%s.png" % (sheet, look))
+    hand_map = {}   # (v0.9.0: the costumes themselves are painted by tools/make_costumes.py)
+    for row, view in view_of.items():
+        for f in range(frames_of[row]):
+            y0, x0 = row * CELL, f * CELL
+            hand_map["%d:%d" % (row, f)] = hands(src[y0:y0 + CELL, x0:x0 + CELL].copy(), view)
     return hand_map
 
 
@@ -434,8 +427,8 @@ def weapons():
     line(px, 2, 1, 7, 1, (120, 80, 60))
     W["sling"] = sprite(10, 12, px, (4, 9))
     # staff: tall, upright like a walking staff, an orb in a little cage at the top
-    px = {}
-    line(px, 4, 9, 4, 43, WOOD_D, 2)
+    px = {}   # (v0.8.2: taller: it rises well above his head and its foot reaches the ground)
+    line(px, 4, 9, 4, 52, WOOD_D, 2)
     for x in range(2, 8):
         px[(x, 8)] = WOOD
     line(px, 2, 7, 2, 3, WOOD)
@@ -443,7 +436,7 @@ def weapons():
     for y in range(2, 8):
         for x in range(3, 7):
             px[(x, y)] = ORB_L if (x == 4 and y == 3) else ORB
-    W["staff"] = sprite(10, 46, px, (4, 26), {"orb": [4, 4]})
+    W["staff"] = sprite(10, 55, px, (4, 36), {"orb": [4, 4]})
     # wand: short, pointing down and forward, a violet tip
     px = {}
     line(px, 2, 2, 8, 10, (60, 44, 40), 2)
@@ -467,3 +460,5 @@ if __name__ == "__main__":
     json.dump(out, open(os.path.join(OUT, "pip-hands.json"), "w"))
     print("wrote garb/pip-hands.json")
     weapons()
+    import make_costumes
+    make_costumes.main()
