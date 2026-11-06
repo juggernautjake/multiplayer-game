@@ -66,13 +66,13 @@ static func roar(kind := 0) -> AudioStreamWAV:
 ## and a click), "scrape" (a hoof raking gravel), "crackle" (sparse electric snaps), "charge" (a rising electric
 ## whine under crackle: the Storm Leap's charge-up), "whoosh" (air rushing past), "zap" (a static hit: a falling
 ## buzz), "slam" (a deep ground boom), "chirp" (an orb launching: a rising zip), "stun" (a static stun's long buzz),
-## "pant" (three heavy breaths), "eat" (crunching an apple), "buzz" (a Static orb); v0.12.0 the horn beam: "beam_hum"
-## (the orb charging: a rising whine with a swelling hum and quickening snaps), "beam" / "beam_long" (the beam firing,
-## 1.6 s / 2.75 s: a crackling sustained roar with a slow warble, rising in the attack and dying away), "pop" (the orb
-## collapsing).
+## "pant" (three heavy breaths), "eat" (crunching an apple), "buzz" (a Static orb), "heal" (v0.12.0: a heal-aura
+## pulse's chime); v0.12.0 the horn beam: "beam_hum" (the orb charging: a rising whine with a swelling hum and
+## quickening snaps), "beam" / "beam_long" (the beam firing, 1.6 s / 2.75 s: a crackling sustained roar with a slow
+## warble, rising in the attack and dying away), "pop" (the orb collapsing).
 static func fx(kind: String) -> AudioStreamWAV:
 	var dur: float = {"snort": 0.45, "hoof": 0.35, "scrape": 0.5, "crackle": 1.0, "charge": 1.6, "whoosh": 0.7,
-		"zap": 0.25, "slam": 1.4, "chirp": 0.18, "stun": 0.9, "pant": 1.4, "eat": 0.35, "buzz": 0.6,
+		"zap": 0.25, "slam": 1.4, "chirp": 0.18, "stun": 0.9, "pant": 1.4, "eat": 0.35, "buzz": 0.6, "heal": 0.55,
 		"beam_hum": 1.05, "beam": 1.6, "beam_long": 2.75, "pop": 0.35}.get(kind, 0.5)
 	var n := int(RATE * dur)
 	var d := PackedFloat32Array()
@@ -144,6 +144,10 @@ static func fx(kind: String) -> AudioStreamWAV:
 			"pop":
 				ph += (900.0 * exp(-t * 18.0) + 60.0) / RATE
 				v = sin(ph * TAU) * exp(-t * 14.0) * 0.8 + noise * exp(-t * 40.0) * 0.7
+			"heal":   # v0.12.0 a heal-aura pulse: a soft shimmering chime (a major triad, rising, with tremolo)
+				var env := minf(t / 0.04, 1.0) * exp(-t * 4.5)
+				var trem := 0.75 + 0.25 * sin(t * TAU * 11.0)
+				v = (sin(t * TAU * 523.0 * (1.0 + 0.03 * u)) + 0.7 * sin(t * TAU * 659.0) + 0.5 * sin(t * TAU * 784.0 * (1.0 + 0.03 * u))) * 0.22 * env * trem
 			"eat":
 				var bite := fposmod(t, 0.12)
 				v = (noise - lp) * exp(-bite * 40.0) * 0.9

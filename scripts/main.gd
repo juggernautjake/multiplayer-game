@@ -51,6 +51,7 @@ var items := {}            # item id -> { node, kind, pos }
 var prompt: Label3D        # "E  pick up Sword" over the nearest weapon
 var magic_fx: MagicFx      # spells' effects, shield bubbles, stuns
 var golem_view: GolemView  # the wand's stone golems
+var fog_view: FogView      # v0.12.0: the wand's fog clouds, who they hide and outline, the blindness inside
 var spell_sel := {}        # weapon -> the spell picked for it (R cycles)
 var aim_point := Vector3.ZERO   # what the crosshair is on (spells use it)
 var mana_fill: ColorRect
@@ -275,6 +276,10 @@ void fragment() {
 	golem_view.name = "Golems"
 	add_child(golem_view)
 	golem_view.setup(net)
+	fog_view = FogView.new()
+	fog_view.name = "Fog"
+	add_child(fog_view)
+	fog_view.setup(net, self)
 	arena_view = ArenaView.new()
 	arena_view.name = "Arena"
 	add_child(arena_view)
@@ -326,6 +331,7 @@ func _make_avatar(id: int, info: Dictionary) -> Node3D:
 		av = Avatar.new(nm, col, id != net.my_id, int(info.get("outfit", 0)))
 	add_child(av)
 	av.set_pvp(bool(info.get("pvp", false)))
+	av.npc = id >= Fog.NPC_ID0   # v0.12.0: challengers' wizards show their mana
 	return av
 
 
@@ -419,6 +425,8 @@ func _process(_delta: float) -> void:
 		for id in avatars.keys():
 			sts[id] = avatars[id].state
 		magic_fx.update(_delta, sts)
+	if fog_view:
+		fog_view.update(_delta, avatars, golem_view, cam)
 	if shake > 0.0:
 		shake = maxf(shake - _delta, 0.0)
 		cam.position += Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.07 * (shake / 0.14)
@@ -577,6 +585,8 @@ func _bot_input() -> Array:
 		return _bot_golems()
 	if bot_mode == "archery":
 		return _bot_archery()
+	if bot_mode == "fog":
+		return _bot_fog()
 	bot_t += 1
 	cam_yaw = wrapf(bot_t * 0.01, -PI, PI)
 	var b: int = Sim.Btn.FORWARD
@@ -611,13 +621,17 @@ func _bot_magic() -> Array:
 	var spell := 0
 	var aim := dummy + Vector3(0, 1.0, 0)
 	# [start tick, spell, ticks to hold the button]; level-2 spells only with --max-level
-	var plan := [[90, 0, 3], [170, 1, 3], [230, 1, 3], [300, 2, 80], [400, 3, 3], [480, 0, 3], [560, 3, 3], [640, 1, 3], [720, 2, 3]]
+	var S := func(n: String) -> int: return Weapons.idx(Weapons.STAFF, n)
+	var W := func(n: String) -> int: return Weapons.idx(Weapons.WAND, n)
+	var plan := [[90, S.call("Lightning"), 3], [170, S.call("Fireball"), 3], [230, S.call("Fireball"), 3], [300, S.call("Shield"), 80],
+		[400, S.call("Frost Nova"), 3], [480, W.call("Golem"), 3], [560, W.call("Fog"), 3], [640, W.call("Teleport"), 3],
+		[720, W.call("Stun"), 3], [800, W.call("Spark Beam"), 3], [870, W.call("Life Drain"), 3]]
 	weapon_slot = Weapons.STAFF if bot_t < 435 else Weapons.WAND
 	if _args().has("plan2"):   # the level-3 spells: a meteor on the dummy, then a gravity well beside it
-		plan = [[90, 4, 3], [330, 4, 3]]
+		plan = [[90, S.call("Meteor"), 3], [330, W.call("Gravity Well"), 3]]
 		weapon_slot = Weapons.STAFF if bot_t < 300 else Weapons.WAND
 	if _args().has("plan3"):   # the ultimates: an arcane storm over the dummies, then a stone titan beside them
-		plan = [[90, 5, 3], [480, 5, 3]]
+		plan = [[90, S.call("Arcane Storm"), 3], [480, W.call("Stone Titan"), 3]]
 		weapon_slot = Weapons.STAFF if bot_t < 450 else Weapons.WAND
 	for p in plan:
 		if bot_t >= p[0] and bot_t < p[0] + p[2]:
@@ -715,7 +729,7 @@ func _bot_show() -> Array:
 	elif t < 900:                       # spells, facing the camera at an angle
 		cam_yaw = lerp_angle(cam_yaw, 0.6, 0.03)
 		weapon_slot = magic
-		var plan := [[540, 1], [600, 0], [690, 2, 100], [820, 0]] if magic == Weapons.STAFF else [[540, 0], [640, 1], [720, 2]]
+		var plan := [[540, 1], [600, 0], [690, 2, 100], [820, 0]] if magic == Weapons.STAFF else [[540, Weapons.idx(Weapons.WAND, "Golem")], [640, Weapons.idx(Weapons.WAND, "Teleport")], [720, Weapons.idx(Weapons.WAND, "Stun")], [800, 0]]
 		for p in plan:
 			if t >= p[0] - 10:
 				spell = p[1]
@@ -730,6 +744,50 @@ func _bot_show() -> Array:
 		get_viewport().get_texture().get_image().save_png(shots.path_join("show_%03d.png" % t))
 	spell_sel[weapon_slot] = spell
 	return [b, cam_yaw, 0.0, weapon_slot, face, face, spell, aim]
+
+
+## Fog bot (v0.12.0; --host --give-all --max-level --bot fog --shots <dir> [--style figure]): a challenger's fog
+## round you (you're blind in it), then walking out of it (thick smoke hiding the challenger inside), then your own
+## fog with the challenger in it (faint for you, the challenger outlined, confused). Pictures along the way.
+func _bot_fog() -> Array:
+	bot_t += 1
+	if net.predicted == null or not net.players.has(net.my_id):
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var sp: Net.ServerPlayer = net.players[net.my_id]
+	sp.state.hp = Sim.MAX_HP
+	var me := net.predicted.pos
+	var npc: Net.ServerPlayer = null
+	for q: Net.ServerPlayer in net.players.values():
+		if q.npc:
+			npc = q
+	if bot_t == 20 and npc == null:
+		npc = net.spawn_npc(sp, Weapons.SWORD, 0)
+	if npc != null and bot_t < 60:
+		npc.state.pos = me + Vector3(0, 0, -5)
+	if bot_t == 60 and npc != null:   # the challenger's fog, round us both
+		var f := Fog.make(net.next_fog, me, npc.id, net.server_tick)
+		net.next_fog += 1
+		net.fogs.append(f)
+		net._fx("fog", Fog.to_args(f))
+	var b := 0
+	weapon_slot = Weapons.WAND
+	var spell := Weapons.idx(Weapons.WAND, "Spark Beam")
+	cam_yaw = 0.0
+	if bot_t >= 200 and bot_t < 330:   # walk out of it, then look back
+		b |= Sim.Btn.BACK
+	if bot_t >= 680 and npc != null and bot_t < 700:   # the challenger's fog is over: ours now
+		npc.state.pos = me + Vector3(1.5, 0, -6)
+	spell = Weapons.idx(Weapons.WAND, "Fog") if bot_t >= 690 else spell
+	if bot_t >= 700 and bot_t < 703:
+		b |= Sim.Btn.ATTACK
+	var shots := str(_args().get("shots", ""))
+	if shots != "" and bot_t in [50, 70, 90, 150, 260, 340, 380, 560, 640, 760, 820, 900, 960]:
+		get_viewport().get_texture().get_image().save_png(shots.path_join("fog_%d.png" % bot_t))
+	if bot_t > 1000:
+		get_tree().quit()
+	spell_sel[weapon_slot] = spell
+	var aim := me + Vector3(0, 1.0, -8.0)
+	return [b, cam_yaw, -0.15, weapon_slot, 0.0, 0.0, spell, aim]
 
 
 ## Golem-watching bot (--host --give-all --max-level --bot golems --shots <dir>): stands to one side of the dummies,
@@ -749,7 +807,7 @@ func _bot_golems() -> Array:
 	else:
 		cam_yaw = lerp_angle(cam_yaw, atan2(-(dummy - me).x, -(dummy - me).z) + 0.5, 0.1)
 	weapon_slot = Weapons.WAND
-	var spell := 0 if bot_t < 600 else 5
+	var spell := Weapons.idx(Weapons.WAND, "Golem") if bot_t < 600 else Weapons.idx(Weapons.WAND, "Stone Titan")
 	var aim := dummy + Vector3(-2.0, 0, 3.0)
 	if (bot_t >= 200 and bot_t < 203) or (bot_t >= 700 and bot_t < 703):
 		b |= Sim.Btn.ATTACK
@@ -1792,9 +1850,9 @@ func _update_combat_hud() -> void:
 			lvl_line += "   kills %d / %d to the next level" % [kn, int(Weapons.LEVEL_KILLS[lv])]
 		else:
 			lvl_line += "   (ultimate unlocked)"
-		var rows := ["   ".join(parts.slice(0, 3))]   # three spells a row, so six fit on screen
-		if parts.size() > 3:
-			rows.append("   ".join(parts.slice(3)))
+		var rows := ["   ".join(parts.slice(0, 4))]   # four spells a row (v0.12.0: the wand has eight)
+		if parts.size() > 4:
+			rows.append("   ".join(parts.slice(4)))
 		hud_spells.text = lvl_line + "\nR spell:  " + "\n".join(rows) + ("\nSTUNNED" if st.stun > 0 else "")
 	else:
 		hud_spells.text = "STUNNED" if st.stun > 0 else ""

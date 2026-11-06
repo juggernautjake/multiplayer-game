@@ -59,6 +59,11 @@ const DATA := [
 		{ "name": "Meteor", "level": 3, "cost": 45, "windup": 22, "cast": 40, "cooldown": 60, "range": 35.0, "delay": 60,
 		  "radius": 5.0, "max_damage": 40, "min_damage": 10, "knock": 9.0,
 		  "burn_radius": 3.0, "burn_ticks": 180, "burn_every": 30, "burn_damage": 4 },
+		# level 3 too (v0.12.0, Jacob): a channel. Hold to raise the staff: `drain` fifths of mana a tick (12 mana a
+		# second), and every `every` ticks the caster and every ally within `radius` m is healed `heal` (8 a second);
+		# it stops when the button is let go, the mana runs out, or everyone in range is already full (Net)
+		{ "name": "Heal Aura", "level": 3, "cost": 0, "windup": 0, "cast": 0, "cooldown": 20, "channel": true,
+		  "drain": 1, "radius": 7.0, "every": 30, "heal": 4 },
 		# level 4, the ultimate (12 kills): a storm gathers over where you aim and rains lightning for `duration` ticks,
 		# a bolt every `every` ticks, each seeking an enemy under the cloud (or striking at random within `area`)
 		{ "name": "Arcane Storm", "level": 4, "cost": 80, "windup": 30, "cast": 50, "cooldown": 120, "range": 35.0,
@@ -67,14 +72,25 @@ const DATA := [
 	] },
 	# the wand from the hidden vault: no mana; each spell has its own recharge (ticks) instead (Jacob 2026-11-04)
 	{ "kind": "magic", "slow": 0.6, "uses": "recharge", "spells": [
+		# v0.12.0 the wand's basic spell: an instant zap along the aim (hit-scan from the wand toward the crosshair, the
+		# first enemy body, golem or dummy within `range`), light damage, ready again every second
+		{ "name": "Spark Beam", "cost": 0, "windup": 5, "cast": 14, "cooldown": 4, "recharge": 60, "range": 30.0,
+		  "damage": 7, "knock": 1.0 },
 		{ "name": "Golem", "cost": 0, "windup": 24, "cast": 40, "cooldown": 10, "recharge": 600, "range": 9.0 },
 		{ "name": "Teleport", "cost": 0, "windup": 8, "cast": 16, "cooldown": 6, "recharge": 240, "range": 18.0 },
 		# the stun bolt bursts where it lands (the first person or golem in its way, a wall, or the crosshair point):
 		# every enemy within `radius` of the burst is held for `duration` (Jacob 2026-11-04: an area, to catch them)
 		{ "name": "Stun", "cost": 0, "windup": 10, "cast": 26, "cooldown": 10, "recharge": 300, "range": 24.0, "duration": 180, "radius": 2.5 },
-		# level 2 (3 kills with the wand): stone spikes burst up one after another in a line toward the crosshair
-		{ "name": "Earth Spikes", "level": 2, "cost": 0, "windup": 12, "cast": 30, "cooldown": 10, "recharge": 360,
-		  "range": 16.0, "spikes": 9, "spacing": 1.7, "radius": 1.5, "max_damage": 16, "min_damage": 8, "knock": 7.0 },
+		# level 2 (3 kills with the wand; v0.12.0, replaces Earth Spikes): a cloud of fog round the caster (see Fog):
+		# `half` m each way from the centre, `duration` ticks, thinning and drifting over the last `fade`
+		{ "name": "Fog", "level": 2, "cost": 0, "windup": 16, "cast": 32, "cooldown": 10, "recharge": 1080,
+		  "duration": 600, "fade": 120, "half": 12.5 },
+		# level 3 (7 kills; v0.12.0): a draining stream from the first enemy along the aim back into the wand: `damage`,
+		# and `drain` of what it really took comes back to the caster as health. If the first one along the aim is an
+		# ALLY (a player the caster can't hurt, or an ally's / the caster's golem) it hurts nobody and heals them
+		# `ally_heal` instead (about what a drain gives back); the caster gets nothing from that
+		{ "name": "Life Drain", "level": 3, "cost": 0, "windup": 12, "cast": 30, "cooldown": 8, "recharge": 180,
+		  "range": 18.0, "damage": 18, "drain": 0.45, "knock": 0.5, "ally_heal": 12 },
 		# level 3 (7 kills): a vortex where you aim, dragging enemies within `pull_radius` toward it for `duration`
 		# ticks (nibbling at those near its heart), then bursting outward
 		{ "name": "Gravity Well", "level": 3, "cost": 0, "windup": 14, "cast": 30, "cooldown": 10, "recharge": 900,
@@ -138,6 +154,35 @@ static func spell(w: int, i: int) -> Dictionary:
 		return {}
 	var sp: Array = d.spells
 	return sp[clampi(i, 0, sp.size() - 1)]
+
+
+## v0.12.0: the slot of the spell with this name on a magic weapon, or -1 (code names spells, so slots can move).
+static func idx(w: int, spell_name: String) -> int:
+	var d := get_data(w)
+	if d.kind != "magic":
+		return -1
+	var sp: Array = d.spells
+	for i in sp.size():
+		if str(sp[i].name) == spell_name:
+			return i
+	return -1
+
+
+## v0.12.0: the spell with this name, or {}.
+static func spell_named(w: int, spell_name: String) -> Dictionary:
+	var i := idx(w, spell_name)
+	return spell(w, i) if i >= 0 else {}
+
+
+## v0.12.0: the names of the spells a staff / wand gains at exactly this level (the level-up banner names them all).
+static func spells_at(w: int, level: int) -> Array:
+	var out := []
+	var d := get_data(w)
+	if d.kind == "magic":
+		for sp in d.spells:
+			if int(sp.get("level", 1)) == level:
+				out.append(str(sp.name))
+	return out
 
 
 ## Area damage: full at the centre, falling off evenly to min_damage at the edge, nothing beyond.

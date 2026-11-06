@@ -124,13 +124,13 @@ func _initialize() -> void:
 	b.state.hp = Sim.MAX_HP
 	b.state.shield = 0
 	a.state.weapon = Weapons.WAND
-	a.state.spell = 2
+	a.state.spell = Weapons.idx(Weapons.WAND, "Stun")
 	a.state.yaw = 0.0
-	net._cast(a, Sim.PlayerInput.new(1, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 2, Vector3(62, 0, 47.5)), a.state.pos)
-	check(b.state.stun == int(Weapons.spell(Weapons.WAND, 2).duration), "a stun landing 2 m away catches them (held for 3 s)")
+	net._cast(a, Sim.PlayerInput.new(1, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, a.state.spell, Vector3(62, 0, 47.5)), a.state.pos)
+	check(b.state.stun == int(Weapons.spell_named(Weapons.WAND, "Stun").duration), "a stun landing 2 m away catches them (held for 3 s)")
 	b.state.stun = 0
 	b.state.pos = Vector3(60, 0, 40)
-	net._cast(a, Sim.PlayerInput.new(2, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 2, Vector3(64, 0, 47.5)), a.state.pos)
+	net._cast(a, Sim.PlayerInput.new(2, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, a.state.spell, Vector3(64, 0, 47.5)), a.state.pos)
 	check(b.state.stun == 0, "8 m away they're not caught")
 	# your own blasts never hurt you
 	a.state.hp = Sim.MAX_HP
@@ -176,8 +176,8 @@ func _initialize() -> void:
 	b.state.vel = Vector3.ZERO
 	b.state.pos = Vector3(66, 0, 60)
 	a.state.weapon = Weapons.WAND
-	a.state.spell = 4
-	net._cast(a, Sim.PlayerInput.new(4, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, 4, Vector3(61, 0, 60)), a.state.pos)
+	a.state.spell = Weapons.idx(Weapons.WAND, "Gravity Well")
+	net._cast(a, Sim.PlayerInput.new(4, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, a.state.spell, Vector3(61, 0, 60)), a.state.pos)
 	var d0 := Vector2(b.state.pos.x - 61, b.state.pos.z - 60).length()
 	for t in 90:
 		net.server_tick += 1
@@ -197,8 +197,8 @@ func _initialize() -> void:
 	b.state.vel = Vector3.ZERO
 	a.state.pos = Vector3(60, 0, 62)
 	a.state.weapon = Weapons.STAFF
-	a.state.spell = 5
-	net._cast(a, Sim.PlayerInput.new(5, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 5, Vector3(60, 0, 50)), a.state.pos)
+	a.state.spell = Weapons.idx(Weapons.STAFF, "Arcane Storm")
+	net._cast(a, Sim.PlayerInput.new(5, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, a.state.spell, Vector3(60, 0, 50)), a.state.pos)
 	var strikes := 0
 	var last_hp := b.state.hp
 	for t in 330:

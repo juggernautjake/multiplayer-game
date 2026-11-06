@@ -294,7 +294,7 @@ staff or the wand.
 Stone's pool before and after the first level-up, one challenger at a time, challengers and players hurt each other
 whatever PvP says, a challenger kill levels the staff and a fallen challenger leaves, a swordsman closes in and fights,
 an archer (v0.11.0: aims where you stand, with spread and a tell) hits some shots but never every one, standing or strafing, Thunderhorn's health (1.7x for two, 2.4x for three), each spell's effect on him
-(lightning 1/4, meteor and earth spikes x1.5, earth spikes stop a charge, fireball burns, frost slows, stuns shorten,
+(lightning 1/4, meteor x1.5, v0.12.0: earth spikes gone (no weakness), fireball burns, frost slows, a stun adds a point to his stun meter,
 gravity wells can't move him), victory, and defeat then restart alone and with two players (levels kept).
 
 ## boss_test.gd
@@ -337,3 +337,63 @@ angles (`beam_<n>_<what>.png`) and a printout of how far the orb sits from the n
 the camera for a movie: add `--write-movie beam.avi --fixed-fps 30` before `-s` (then e.g. `ffmpeg -i beam.avi -c:v
 libx264 -crf 22 -pix_fmt yuv420p beam.mp4`). `boss_pose_shots.gd ... dazed` (with `--fixed-fps 60`): the daze strip.
 
+## fog_test.gd
+
+`<godot> --headless --path . --script tools/fog_test.gd` (v0.12.0, offline, prints harmless RPC errors): the wand's
+list (Earth Spikes gone); Fog cast by a player covers 25 x 25 m round them (corners in, 14 m out), thick for 8 s,
+thinning and drifting, gone at 10 s; `Fog.view_for` / `look_for`: the caster and an ally (PvP off) see the challenger
+inside outlined and themselves outlined, aren't blinded and see through it; the challenger inside is blinded and sees
+nothing beyond ~2.5 m; out of it the blindness lifts; a PvP enemy outside sees everyone inside hidden, inside is
+blinded; a challenger inside can't target anyone, thrashes or stumbles (both seen as it re-picks every 2 s), is still
+confused 0.5 s after leaving and itself again after ~1 s, can't target the caster inside from outside; a challenger
+walking to someone on the far side never enters the fog and gets round it; an enemy (challenger's) golem in the fog is
+confused while the caster's own golem isn't; Thunderhorn's targeting is the same with a fog over his target (and
+boss.gd has no fog code); overlapping clouds: a same-side overlap (1 and 2, PvP off) stays clear for them with
+the enemy outlined, an opposing overlap (1's and the challenger's) blinds 1, ally 2 and the challenger alike, with no
+outlines on or from anyone in it, while the per-caster rules hold elsewhere. Spark Beam zaps the first enemy on the aim for 7 and misses one off the line; Life Drain hits
+for 18 and gives back 45% (+8), and only of what it really took (5 hp left -> +2).
+
+magic_test (v0.12.0 additions): Fog unlocks at wand level 2, Earth Spikes gone (weapons, CastPose, MagicFx), Spark
+Beam is slot 0 at level 1 with a 1 s recharge and casts once a second held down, Life Drain at level 3 every 3 s,
+eight wand spells = eight recharges in the state and the snapshot (`Codec.RECHARGES`).
+
+Demo: `<godot> --path . -- --host --port 7797 --give-all --max-level --bot fog --shots <dir> [--style figure]`: a
+challenger's fog round you (blind), walking out (thick smoke hides him), then your own fog (faint, him outlined red,
+you cyan).
+
+Also in fog_test (`_spells`): Life Drain on an ally (PvP off) heals them +12, hurts nobody and gives the caster
+nothing, never past full, and mends the caster's own golem.
+
+## wizard_test.gd
+
+`<godot> --headless --path . --script tools/wizard_test.gd` (v0.12.0, offline, prints harmless RPC errors): challenger
+wizards' kits are their level-1 spells (staff: Lightning, Fireball, Shield; wand: Spark Beam, Golem, Teleport, Stun);
+a staff wizard over 45 s runs its mana down (under 22), then rests with no casts until it's back, never spends more
+than 100 + 12 a second, and casts at most 30 times; a hard wand wizard against a player strafing 3.5 m each way lands
+some sparks but not all (typically ~10 of 21; ~15 of 21 on a still player); over 80 s fights (arrows drawn and loosed
+at it every 1.5 s, the player stepping into melee every ~12 s) each wizard uses every spell of its kit, never the same
+one more than 3 times running, with a wind-up seen before its casts.
+
+## dodge_test.gd
+
+`<godot> --headless --path . --script tools/dodge_test.gd` (v0.12.0, offline, prints harmless RPC errors): 60
+challengers per tier with a lightning warning ring under them: they dash out more at higher tiers (typically 7% /
+42% / 73%), never always, and only after a reaction delay; 60 per tier in Thunderhorn's charge line: more side-steps
+at higher tiers (~12% / 37% / 70%), none when the charge isn't coming at them; archers aim at the target's current
+position (no lead) and their spread shrinks / draw rate rises with tier.
+
+## heal_test.gd
+
+`<godot> --headless --path . --script tools/heal_test.gd` (v0.12.0, offline, prints harmless RPC errors): the staff's
+Heal Aura is a second level-3 spell beside Meteor and not in challengers' kits; held for ~1 s it heals the caster and
+an ally 3 m off by 12 each (pulses at 0, 0.5 and 1 s), never a challenger 4 m off or a player 12 m off, and costs 12
+mana; letting go stops it (no more healing, mana comes back); with everyone in reach full it stops while still held;
+with 8 mana it stops when the mana runs out (~40 ticks).
+
+npc_test (v0.12.0 additions): over nine duels the challengers' tiers go 1, 1, 1, 2, 2, 2, 2, 2, 3 (tier 2 after three
+wins, tier 3 after eight; level 2 / 3 also give tier 2 / 3) and the name tag shows the tier; no dash-dodging at tier 1.
+dodge_test now expects no dodges at tier 1.
+
+wizard_test (`_npc_golems`): a wand challenger over 60 s keeps at most 3 golems alive; its golem hits a player with
+PvP off; a player's golem picks the challenger's golem; killing that golem gives no level; the challenger's golems
+crumble when it falls.

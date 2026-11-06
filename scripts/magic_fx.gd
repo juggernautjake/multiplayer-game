@@ -20,7 +20,10 @@
 ##   stun:      (also) little violet arcs keep crackling round anyone stunned;
 ##   frost nova: a ring of ice racing out from the caster, ice shards bursting up along it, a cold flash, frost on the
 ##              ground, and a frosty ring at the feet of everyone it slowed;
-##   earth spikes: stone spikes stabbing up out of the ground one after another, in dust;
+##   spark beam: (v0.12.0) an instant thin white-blue zap from the wand along the aim, sparks where it ends;
+##   life drain: (v0.12.0) a crimson stream pulled out of the victim, motes flowing back into the caster's wand, a
+##              green "+N" over the caster for what came back;
+##   fog:       (v0.12.0) drawn by FogView (the cloud, the outlines, the blindness), from the "fog" event;
 ##   meteor:    a red target ring, a burning rock streaking down from the sky trailing fire and smoke, then a huge
 ##              blast, flying rocks, a shockwave ring, a crater, and flames on the ground for 3 s;
 ##   gravity well: a dark violet vortex: a black core, spinning rings, motes spiralling in, a violet light pulsing;
@@ -92,7 +95,8 @@ var frosts := {}             # player id -> the frosty ring at the feet of a slo
 var runes := {}              # player id -> the rune circle turning under them while they cast
 const SPELL_COLOR := { "Lightning": Color("cfe6ff"), "Fireball": Color("ff8a2a"), "Shield": Color("7fd0ff"),
 	"Frost Nova": Color("9fe8ff"), "Golem": Color("ffb02e"), "Teleport": Color("c070ff"), "Stun": Color("c070ff"),
-	"Earth Spikes": Color("d8a060"), "Meteor": Color("ff5a1a"), "Gravity Well": Color("8a3cff"),
+	"Spark Beam": Color("bfe8ff"), "Life Drain": Color("d0203a"),
+	"Fog": Color("b8c4cc"), "Heal Aura": Color("7dffa0"), "Meteor": Color("ff5a1a"), "Gravity Well": Color("8a3cff"),
 	"Arcane Storm": Color("9fc4ff"), "Stone Titan": Color("ff5a1a") }
 var _door_target := 0.0
 
@@ -165,8 +169,19 @@ func _on_fx(kind: String, a: Array) -> void:
 			_cracks(a[1], 4.0, 10)
 			_flash_light(a[1] + Vector3(0, 1, 0), Color("ff5a1a"), 6.0, 10.0, 0.8)
 			_shake_near(a[1], 0.3)
-		"spike":
-			_spike(a[0])
+		"npc_tell":   # v0.12.0: a challenger wizard winding a spell up: a growing glow and motes at its hand
+			_npc_tell(int(a[0]), str(a[1]), float(a[2]) * Config.DT)
+		"spark":
+			_spark(a[1], a[2], bool(a[3]))
+		"drain":
+			_drain(int(a[0]), a[1], a[2], int(a[3]))
+		"heal_pulse":   # v0.12.0 the staff's Heal Aura: a ring, rising motes, "+N" over everyone healed, a chime
+			_heal_pulse(int(a[0]), a[1], float(a[2]), a[3])
+		"heal_stop":
+			if avatars.has(a[0]):
+				Fx.burst(main, (avatars[a[0]] as Node3D).position + Vector3(0, 2.0, 0), Vector3.UP, Color("b8ffb0"), 10, 1.5, 0.04)
+		"drain_ally":   # v0.12.0: Life Drain on an ally: a green-gold stream from the caster into them, "+N" on them
+			_drain_ally(a[1], a[2], int(a[3]), int(a[4]))
 		"level_up":
 			_level_up(int(a[0]), int(a[1]), int(a[2]), str(a[3]))
 		"shield_shatter":
@@ -958,30 +973,173 @@ func _frost_nova(at: Vector3, r: float) -> void:
 	_shake_near(at, 0.1)
 
 
-func _spike(at: Vector3) -> void:
-	var spike := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = 0.0
-	cm.bottom_radius = 0.42
-	cm.height = 1.7
-	cm.radial_segments = 6
-	spike.mesh = cm
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color("7a6a58")
-	m.roughness = 0.95
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	spike.material_override = m
-	main.add_child(spike)
-	spike.global_position = at + Vector3(0, -0.9, 0)
-	spike.rotation = Vector3(randf_range(-0.2, 0.2), randf() * TAU, randf_range(-0.2, 0.2))
-	var tw := spike.create_tween()
-	tw.tween_property(spike, "global_position:y", at.y + 0.75, 0.07).set_ease(Tween.EASE_OUT)
-	tw.tween_interval(0.7)
-	tw.tween_property(spike, "global_position:y", at.y - 1.0, 0.5)
-	tw.tween_callback(spike.queue_free)
-	Fx.burst(main, at + Vector3(0, 0.2, 0), Vector3.UP, Color("9a8f80"), 14, 4.0, 0.07)
-	_flash_light(at + Vector3(0, 0.6, 0), Color("ffb060"), 1.5, 3.0, 0.2)
-	_shake_near(at, 0.06)
+## v0.12.0: a challenger wizard's wind-up tell: a light in the spell's colour at its hand, swelling until the cast,
+## with motes drawn in.
+func _npc_tell(id: int, spell: String, life: float) -> void:
+	if not avatars.has(id):
+		return
+	var av: Node3D = avatars[id]
+	var c: Color = SPELL_COLOR.get(spell, Color.WHITE)
+	var l := OmniLight3D.new()
+	l.light_color = c
+	l.light_energy = 0.3
+	l.omni_range = 3.0
+	av.add_child(l)
+	l.position = Vector3(0, 1.5, 0)
+	var tw := l.create_tween()
+	tw.tween_property(l, "light_energy", 3.5, maxf(life, 0.1))
+	tw.tween_property(l, "light_energy", 0.0, 0.25)
+	tw.tween_callback(l.queue_free)
+	var motes := func() -> void:
+		if is_instance_valid(av):
+			Fx.burst(main, av.position + Vector3(0, 1.5, 0), Vector3.UP, c, 6, 1.2, 0.04)
+	for k in 3:
+		get_tree().create_timer(life * k / 3.0 + 0.01).timeout.connect(motes)
+
+
+## v0.12.0 the Heal Aura's pulse: a green-gold ring spreading over the ground to its reach, motes rising round the
+## caster and from everyone healed, "+N" over each, and a soft chime.
+var _heal_snd: AudioStream
+
+
+func _heal_pulse(id: int, at: Vector3, r: float, got: Array) -> void:
+	var c := at
+	if avatars.has(id):
+		c = (avatars[id] as Node3D).position
+	var ring := _disc(c, r, Color("9dff9a"), 0.22)
+	ring.scale = Vector3(0.2, 1, 0.2)
+	var tw := ring.create_tween().set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3(1, 1, 1), 0.45)
+	tw.tween_property(ring.material_override, "albedo_color:a", 0.0, 0.5)
+	tw.chain().tween_callback(ring.queue_free)
+	Fx.burst(main, c + Vector3(0, 2.3, 0), Vector3.UP, Color("ffe27a"), 6, 1.4, 0.04)
+	for g in got:
+		var who := int(g[0])
+		var amt := int(g[1])
+		if not avatars.has(who) or amt <= 0:
+			continue
+		var p := (avatars[who] as Node3D).position
+		Fx.burst(main, p + Vector3(0, 0.3, 0), Vector3.UP, Color("8aff8a") if who % 2 else Color("ffe27a"), 8, 2.2, 0.045)
+		var l := Label3D.new()
+		l.text = "+%d" % amt
+		l.modulate = Color("7dffa0")
+		l.font_size = 40
+		l.outline_size = 8
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		l.no_depth_test = true
+		main.add_child(l)
+		l.global_position = p + Vector3(randf_range(-0.3, 0.3), 2.4, 0)
+		var lt := l.create_tween().set_parallel(true)
+		lt.tween_property(l, "global_position:y", l.global_position.y + 0.7, 0.8)
+		lt.tween_property(l, "modulate:a", 0.0, 0.4).set_delay(0.4)
+		lt.chain().tween_callback(l.queue_free)
+	if _heal_snd == null:
+		_heal_snd = Synth.fx("heal")
+	if avatars.has(net.my_id) and (avatars[net.my_id] as Node3D).position.distance_to(c) < 30.0:
+		Synth.play(main, _heal_snd, -10.0)
+
+
+## v0.12.0 Life Drain on an ally: a green-gold healing stream from the caster's wand into them, motes flowing along
+## it, a soft green light and "+N" over them.
+func _drain_ally(hand: Vector3, at: Vector3, heal: int, target: int) -> void:
+	var beam := _jag(hand, at, maxi(3, int(at.distance_to(hand) / 1.2)), 0.12, 0.05, Color("b8ff6a"))
+	var mat: StandardMaterial3D = beam.get_meta("mat")
+	var tw := beam.create_tween()
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.6)
+	tw.tween_callback(beam.queue_free)
+	for k in 9:
+		var m := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.07
+		sm.height = 0.14
+		m.mesh = sm
+		m.material_override = _glow_mat(Color("7dffa0") if k % 2 else Color("ffd860"), 4.0)
+		main.add_child(m)
+		m.global_position = hand
+		var side := Vector3(randf_range(-0.5, 0.5), randf_range(0.0, 0.6), randf_range(-0.5, 0.5))
+		var fly := func(x: float) -> void:
+			m.global_position = hand.lerp(at, x) + side * sin(x * PI)
+		var t := m.create_tween()
+		t.tween_interval(k * 0.05)
+		t.tween_method(fly, 0.0, 1.0, 0.45)
+		t.tween_callback(m.queue_free)
+	Fx.burst(main, at, Vector3.UP, Color("9dff9a"), 16, 2.0, 0.05)
+	_flash_light(at + Vector3(0, 0.3, 0), Color("8aff8a"), 2.0, 4.0, 0.5)
+	var where := at + Vector3(0, 1.2, 0)
+	if avatars.has(target):
+		where = (avatars[target] as Node3D).position + Vector3(0, 2.5, 0)
+	if heal > 0:
+		var l := Label3D.new()
+		l.text = "+%d" % heal
+		l.modulate = Color("7dffa0")
+		l.font_size = 52
+		l.outline_size = 10
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		l.no_depth_test = true
+		main.add_child(l)
+		l.global_position = where
+		var lt := l.create_tween().set_parallel(true)
+		lt.tween_property(l, "global_position:y", where.y + 0.9, 1.0).set_delay(0.4)
+		lt.tween_property(l, "modulate:a", 0.0, 0.6).set_delay(0.8)
+		lt.chain().tween_callback(l.queue_free)
+
+
+## v0.12.0 Spark Beam: a quick bright zap, gone in a tenth of a second or so.
+func _spark(from: Vector3, to: Vector3, hit: bool) -> void:
+	var beam := _jag(from, to, maxi(2, int(from.distance_to(to) / 2.5)), 0.08, 0.035, Color("dff4ff"))
+	var mat: StandardMaterial3D = beam.get_meta("mat")
+	var tw := beam.create_tween()
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.14)
+	tw.tween_callback(beam.queue_free)
+	Fx.burst(main, to, (from - to).normalized(), Color("bfe8ff"), 10 if hit else 4, 3.0, 0.03)
+	_flash_light(from, Color("bfe8ff"), 1.2, 3.0, 0.08)
+	_flash_light(to, Color("9fd8ff"), 1.8 if hit else 0.8, 3.0, 0.12)
+
+
+## v0.12.0 Life Drain: a dark red stream from the victim, and motes of life flowing along it back into the caster's
+## wand (following the caster if they move), then "+N" over the caster.
+func _drain(id: int, hand: Vector3, at: Vector3, heal: int) -> void:
+	var beam := _jag(at, hand, maxi(3, int(at.distance_to(hand) / 1.2)), 0.18, 0.05, Color("d0203a"))
+	var mat: StandardMaterial3D = beam.get_meta("mat")
+	var tw := beam.create_tween()
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.55)
+	tw.tween_callback(beam.queue_free)
+	Fx.burst(main, at, Vector3.UP, Color("ff3050"), 14, 2.5, 0.05)
+	for k in 9:
+		var m := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.07
+		sm.height = 0.14
+		m.mesh = sm
+		m.material_override = _glow_mat(Color("ff4060") if k % 3 else Color("7dffa0"), 4.0)
+		main.add_child(m)
+		m.global_position = at
+		var side := Vector3(randf_range(-0.6, 0.6), randf_range(0.0, 0.8), randf_range(-0.6, 0.6))
+		var t := m.create_tween()
+		t.tween_interval(k * 0.05)
+		var fly := func(x: float) -> void:
+			var end := hand
+			if avatars.has(id):
+				end = (avatars[id] as Node3D).position + Vector3(0, 1.4, 0)
+			m.global_position = at.lerp(end, x) + side * sin(x * PI)
+			m.scale = Vector3.ONE * (1.0 - 0.5 * x)
+		t.tween_method(fly, 0.0, 1.0, 0.45)
+		t.tween_callback(m.queue_free)
+	_flash_light(at + Vector3(0, 0.3, 0), Color("ff2040"), 2.0, 4.0, 0.4)
+	if heal > 0 and avatars.has(id):
+		var l := Label3D.new()
+		l.text = "+%d" % heal
+		l.modulate = Color("7dffa0")
+		l.font_size = 52
+		l.outline_size = 10
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		l.no_depth_test = true
+		main.add_child(l)
+		l.global_position = (avatars[id] as Node3D).position + Vector3(0, 2.5, 0)
+		var lt := l.create_tween().set_parallel(true)
+		lt.tween_property(l, "global_position:y", l.global_position.y + 0.9, 1.0).set_delay(0.4)
+		lt.tween_property(l, "modulate:a", 0.0, 0.6).set_delay(0.8)
+		lt.chain().tween_callback(l.queue_free)
 
 
 func _level_up(id: int, w: int, lv: int, spell: String) -> void:

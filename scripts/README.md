@@ -616,9 +616,9 @@ centre, size, up and facing, hat sizes).
 ### cast_pose.gd
 
 `class_name CastPose`, static: `at(weapon, spell, into, windup, cast)` gives the staff or wand's reach, lift, sideways
-offset, angle, crouch, lean, flare and whether the free hand joins, through each spell's gesture: `thrust` (Fireball,
-Stun, Teleport), `sky` (Lightning, Meteor, Arcane Storm), `slam` (Frost Nova, Earth Spikes), `summon` (Golem, Stone
-Titan), `vortex` (Gravity Well). Each gesture has anticipation, a fast release with overshoot and a follow-through; the
+offset, angle, crouch, lean, flare and whether the free hand joins, through each spell's gesture: `thrust` (Fireball, Spark Beam, Life Drain,
+Stun, Teleport), `sky` (Lightning, Meteor, Arcane Storm), `slam` (Frost Nova), `summon` (Golem, Stone
+Titan), `vortex` (Gravity Well, Fog). Each gesture has anticipation, a fast release with overshoot and a follow-through; the
 wand adds a looping flourish while the spell builds. Pip's prop and the figure's hands both use it.
 
 ### motion_fx.gd
@@ -711,7 +711,7 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   wizards shield, cast area spells, blink, summon golems and follow stuns up.
 - `boss.gd` (`Boss`): Thunderhorn on the server (a `RefCounted` like the golems). States `S`, `tick(now, people,
   golems)` fills `hits`, `slows`, `strikes` and `fx` for Net to apply; `hurt(amount, from, spell)` applies his
-  weaknesses (Earth Spikes, Meteor x1.5, Lightning x0.25, Fireball burns), `stunned` (diminishing staggers),
+  weaknesses (Meteor x1.5, Lightning x0.25, Fireball burns), `stunned` (a point on the stun meter; 7 = dazed),
   `frosted`; enrage below 1/2, storm below 1/4; `pack()` for clients. Target id `Boss.ID` (-5000).
 - `boss_view.gd` (`BossView`): draws him from `Net.boss_changed` and the `boss_*` events: the cloud body, the lightning
   skeleton, horns, eyes, gait, every state's pose, the beam, stomp rings, ball lightning, the static field, sounds,
@@ -963,3 +963,106 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   45/s while firing) and HornBeam follows the server's heading eased at 45/s.
 - `tools/boss_beam_shots.gd`: the whole sequence at dusk through a real BossView (stills, or a clip for the movie maker).
 
+
+## Wand spells: Spark Beam, Fog, Life Drain (after v0.12.0)
+
+- Wand spell set. Earth Spikes are gone everywhere (weapons, `CastPose`, `MagicFx`, `Net._cast` / the
+  "spike" pending spell, NpcAI, Thunderhorn's weakness and charge stop, docs, tests). The wand is now (slot: name,
+  level, recharge): 0 **Spark Beam** L1 1 s; 1 Golem L1 10 s; 2 Teleport L1 4 s; 3 Stun L1 5 s; 4 **Fog** L2 18 s;
+  5 **Life Drain** L3 3 s; 6 Gravity Well L3 15 s; 7 Stone Titan L4 60 s. R cycles the unlocked ones (the HUD shows four a
+  row). `Sim.PlayerState.recharge` has 8 slots and `Codec.RECHARGES` (8) sends them all (83 bytes a player). Code
+  names spells instead of slots: `Weapons.idx(w, name)`, `spell_named`, `spells_at(w, level)` (the level-up banner
+  names every spell of the level, "A & B"); Net, Main's bots and the tests use names.
+  - **Spark Beam:** windup 5, cast 14, damage 7, knock 1, range 30. `Net._beam_target(p, from, aim, reach)`: the first
+    enemy player, other summoner's golem (via `_stun_target`), practice dummy or Thunderhorn along the line, walls stop
+    it. Event `spark` [id, hand, end, hit]: `MagicFx._spark` (a thin white-blue jagged line gone in ~0.14 s, sparks, two
+    small lights).
+  - **Life Drain:** windup 12, cast 30, damage 18, `drain` 0.45, range 18. `Net.last_dealt` (set by `_damage`: what the
+    target really lost, 0 if a shield soaked it all) -> `Net.drain_heal(dealt, k)` back to the caster. Event `drain`
+    [id, hand, target point, heal]: `MagicFx._drain` (a crimson jagged stream, nine red/green motes flying from the
+    victim into the caster's wand, following them, "+N" in green).
+  - **Fog** (`fog.gd`, `Fog`, pure statics; `fog_view.gd`, `FogView`): `Net.fogs` holds records (`Fog.make`: id,
+    centre, caster, t0, `duration` 600, `fade` 120, `half` 12.5, a drift direction from the id); the `fog` event
+    (`Fog.to_args`) gives every client the same record; pruned when over. `covers` (the 25 x 25 m square, -3..+7 m
+    high, while density >= 0.12), `density` (1, then down over the last 2 s), `centre` (drifts 1.5 m/s while fading),
+    `half_now` (spreads 15%). Sides like `Net.can_hurt` (`enemies(a, b, pvp)`; ids from `Fog.NPC_ID0` are challengers
+    / minions; golems pass their summoner): `friend(f, who)` = the caster or anyone they can't hurt. `impair`,
+    `view_for(viewer, pos, fogs, tick, pvp)` -> {impair, see_through, inside}, `look_for(viewer, vpos, side, pos, ...,
+    is_self)` -> `Look.NORMAL / OUTLINED / HIDDEN`, `can_see` (NPC brains, golems), `lost`, `steer` (walk round a
+    cloud's edge, a steady side choice), `overlap_at(pos, fogs, tick, pvp)`: clouds from OPPOSING casters overlapping
+    there (Jacob): everyone inside that overlap is blind, both sides, and no outlines there (none on anyone in it, none
+    seen from it); same-side overlaps change nothing. Thunderhorn has no fog code. Net: `fog_pvp()`; NpcAI:
+    `_confused` (`fog_mode` "thrash": swing / shoot / spark at a random spot 1-4 m off every 0.5 s; "stumble": walk on
+    a jerking heading), re-picked every `FOG_ROLL` 120 ticks, `FOG_RECOVER` 60 ticks after getting out; `_pick_target`
+    skips anyone it can't see; moves pass through `Fog.steer`. Golems: `fogs` / `fog_pvp` set by Net each tick,
+    `_confused` (thrash = a slam at the air, stumble), `_pick` skips hidden targets, walking is steered round.
+    FogView (Main calls `update(delta, avatars, golem_view, cam)` after placing the avatars): 108 billboard puffs per
+    cloud (3 layers of 6 x 6, a generated noise texture), alpha 0.8 x density for those it hides from, 0.12 for the
+    caster's side, billowing out over 0.5 s; avatars and golems that are HIDDEN are made invisible (names and bars with
+    them); OUTLINED gets a rim-light `material_overlay` (red on enemies, cyan on yourself; depth test off, so it shows
+    through everything) on every mesh of the figure or golem, or for Pip a twin Sprite3D with a shader that grows his
+    sprite's alpha by ~2.5 px in flat glowing colour, drawn just behind him; blind (impair > 0): a full-screen quad on
+    the camera reading the depth buffer, fogging by distance from the player's body (1.6 -> 3.2 m), washing colours
+    out and darkening the edges, easing in fast and out over `Fog.CLEAR` (0.5 s); the crosshair is UI and stays.
+    Demo bot: `--bot fog` (Main `_bot_fog`). Tests: `tools/fog_test.gd`, magic_test additions.
+- Life Drain on an ally (v0.12.0, Jacob): if the first body along the beam is an ally (a player the caster can't hurt,
+  or the caster's or an ally's golem: `Net._ally_on_beam`), nobody is hurt; the ally is healed `ally_heal` (12) through
+  `Net.heal_target` (players and golems, never past full) and the caster gets nothing. Event `drain_ally` [caster,
+  hand, point, healed, target]: `MagicFx._drain_ally` (a green-gold stream from the wand into them, motes, "+N" on
+  them). Same 3 s recharge. Challenger wand wizards don't have Life Drain (it's level 3; their kit is level 1).
+  Test: fog_test `_spells`.
+- Challenger wizards (v0.12.0, `npc_ai.gd`, the WIZARDS block). Kit: `NpcAI.kit(w)` = the weapon's level-1 spells
+  (staff: Lightning, Fireball, Shield; wand: Spark Beam, Golem, Teleport, Stun); the basic attack is Fireball / Spark
+  Beam. Mana: no bypass was found (the staff's mana always went through `Sim.step`); what looked infinite was a cast
+  as soon as it could afford one. Now below `LOW_MANA` (22) it rests (backs off 5 m further, strafes, no casting)
+  until `REST_MANA` (55). Choice: `_utility` -> `_score` per ready spell (`_ready_to`: the game's recharge / mana and
+  its own `SPELL_CD`): Lightning 1.0 (+0.6 at a still target, +0.5 per player near the target, -0.6 under 5 m),
+  Fireball 1.1 (+0.4 at 5-20 m, -0.3 at a fast target, +0.3 a crowd), Shield 2.5 with shots coming (+0.6 low health
+  up close), Spark Beam 1.0 in range, Golem 1.3 (0.4 with two out; +0.4 low health) under 22 m, Teleport 2.6 under
+  4 m (1.4 low health under 8 m), Stun 0.9 (+0.7 at a runner, +0.5 if they're attacking or drawing); x0.6 if it would
+  leave under 10 mana; x`REPEAT_K` (0.5) per use among the last `REPEAT_WINDOW` (4); 0 after `MAX_SAME` (3) in a row
+  (`_run_of`, also for the reactive shield); x random 0.75-1.25. Reactive shield: a shot about to hit, or (new) a bow
+  or slingshot drawn at it past 20 ticks (`_threat`); it drops a wind-up for it. Aim: `_track` follows the target's
+  current position with a lag (`TRACK` 0.08 a tick; no lead), plus an error picked at the wind-up (`WIZ_ERR`
+  0.09/0.07/0.055 rad at 10 m, x(0.6 + d/25), x(1 + speed/4, at most 2.5), x1.8 if dashing), turned round the caster
+  and short/long. Tell: `WINDUP` 34/26/20 ticks planted and facing them (event `npc_tell` [id, spell, ticks]:
+  `MagicFx._npc_tell`, a swelling light in the spell's colour and motes at its hand), then the cast, then `PAUSE`
+  50-90 / 35-70 / 25-55 ticks. `casts` lists what it cast. Melee keeps `AIM_ERR`; wizards don't use it any more.
+  Mana bar: `Avatar.mana_bars` / `show_mana` (a blue bar under the health bar, flashing when low) for challengers
+  (`npc`, set by Main from the id) holding a mana weapon, in both the Pip and figure views. Test: `tools/wizard_test.gd`.
+- Challengers learn to dash (v0.12.0, `npc_ai.gd`): `_threat` also reports area spells about to land on them (the
+  warning ring of lightning, a meteor, a storm bolt or Thunderhorn's called lightning within its radius + 0.8 m,
+  `pending_spells`; never a fellow challenger's) and Thunderhorn winding up or running a charge / rush down a line
+  through them (ahead within 28 m, within his radius + 1.6 m of the line); `threat_kind` says which ("shot", "draw",
+  "melee", "spell", "charge"). For spells and charges: noticed after REACT/2 + `SPELL_REACT` (10/6/3) + random ticks,
+  then a side-dash away with `SPELL_DODGE` (0.12/0.4/0.65) by tier. Measured (dodge_test): lightning rings 7% / 42% /
+  73% after ~24 / 15 / 8 ticks; charges 12% / 37% / 70%. `dodges` counts them. Archers and slingers (v0.11.0)
+  verified unchanged: no lead (`_lead(..., 0.0)`), `SHOT_ERR` 0.1/0.075/0.055, `SHOT_START` 0.02/0.028/0.036,
+  `SHOT_HOLD` 32/24/16. Test: `tools/dodge_test.gd`.
+- Heal Aura (v0.12.0, Jacob; the staff's second level-3 spell, after Meteor; the staff is now Lightning, Fireball,
+  Shield, Frost Nova (L2), Meteor (L3), Heal Aura (L3), Arcane Storm (L4)). `channel: true`, `drain` 1 fifth a tick
+  (12 mana a second), `radius` 7, `every` 30, `heal` 4 (8 a second). `Sim._combat`: held with the mana for a tick, it
+  keeps `atk` at 2 (so no mana comes back and the pose holds; the first tick is `Ev.CAST` and a new `swing_n`); let go
+  or dry, `atk` runs out and `atk_cd` = its cooldown (20). `Sim.channeling(s)`. `Net._server_heal_auras` (each tick
+  after the spells): `heal_aura_targets` = the caster and living allies (players the caster can't hurt; never
+  challengers) within 7 m, flat; the first tick and every 30 after (`ServerPlayer.heal_t0`, `heal_last`) each hurt one
+  gains up to 4 (event `heal_pulse` [caster, pos, radius, [[id, gained]...]]); with nobody in reach hurt the server ends
+  the channel (`atk` 0, cooldown; event `heal_stop`) - the caster's client sees that as a small correction. Looks:
+  `CastPose` style "raise" (staff high overhead, swaying, the orb glowing; both views use the shield's raised pose);
+  `MagicFx._heal_pulse`: a green ring spreading to 7 m, gold motes over the staff, green and gold motes rising from
+  each one healed, "+N" over them, and `Synth.fx("heal")` (a soft shimmering major-triad chime) each pulse, within
+  30 m. Challenger wizards never have it (level 1 kits). Test: `tools/heal_test.gd`.
+- Challenger tiers (v0.12.0, Jacob: every challenger used to be difficulty 1). `ServerPlayer.duel_wins` counts the
+  challengers a player called that went down (`Net._damage`); `Net.duel_tier(wins, level)`: tier 1 (NpcAI difficulty
+  0) at first, tier 2 after `TIER2_WINS` (3) wins or the staff / wand at level 2, tier 3 after `TIER3_WINS` (8) or
+  level 3; `_stone_interact` passes it to `spawn_npc`, and the name tag reads "Challenger Morwen (tier 2)". Dash-dodging
+  now starts at tier 2: `DODGE` 0 / 0.6 / 0.85 and `SPELL_DODGE` 0 / 0.4 / 0.65 (dodge_test now measures ~0% / 30% /
+  58% out of lightning rings, 0% / 27% / 50% out of a charge); aim (`SHOT_ERR`, `AIM_ERR`, `WIZ_ERR`) tightens, draws
+  (`SHOT_START`) come faster and reactions (`REACT`) quicker per tier, as before. Test: npc_test (a run of nine duels
+  goes tier 1, 1, 1, 2, 2, 2, 2, 2, 3).
+- NPC wizards' golems (v0.12.0, Jacob): challenger / minion wand wizards summon golems (Golem is in their level-1
+  kit) but never more than `NpcAI.MAX_GOLEMS` (3) of their own alive at once (`_score` gives Golem 0 at 3). Their
+  golems fight players whatever PvP says, and players' golems (`Golems.foe`: an NPC's golems fight Who.PLAYER only;
+  players' golems always fight Who.NPC and Who.BOSS and those enemies' golems). Killing one gives no level credit
+  (golem kills never call `_magic_kill`). Chosen: they DISSOLVE when their wizard falls (`Golems.dissolve(owner)` from
+  `Net._server_npcs` as soon as the wizard is down: they crumble). Test: wizard_test `_npc_golems`.

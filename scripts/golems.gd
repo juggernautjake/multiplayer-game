@@ -82,6 +82,19 @@ class G:
 	var leap_step := Vector2.ZERO   # metres a tick while leaping
 	var slot := 0.0                 # its angle offset round a shared target
 	var guard_a := 0.0              # its place in the guard ring
+	var fog_t := 0                  # v0.12.0: ticks of confusion left (lost in an enemy's fog, and ~1 s after)
+	var fog_mode := ""              # "thrash" or "stumble" while confused
+	var fog_roll := 0               # ticks until it picks again
+	var wander := 0.0               # its stumbling heading
+
+
+## v0.12.0 the wand's Fog (see Fog): Net sets these before each tick. A golem whose summoner is an enemy of a fog's
+## caster can't see into it; lost inside one it's confused (thrashes at nothing or stumbles about, re-picking every
+## FOG_ROLL ticks, still confused FOG_RECOVER ticks after it gets out); outside it steers round.
+var fogs: Array = []
+var fog_pvp := {}
+const FOG_ROLL := 120
+const FOG_RECOVER := 60
 
 
 var list := {}        # id -> G
@@ -123,6 +136,13 @@ func spawn(owner: int, pos: Vector3, yaw: float, now: int, titan := false) -> G:
 	g.hp = g.max_hp
 	list[g.id] = g
 	return g
+
+
+## v0.12.0: an NPC wizard went down: its golems crumble with it.
+func dissolve(owner: int) -> void:
+	for g: G in list.values():
+		if g.owner == owner and g.state != State.DIE:
+			_to_state(g, State.DIE)
 
 
 func _to_state(g: G, s: int) -> void:
@@ -198,6 +218,14 @@ func tick(now: int, people: Array) -> Array:
 				g.leap_cd = LEAP_CD
 				_to_state(g, State.IDLE)
 			continue
+		if not fogs.is_empty() or g.fog_t > 0:
+			if Fog.lost(g.owner, g.pos, fogs, now, fog_pvp):
+				g.fog_t = FOG_RECOVER
+			elif g.fog_t > 0:
+				g.fog_t -= 1
+			if g.fog_t > 0:
+				_confused(g)
+				continue
 		if g.state == State.ATTACK:
 			var chase = _target_pos(g, where)   # it keeps after its target while it swings
 			if chase != null:
@@ -281,6 +309,8 @@ func tick(now: int, people: Array) -> Array:
 		if dir == Vector2.ZERO:
 			continue
 		dir = _separate(g, dir)
+		if not fogs.is_empty():   # v0.12.0: round an enemy's fog, not into it
+			dir = Fog.steer(g.owner, g.pos, dir, fogs, now, fog_pvp)
 		if g.state != State.WALK:
 			_to_state(g, State.WALK)
 		_move(g, dir * _speed(g) * Config.DT)
@@ -338,6 +368,8 @@ func _pick(g: G, where: Dictionary, pvp: Dictionary) -> int:
 		if not foe(g.owner, id, pvp):
 			continue
 		var at: Vector3 = where[id]
+		if not fogs.is_empty() and not Fog.can_see(g.owner, g.pos, id, at, fogs, _now, fog_pvp):
+			continue   # v0.12.0: hidden in a fog
 		if _who.get(id, Who.PLAYER) == Who.BOSS:   # measured to his flank, not his middle
 			at = at + (g.pos - at).normalized() * 2.0
 		if Vector2(at.x - centre.x, at.z - centre.z).length() > leash or g.pos.distance_to(at) > SENSE:
@@ -348,6 +380,8 @@ func _pick(g: G, where: Dictionary, pvp: Dictionary) -> int:
 			best = id
 	for o: G in list.values():
 		if o.owner == g.owner or o.state == State.DIE or o.state == State.RISE or not foe(g.owner, o.owner, pvp):
+			continue
+		if not fogs.is_empty() and not Fog.can_see(g.owner, g.pos, o.owner, o.pos, fogs, _now, fog_pvp):
 			continue
 		if Vector2(o.pos.x - centre.x, o.pos.z - centre.z).length() > leash or g.pos.distance_to(o.pos) > SENSE:
 			continue
@@ -364,6 +398,37 @@ func _pick(g: G, where: Dictionary, pvp: Dictionary) -> int:
 			best_d = d
 			best = -(i + 1)
 	return best
+
+
+## v0.12.0 lost in an enemy's fog: thrash (slam at random spots round it) or stumble (wander, the heading jerking
+## about), picked again every FOG_ROLL ticks. It hits nothing it can't see: a thrash is a swing at the air.
+func _confused(g: G) -> void:
+	g.target = 0
+	g.fog_roll -= 1
+	if g.fog_roll <= 0 or g.fog_mode == "":
+		g.fog_mode = "thrash" if randf() < 0.5 else "stumble"
+		g.fog_roll = FOG_ROLL
+		g.wander = randf() * TAU
+	if g.state == State.ATTACK:
+		if g.t >= ATTACK:
+			g.atk_cd = COOLDOWN
+			_to_state(g, State.IDLE)
+		return
+	if g.fog_mode == "thrash":
+		if g.atk_cd == 0 and randf() < 0.05:
+			g.yaw = randf() * TAU
+			_to_state(g, State.ATTACK)
+		return
+	if randf() < 0.04:
+		g.wander += randf_range(-1.4, 1.4)
+	var dir := Vector2(cos(g.wander), sin(g.wander))
+	if not _free(g, g.pos + Vector3(dir.x, 0, dir.y) * 0.8):
+		g.wander += PI * 0.5
+		return
+	if g.state != State.WALK:
+		_to_state(g, State.WALK)
+	_move(g, dir * _speed(g) * 0.55 * Config.DT)
+	g.yaw = lerp_angle(g.yaw, atan2(-dir.x, -dir.y), 0.2)
 
 
 ## The way to go: the straight line if it's clear, else the first clear direction fanning out to the golem's side.
