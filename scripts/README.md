@@ -984,3 +984,29 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
     the camera reading the depth buffer, fogging by distance from the player's body (1.6 -> 3.2 m), washing colours
     out and darkening the edges, easing in fast and out over `Fog.CLEAR` (0.5 s); the crosshair is UI and stays.
     Demo bot: `--bot fog` (Main `_bot_fog`). Tests: `tools/fog_test.gd`, magic_test additions.
+- Life Drain on an ally (v0.12.0, Jacob): if the first body along the beam is an ally (a player the caster can't hurt,
+  or the caster's or an ally's golem: `Net._ally_on_beam`), nobody is hurt; the ally is healed `ally_heal` (12) through
+  `Net.heal_target` (players and golems, never past full) and the caster gets nothing. Event `drain_ally` [caster,
+  hand, point, healed, target]: `MagicFx._drain_ally` (a green-gold stream from the wand into them, motes, "+N" on
+  them). Same 3 s recharge. Challenger wand wizards don't have Life Drain (it's level 3; their kit is level 1).
+  Test: fog_test `_spells`.
+- Challenger wizards (v0.12.0, `npc_ai.gd`, the WIZARDS block). Kit: `NpcAI.kit(w)` = the weapon's level-1 spells
+  (staff: Lightning, Fireball, Shield; wand: Spark Beam, Golem, Teleport, Stun); the basic attack is Fireball / Spark
+  Beam. Mana: no bypass was found (the staff's mana always went through `Sim.step`); what looked infinite was a cast
+  as soon as it could afford one. Now below `LOW_MANA` (22) it rests (backs off 5 m further, strafes, no casting)
+  until `REST_MANA` (55). Choice: `_utility` -> `_score` per ready spell (`_ready_to`: the game's recharge / mana and
+  its own `SPELL_CD`): Lightning 1.0 (+0.6 at a still target, +0.5 per player near the target, -0.6 under 5 m),
+  Fireball 1.1 (+0.4 at 5-20 m, -0.3 at a fast target, +0.3 a crowd), Shield 2.5 with shots coming (+0.6 low health
+  up close), Spark Beam 1.0 in range, Golem 1.3 (0.4 with two out; +0.4 low health) under 22 m, Teleport 2.6 under
+  4 m (1.4 low health under 8 m), Stun 0.9 (+0.7 at a runner, +0.5 if they're attacking or drawing); x0.6 if it would
+  leave under 10 mana; x`REPEAT_K` (0.5) per use among the last `REPEAT_WINDOW` (4); 0 after `MAX_SAME` (3) in a row
+  (`_run_of`, also for the reactive shield); x random 0.75-1.25. Reactive shield: a shot about to hit, or (new) a bow
+  or slingshot drawn at it past 20 ticks (`_threat`); it drops a wind-up for it. Aim: `_track` follows the target's
+  current position with a lag (`TRACK` 0.08 a tick; no lead), plus an error picked at the wind-up (`WIZ_ERR`
+  0.09/0.07/0.055 rad at 10 m, x(0.6 + d/25), x(1 + speed/4, at most 2.5), x1.8 if dashing), turned round the caster
+  and short/long. Tell: `WINDUP` 34/26/20 ticks planted and facing them (event `npc_tell` [id, spell, ticks]:
+  `MagicFx._npc_tell`, a swelling light in the spell's colour and motes at its hand), then the cast, then `PAUSE`
+  50-90 / 35-70 / 25-55 ticks. `casts` lists what it cast. Melee keeps `AIM_ERR`; wizards don't use it any more.
+  Mana bar: `Avatar.mana_bars` / `show_mana` (a blue bar under the health bar, flashing when low) for challengers
+  (`npc`, set by Main from the id) holding a mana weapon, in both the Pip and figure views. Test: `tools/wizard_test.gd`.
+

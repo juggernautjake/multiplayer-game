@@ -351,3 +351,17 @@ eight wand spells = eight recharges in the state and the snapshot (`Codec.RECHAR
 Demo: `<godot> --path . -- --host --port 7797 --give-all --max-level --bot fog --shots <dir> [--style figure]`: a
 challenger's fog round you (blind), walking out (thick smoke hides him), then your own fog (faint, him outlined red,
 you cyan).
+
+Also in fog_test (`_spells`): Life Drain on an ally (PvP off) heals them +12, hurts nobody and gives the caster
+nothing, never past full, and mends the caster's own golem.
+
+## wizard_test.gd
+
+`<godot> --headless --path . --script tools/wizard_test.gd` (v0.12.0, offline, prints harmless RPC errors): challenger
+wizards' kits are their level-1 spells (staff: Lightning, Fireball, Shield; wand: Spark Beam, Golem, Teleport, Stun);
+a staff wizard over 45 s runs its mana down (under 22), then rests with no casts until it's back, never spends more
+than 100 + 12 a second, and casts at most 30 times; a hard wand wizard against a player strafing 3.5 m each way lands
+some sparks but not all (typically ~10 of 21; ~15 of 21 on a still player); over 80 s fights (arrows drawn and loosed
+at it every 1.5 s, the player stepping into melee every ~12 s) each wizard uses every spell of its kit, never the same
+one more than 3 times running, with a wind-up seen before its casts.
+

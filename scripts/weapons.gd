@@ -81,9 +81,11 @@ const DATA := [
 		{ "name": "Fog", "level": 2, "cost": 0, "windup": 16, "cast": 32, "cooldown": 10, "recharge": 1080,
 		  "duration": 600, "fade": 120, "half": 12.5 },
 		# level 3 (7 kills; v0.12.0): a draining stream from the first enemy along the aim back into the wand: `damage`,
-		# and `drain` of what it really took comes back to the caster as health
+		# and `drain` of what it really took comes back to the caster as health. If the first one along the aim is an
+		# ALLY (a player the caster can't hurt, or an ally's / the caster's golem) it hurts nobody and heals them
+		# `ally_heal` instead (about what a drain gives back); the caster gets nothing from that
 		{ "name": "Life Drain", "level": 3, "cost": 0, "windup": 12, "cast": 30, "cooldown": 8, "recharge": 180,
-		  "range": 18.0, "damage": 18, "drain": 0.45, "knock": 0.5 },
+		  "range": 18.0, "damage": 18, "drain": 0.45, "knock": 0.5, "ally_heal": 12 },
 		# level 3 (7 kills): a vortex where you aim, dragging enemies within `pull_radius` toward it for `duration`
 		# ticks (nibbling at those near its heart), then bursting outward
 		{ "name": "Gravity Well", "level": 3, "cost": 0, "windup": 14, "cast": 30, "cooldown": 10, "recharge": 900,

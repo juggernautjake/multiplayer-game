@@ -33,6 +33,9 @@ var blob: MeshInstance3D  # coloured ring at the feet
 var label: Label3D
 var hp_bar: Sprite3D
 var zap_bar: Sprite3D        # v0.11.0: Thunderhorn's Static build-up, over the health bar
+var npc := false             # v0.12.0: a challenger (Main sets it): wizards show a mana bar under the health bar
+var mana_back: Sprite3D
+var mana_bar: Sprite3D
 var zap_back: Sprite3D
 
 var _anim := "idle"
@@ -165,6 +168,9 @@ func _init(player_name: String, color: Color, show_name: bool, outfit := 0) -> v
 	var zb := Avatar.static_bars(self, img, 2.2)
 	zap_back = zb[0]
 	zap_bar = zb[1]
+	var mb := Avatar.mana_bars(self, img, 2.05)
+	mana_back = mb[0]
+	mana_bar = mb[1]
 	_color = color
 	_accent = Sprite3D.new()   # the costume's accent colour pieces, tinted with his colour (v0.9.0)
 	_accent.pixel_size = PIXEL
@@ -210,6 +216,37 @@ static func static_bars(owner: Node3D, img: Image, y: float) -> Array:
 		owner.add_child(b)
 		out.append(b)
 	return out
+
+
+## v0.12.0: a challenger wizard's mana bar under its health bar (a dark back and a blue fill), shared with the figure.
+static func mana_bars(owner: Node3D, img: Image, y: float) -> Array:
+	var out := []
+	for i in 2:
+		var b := Sprite3D.new()
+		b.texture = ImageTexture.create_from_image(img)
+		b.pixel_size = 1.0
+		b.scale = Vector3(0.9, 0.05, 1)
+		b.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		b.no_depth_test = true
+		b.position.y = y
+		b.render_priority = i
+		b.modulate = Color(0, 0, 0, 0.6) if i == 0 else Color("4a8cff")
+		b.visible = false
+		owner.add_child(b)
+		out.append(b)
+	return out
+
+
+## Shown for challengers holding a weapon that runs on mana (the staff), alive.
+static func show_mana(back: Sprite3D, fill: Sprite3D, st: Sim.PlayerState, shown: bool, is_npc: bool) -> void:
+	var on: bool = shown and is_npc and st.dead == 0 and Weapons.get_data(st.weapon).get("uses", "") == "mana"
+	back.visible = on
+	fill.visible = on
+	if on:
+		var k := clampf(float(st.mana) / float(Sim.MANA_FULL), 0.0, 1.0)
+		fill.scale.x = maxf(0.9 * k, 0.001)
+		fill.position.x = -0.45 * (1.0 - k)   # drains toward the left
+		fill.modulate = Color("4a8cff") if k > 0.22 else Color("8ab4ff").lerp(Color.WHITE, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.015))
 
 
 ## Fill it from the player's state: stacks out of Boss.static_need; while static-stunned, the stun running out, flashing.
@@ -359,6 +396,7 @@ func animate(delta: float, cam: Camera3D) -> void:
 		hp_bar.modulate = Color(0.9, 0.2, 0.2).lerp(Color(0.3, 0.9, 0.3), k)
 		hp_bar.visible = label.visible and state.dead == 0
 		Avatar.show_static(zap_back, zap_bar, state, label.visible)
+		Avatar.show_mana(mana_back, mana_bar, state, label.visible, npc)
 		# stunned: dizzy, swaying, crackling violet when it's Static; knocked down: lying, then getting up
 		var dizzy := state.stun > 0 and state.dead == 0
 		sprite.position.x = sin(Time.get_ticks_msec() * 0.008) * 0.06 if dizzy else 0.0

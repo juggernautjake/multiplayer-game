@@ -169,10 +169,14 @@ func _on_fx(kind: String, a: Array) -> void:
 			_cracks(a[1], 4.0, 10)
 			_flash_light(a[1] + Vector3(0, 1, 0), Color("ff5a1a"), 6.0, 10.0, 0.8)
 			_shake_near(a[1], 0.3)
+		"npc_tell":   # v0.12.0: a challenger wizard winding a spell up: a growing glow and motes at its hand
+			_npc_tell(int(a[0]), str(a[1]), float(a[2]) * Config.DT)
 		"spark":
 			_spark(a[1], a[2], bool(a[3]))
 		"drain":
 			_drain(int(a[0]), a[1], a[2], int(a[3]))
+		"drain_ally":   # v0.12.0: Life Drain on an ally: a green-gold stream from the caster into them, "+N" on them
+			_drain_ally(a[1], a[2], int(a[3]), int(a[4]))
 		"level_up":
 			_level_up(int(a[0]), int(a[1]), int(a[2]), str(a[3]))
 		"shield_shatter":
@@ -962,6 +966,75 @@ func _frost_nova(at: Vector3, r: float) -> void:
 	var frost := _disc(at, r * 0.85, Color("d8f6ff"), 0.16)
 	_fade_out(frost, frost.material_override, 2.5, 2.0)
 	_shake_near(at, 0.1)
+
+
+## v0.12.0: a challenger wizard's wind-up tell: a light in the spell's colour at its hand, swelling until the cast,
+## with motes drawn in.
+func _npc_tell(id: int, spell: String, life: float) -> void:
+	if not avatars.has(id):
+		return
+	var av: Node3D = avatars[id]
+	var c: Color = SPELL_COLOR.get(spell, Color.WHITE)
+	var l := OmniLight3D.new()
+	l.light_color = c
+	l.light_energy = 0.3
+	l.omni_range = 3.0
+	av.add_child(l)
+	l.position = Vector3(0, 1.5, 0)
+	var tw := l.create_tween()
+	tw.tween_property(l, "light_energy", 3.5, maxf(life, 0.1))
+	tw.tween_property(l, "light_energy", 0.0, 0.25)
+	tw.tween_callback(l.queue_free)
+	var motes := func() -> void:
+		if is_instance_valid(av):
+			Fx.burst(main, av.position + Vector3(0, 1.5, 0), Vector3.UP, c, 6, 1.2, 0.04)
+	for k in 3:
+		get_tree().create_timer(life * k / 3.0 + 0.01).timeout.connect(motes)
+
+
+## v0.12.0 Life Drain on an ally: a green-gold healing stream from the caster's wand into them, motes flowing along
+## it, a soft green light and "+N" over them.
+func _drain_ally(hand: Vector3, at: Vector3, heal: int, target: int) -> void:
+	var beam := _jag(hand, at, maxi(3, int(at.distance_to(hand) / 1.2)), 0.12, 0.05, Color("b8ff6a"))
+	var mat: StandardMaterial3D = beam.get_meta("mat")
+	var tw := beam.create_tween()
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.6)
+	tw.tween_callback(beam.queue_free)
+	for k in 9:
+		var m := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.07
+		sm.height = 0.14
+		m.mesh = sm
+		m.material_override = _glow_mat(Color("7dffa0") if k % 2 else Color("ffd860"), 4.0)
+		main.add_child(m)
+		m.global_position = hand
+		var side := Vector3(randf_range(-0.5, 0.5), randf_range(0.0, 0.6), randf_range(-0.5, 0.5))
+		var fly := func(x: float) -> void:
+			m.global_position = hand.lerp(at, x) + side * sin(x * PI)
+		var t := m.create_tween()
+		t.tween_interval(k * 0.05)
+		t.tween_method(fly, 0.0, 1.0, 0.45)
+		t.tween_callback(m.queue_free)
+	Fx.burst(main, at, Vector3.UP, Color("9dff9a"), 16, 2.0, 0.05)
+	_flash_light(at + Vector3(0, 0.3, 0), Color("8aff8a"), 2.0, 4.0, 0.5)
+	var where := at + Vector3(0, 1.2, 0)
+	if avatars.has(target):
+		where = (avatars[target] as Node3D).position + Vector3(0, 2.5, 0)
+	if heal > 0:
+		var l := Label3D.new()
+		l.text = "+%d" % heal
+		l.modulate = Color("7dffa0")
+		l.font_size = 52
+		l.outline_size = 10
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		l.no_depth_test = true
+		main.add_child(l)
+		l.global_position = where
+		var lt := l.create_tween().set_parallel(true)
+		lt.tween_property(l, "global_position:y", where.y + 0.9, 1.0).set_delay(0.4)
+		lt.tween_property(l, "modulate:a", 0.0, 0.6).set_delay(0.8)
+		lt.chain().tween_callback(l.queue_free)
 
 
 ## v0.12.0 Spark Beam: a quick bright zap, gone in a tenth of a second or so.

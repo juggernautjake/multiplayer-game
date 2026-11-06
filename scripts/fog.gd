@@ -225,7 +225,7 @@ static func steer(viewer: int, pos: Vector3, want: Vector2, fogs: Array, tick: f
 			out = Vector2(0, signf(rel.y))
 		var along := Vector2(-out.y, out.x)
 		var lean := along.dot(dir)   # the way the wish clearly leans (round a corner it's already past)
-		if absf(lean) < 0.4:         # heading at the face (a strafe's lean doesn't count): toward the nearer corner
+		if absf(lean) < 0.6:         # heading at the face (a strafe's lean doesn't count): toward the nearer corner
 			lean = along.dot(rel) if absf(along.dot(rel)) > 0.3 else 1.0
 		if lean < 0.0:
 			along = -along

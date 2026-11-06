@@ -1395,7 +1395,11 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 			var tgt := _beam_target(p, hand, inp.aim_point, float(sp.range))
 			var hit_id: int = tgt[0]
 			var heal := 0
-			if hit_id != 0:
+			var ally := _ally_on_beam(p, hand, inp.aim_point, hand.distance_to(tgt[1]))
+			if ally.size() > 0:   # an ally in the way first: heal them instead, hurt nobody, nothing for the caster
+				var got := heal_target(int(ally[0]), int(sp.ally_heal))
+				_fx("drain_ally", [p.id, hand, ally[1], got, int(ally[0])])
+			elif hit_id != 0:
 				dmg_src = Weapons.WAND
 				dmg_spell = "Life Drain"
 				_damage(hit_id, int(sp.damage), p.id, (tgt[1] as Vector3) - hand, float(sp.knock))
@@ -1404,7 +1408,8 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 				heal = drain_heal(last_dealt, float(sp.drain))
 				if s.dead == 0 and heal > 0:
 					s.hp = mini(s.hp + heal, Sim.MAX_HP)
-			_fx("drain", [p.id, hand, tgt[1], heal])
+			if ally.is_empty():
+				_fx("drain", [p.id, hand, tgt[1], heal])
 		"Fog":   # v0.12.0: a cloud round the caster (see Fog)
 			var f := Fog.make(next_fog, s.pos, p.id, server_tick, sp)
 			next_fog += 1
@@ -1415,6 +1420,51 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 ## v0.12.0 Life Drain: the health that comes back for `dealt` damage.
 static func drain_heal(dealt: int, k: float) -> int:
 	return int(round(float(dealt) * k))
+
+
+## v0.12.0 Life Drain on an ally: the first ally along the beam closer than `before` (where it would hit an enemy or a
+## wall): a player the caster can't hurt (not the caster), or a golem of the caster or of such a player.
+## -> [id as _damage takes it, the point] or [].
+func _ally_on_beam(p: ServerPlayer, from: Vector3, aim: Vector3, before: float) -> Array:
+	var dir := aim - from
+	if dir.length() < 0.5:
+		dir = Vector3(-sin(p.state.yaw), 0, -cos(p.state.yaw))
+	dir = dir.normalized()
+	var best := 0
+	var best_t := before
+	for q: ServerPlayer in players.values():
+		if q.id == p.id or q.state.dead > 0 or can_hurt(p.id, q.id):
+			continue
+		var t := _ray_cyl(from, dir, q.state.pos, 0.6, 1.9)
+		if t < best_t:
+			best_t = t
+			best = q.id
+	for g: Golems.G in golems.list.values():
+		if g.state == Golems.State.DIE:
+			continue
+		if g.owner == p.id or (players.has(g.owner) and g.owner != p.id and not can_hurt(p.id, g.owner)):
+			var t := _ray_cyl(from, dir, g.pos, 0.45, 1.3)
+			if t < best_t:
+				best_t = t
+				best = -1000 - g.id
+	if best == 0:
+		return []
+	return [best, from + dir * best_t]
+
+
+## v0.12.0: heal a player or a golem by up to `amount`; -> what it really gained.
+func heal_target(id: int, amount: int) -> int:
+	if id > 0 and players.has(id) and players[id].state.dead == 0:
+		var s: Sim.PlayerState = players[id].state
+		var got := mini(amount, Sim.MAX_HP - s.hp)
+		s.hp += got
+		return got
+	if id <= -1000 and golems.list.has(-1000 - id):
+		var g: Golems.G = golems.list[-1000 - id]
+		var got := mini(amount, g.max_hp - g.hp)
+		g.hp += got
+		return got
+	return 0
 
 
 ## v0.12.0: who's on PvP (id -> on), for Fog's rules about enemies.

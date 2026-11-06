@@ -331,6 +331,7 @@ func _make_avatar(id: int, info: Dictionary) -> Node3D:
 		av = Avatar.new(nm, col, id != net.my_id, int(info.get("outfit", 0)))
 	add_child(av)
 	av.set_pvp(bool(info.get("pvp", false)))
+	av.npc = id >= Fog.NPC_ID0   # v0.12.0: challengers' wizards show their mana
 	return av
 
 

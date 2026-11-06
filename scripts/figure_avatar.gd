@@ -54,6 +54,9 @@ var label: Label3D
 var hp_bar: Sprite3D
 var zap_bar: Sprite3D        # v0.11.0: Static build-up (Avatar.static_bars)
 var zap_back: Sprite3D
+var npc := false             # v0.12.0: a challenger: wizards show a mana bar (Avatar.mana_bars)
+var mana_back: Sprite3D
+var mana_bar: Sprite3D
 var _tumble := 0.0
 var _thrown_vy := 0.0
 var _thrown_dust := 0.0
@@ -265,6 +268,9 @@ func _init(player_name: String, color: Color, show_name: bool, _outfit := 0) -> 
 	var zb := Avatar.static_bars(self, img, 2.14)
 	zap_back = zb[0]
 	zap_bar = zb[1]
+	var mb := Avatar.mana_bars(self, img, 1.98)
+	mana_back = mb[0]
+	mana_bar = mb[1]
 	_garb = WizardGarb.new()
 	add_child(_garb)
 	for sd in ["r", "l"]:   # bell sleeves, shown with a robe
@@ -563,6 +569,7 @@ func animate(delta: float, _cam: Camera3D) -> void:
 		hp_bar.modulate = Color(0.9, 0.2, 0.2).lerp(Color(0.3, 0.9, 0.3), hpk)
 		hp_bar.visible = label.visible and st.dead == 0
 		Avatar.show_static(zap_back, zap_bar, st, label.visible)
+		Avatar.show_mana(mana_back, mana_bar, st, label.visible, npc)
 	var ground := WorldLayout.ground_height(position.x, position.z, position.y)
 	blob.global_position = Vector3(position.x, ground + 0.012, position.z)
 	var bs := clampf(1.0 - (position.y - ground) / 6.0, 0.35, 1.0)

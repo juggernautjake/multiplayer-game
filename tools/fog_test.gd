@@ -233,6 +233,23 @@ func _spells(net: Net, a: Net.ServerPlayer, b: Net.ServerPlayer) -> void:
 	a.state.hp = 50
 	net._cast(a, Sim.PlayerInput.new(4, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, a.state.spell, Vector3(60, 1.2, 40)), a.state.pos)
 	check(a.state.hp == 50 + 2, "it only gives back what it really took (5 -> +2)")
+	# on an ally (PvP off: everyone's on one side): no damage, it heals them ~12 instead; nothing for the caster
+	a.pvp = false
+	b.pvp = false
+	b.state = Sim.spawn_state(2)
+	b.state.pos = Vector3(60, 0, 50)
+	b.state.hp = 60
+	a.state.hp = 50
+	net._cast(a, Sim.PlayerInput.new(5, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, a.state.spell, Vector3(60, 1.2, 40)), a.state.pos)
+	check(b.state.hp == 60 + int(ld.ally_heal) and a.state.hp == 50, "on an ally it heals them (+%d) and hurts nobody; the caster gets nothing" % (b.state.hp - 60))
+	b.state.hp = Sim.MAX_HP - 5
+	net._cast(a, Sim.PlayerInput.new(6, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, a.state.spell, Vector3(60, 1.2, 40)), a.state.pos)
+	check(b.state.hp == Sim.MAX_HP, "never past full")
+	var gid := net.golems.spawn(1, Vector3(60, 0, 52), 0.0, net.server_tick).id
+	net.golems.list[gid].hp = 20
+	net._cast(a, Sim.PlayerInput.new(7, 0, 0.0, 0.0, Weapons.WAND, 0, 0.0, INF, a.state.spell, Vector3(60, 0.6, 40)), a.state.pos)
+	check(net.golems.list[gid].hp == 20 + int(ld.ally_heal), "it mends the caster's own golem too")
+	net.golems.list.erase(gid)
 	b.state.shield = 0
 	a.pvp = false
 	b.pvp = false
