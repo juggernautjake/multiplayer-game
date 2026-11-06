@@ -860,3 +860,38 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   it). `WorldLayout.altar_pressed` (server: boss present or the defeat screen; clients: from the boss state) holds it
   down for the whole fight; ArenaView sinks it with a clunk, dust and a flash and lets it rise slowly afterwards.
   Test: npc_test `_altar_button`.
+
+## Thunderhorn anatomy (v0.12.0)
+
+- Bones (`BossModel.BONES`, model space before `S` 0.85, forward -Z): spine `hips` (pelvis), `loin`, `back`, `chest`
+  (withers and the shoulder hump), `neck0`, `neck1`, `head`, `jaw`; front legs `s` (scapula), `u` (shoulder), `e`
+  (elbow), `c` (carpus, folds backwards), `f` (fetlock), `h` (hoof); hind legs `u` (hip), `k` (stifle), `c` (hock), `f`,
+  `h`; tail `t0`..`t7`. The trunk's cross sections (`SECTIONS`: z, y, half width, up, down, keel, ridge) are squarish
+  super-ellipses narrowing underneath and on top, plus Gaussian muscle masses (`BUMPS`): shoulders, triceps, brisket,
+  haunches, neck crest, cheeks, a thick dewlap. A separate lower-jaw tube really opens (throat, molars, spade incisors,
+  cracked fangs, lower tusks, tongue).
+- IK (`BossModel._leg_ik`): BossView gives each hoof a target (`t`, model space) or an offset from the leg's root in
+  model axes (`rel`, blended by `k`), plus `flex` (carpus / hock fold) and `curl` (hoof flip). Abduction tilt about Z,
+  a two-bone solve with a virtual lower bone whose length follows the fold, the pastern at its standing angle to the
+  ground, the hoof flat. Knees bend the bovine way by construction (bend sides taken from the rest pose).
+- Gaits (`BossView.GAITS`, `_locomote`): walk 4-beat lateral (LH 0, LF .25, RH .5, RF .75; duty .66; 4.2 m stride at 6
+  m/s), trot diagonal pairs (duty .45), transverse gallop (LH 0, RH .11, LF .36, RF .48; duty .30, suspension). Planted
+  hooves stay fixed in the world; swings land at the predicted spot (speed and turn rate); corrective steps when
+  standing. Body: head bob, hump roll, gallop pitch rocking / spine flex / surge, lean into turns, a damped momentum
+  spring, braced skid with dust (also on `boss_skid`), rear (forelegs striking, slam on the way down), jump (hop,
+  Storm Leap), buck (on `boss_snort` while idle / walking / turning).
+- Face: brows (`brow` -1 furrowed .. 1 lifted), upper lids (`lid`, blinks), pupils tracking `extra[4]`'s avatar, head
+  turning toward it, flaring nostrils, steam breath (`breath()`, a pool of 20 billboards, `STEAM_SHADER`), `tongue`.
+- Horns: span about 6.5 m, out from a 0.66 thick base then forward and up to points about 5.2 m ahead of his centre;
+  growth-ring ridges, chips and a crack groove in the mesh (`_horn_mesh`, parallel-transport frames, UVs), `HORN_SHADER`
+  (weathered base, black polished tips glowing white-hot, crack veins brightening with `hot` and `crack`); a smaller
+  second pair and brow spikes; a third, rhino-like spike out of the nose ridge pointing along the snout (about 13
+  degrees up): a lance when his head is down in the charge, rush and gore. Trails from every tip (`horn_*`, `horn2_*`,
+  `spike`). A charge or rush hit (`boss_launch`) shows an impale-and-toss head heave with a burst at the spike's tip.
+- Hitboxes scaled to the horns (`boss.gd`): gore `RADIUS + 4.6` (was 3.4) and facing dot > 0.25 (was 0.35); charge
+  `RADIUS + 1.4` (was 0.9) for players and trampled bystanders, golems `RADIUS + 1.2` (was 0.7); rush `RADIUS + 1.3`
+  (was 0.8); plus the nose spike: `Boss._on_spike(d, dir)` hits within `SPIKE_R` 1.4 m of a point `HORN_REACH` 5.6 m
+  ahead along his facing (charge, rush, gore).
+- Tools: `tools/boss_pose_shots.gd` (`model`: still poses and face close-ups; `gait`: 8-frame strips per motion
+  through a real BossView), `tools/boss_anim_review.gd` (every motion in slow motion under an orbiting camera with
+  labels; records with `--write-movie`, writes `segments.txt`).

@@ -71,6 +71,8 @@ const NAME := "Thunderhorn"
 const BASE_HP := 7000
 const HP_PER_EXTRA := 0.7
 const RADIUS := 2.8              # his body, for hits (v0.11.0: about 3.5x a player)
+const HORN_REACH := 5.6          # v0.12.0: the nose spike's tip, metres ahead of his centre (head lowered)
+const SPIKE_R := 1.4             # v0.12.0: how close to that tip skewers you
 const HEIGHT := 6.4
 const HEAD_Y := 4.7
 const WALK := 6.0
@@ -432,15 +434,15 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			_step(charge_dir * GALLOP * speed_k())
 			for p in living:
 				var d := _flat(p[1] - pos)
-				if d.length() < RADIUS + 0.9 and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
+				if (d.length() < RADIUS + 1.4 or _on_spike(d, charge_dir)) and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
 					charge_hit[p[0]] = true
 					var cdir := Vector3(charge_dir.x + d.normalized().x * 0.5, 0, charge_dir.y + d.normalized().y * 0.5).normalized()
 					hits.append([p[0], 30 if enraged else 25, cdir, 0.0])
 					launches.append([p[0], cdir])   # v0.12.0: the charge throws you too
-			_trample_bystanders(RADIUS + 0.9, 25)
+			_trample_bystanders(RADIUS + 1.4, 25)
 			for g in golems:
 				var d := _flat(g[1] - pos)
-				if d.length() < RADIUS + 0.7 and not charge_hit.has(-1000 - int(g[0])):
+				if d.length() < RADIUS + 1.2 and not charge_hit.has(-1000 - int(g[0])):
 					charge_hit[-1000 - int(g[0])] = true
 					hits.append([-1000 - int(g[0]), 25, Vector3(charge_dir.x, 0, charge_dir.y), 0.0])
 			var past := true
@@ -540,7 +542,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				var fwd := Vector2(-sin(yaw), -cos(yaw))
 				for p in living:
 					var d := _flat(p[1] - pos)
-					if d.length() < RADIUS + 3.4 and d.normalized().dot(fwd) > 0.35 and (p[1] as Vector3).y < 4.0:
+					if ((d.length() < RADIUS + 4.6 and d.normalized().dot(fwd) > 0.25) or _on_spike(d, fwd)) and (p[1] as Vector3).y < 4.0:
 						hits.append([p[0], 20 if enraged else 16, Vector3(d.x + fwd.x, 0.3, d.y + fwd.y), 11.0])
 			if t >= 24:
 				_after()
@@ -653,7 +655,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			_step(charge_dir * RUSH_V * (0.6 if slow > 0 else 1.0))
 			for p in living:
 				var d := _flat(p[1] - pos)
-				if d.length() < RADIUS + 0.8 and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
+				if (d.length() < RADIUS + 1.3 or _on_spike(d, charge_dir)) and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
 					charge_hit[p[0]] = true
 					if _p_dash(p):   # dashed: untouchable
 						fx.append(["boss_dodged", [p[1]]])
@@ -662,7 +664,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 					var dir := Vector3(charge_dir.x + side.x, 0, charge_dir.y + side.y).normalized()
 					hits.append([p[0], 35 if enraged else 30, dir, 0.0])
 					launches.append([p[0], dir])
-			_trample_bystanders(RADIUS + 0.8, 30)
+			_trample_bystanders(RADIUS + 1.3, 30)
 			var past := true
 			for p in living:
 				if int(p[0]) == rush_target:
@@ -864,6 +866,11 @@ func _want_tree(living: Array) -> bool:
 ## v0.12.0: challengers and corrupted minions caught in a charge or the rush are hurt and thrown like players
 ## (`bystanders`: [[id, pos]] from Net; he never picks them as targets).
 var bystanders: Array = []
+
+
+## v0.12.0: is a point (d: flat offset from his centre) on the nose spike, HORN_REACH ahead along `dir`?
+static func _on_spike(d: Vector2, dir: Vector2) -> bool:
+	return (d - dir.normalized() * HORN_REACH).length() < SPIKE_R
 
 
 func _trample_bystanders(reach: float, dmg: int) -> void:

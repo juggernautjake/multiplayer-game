@@ -5,15 +5,21 @@
 ##
 ## Animation, all from his state and how long he's been in it (BossModel.apply poses the skeleton):
 ##   at rest:  breathing, the head swaying, a snort and a head-shake now and then, a hoof pawing, the tail swishing;
-##   moving:   a walking gait (diagonal pairs) and a gallop, strafing side-on, backing off, a crouch and pounce for the
-##             hop, a stamping snap-round for the turn, a dip and lunge;
-##   attacks:  the charge's head-down hoof scrape, rearing and slamming (stomp and the slams), the horns lit for the
+##   moving:   (v0.12.0, _locomote) a 4-beat walk, a diagonal trot and a transverse gallop on IK-planted hooves (each
+##             foot stays put in the world until it steps; swings land where the body will be), a lift-and-slam
+##             footfall, head bob, hump roll, the gallop's rocking and spine flex, leaning into turns, braced skids,
+##             a momentum spring (overshoot after braking and turning), a jump for the hop and the Storm Leap
+##             (haunches, push, forelegs tucked, reach and absorb), a buck when he snorts at apples underfoot;
+##   attacks:  the charge's head-down hoof scrape, rearing on the haunches with the forelegs striking the air and
+##             slamming down (stomp, the slams, the howl, call, roar, phase change), the horns lit for the
 ##             beam (the head follows it), bellowing at the sky (call, roar, the howl, the jaw wide), the gore's wound-up
 ##             hooking head, the tail lash's coil and whip, the leap's deep crouch, tucked flight and heavy landing,
 ##             the rush's pawing;
 ##   hurt:     a flinch on big hits, stumbling when staggered, the phase changes (rearing and roaring as the plates
 ##             crack open with light when enraged; the storm swirling round him at a quarter), the death (he buckles,
 ##             then comes apart into cloud and lightning).
+## The face: brows furrow in attacks and lift in roars, lids narrow or open wide, the eyes follow his target (extra[4]),
+## steam breath (BossModel.breath) from the nostrils and an open roaring mouth.
 ## Glowing trails (BossModel.Trail) stream from his eyes always, and from whatever part is attacking (horns: charge,
 ## beam, gore, rush; hooves: stomps, slams, leap, hops, charges; tail: the lash), in the attack's colour: blue normally,
 ## cyan for the beam, violet for static, white-gold for the Storm Leap, red when enraged.
@@ -192,6 +198,11 @@ func _despawn() -> void:
 	if _leap_shadow != null:
 		_leap_shadow.queue_free()
 		_leap_shadow = null
+	if _leap_pillar != null:
+		_leap_pillar.queue_free()
+		_leap_pillar = null
+	if _arrow != null:
+		_arrow.visible = false
 	for n in ring_nodes + ball_nodes + orb_nodes + _swirl:
 		(n as Node).queue_free()
 	ring_nodes = []
@@ -226,6 +237,10 @@ func _process(delta: float) -> void:
 	var lift := 0.0
 	var scrape := -1          # a leg pawing the ground
 	var tuck := 0.0           # legs folded (leaping)
+	var rear := 0.0           # v0.12.0: rearing up on the haunches (0..1), the forelegs striking the air
+	var jump := -1.0          # v0.12.0: a jump's stage: 0..1 crouch, 1..3 flight, 3..4 landing
+	p.brow = -0.45            # always scowling
+	p.lid = 0.35
 	var col := RED if enraged else BLUE
 	var hot := 0.0
 	var on := {"eye_l": 0.55, "eye_r": 0.55, "tail": 0.15}
@@ -252,11 +267,8 @@ func _process(delta: float) -> void:
 			p.head_dip = 0.25
 			p.bend = 0.25 * signf(mv.normalized().cross(fwd)) if state == Boss.S.STRAFE else 0.0
 		Boss.S.HOP:
-			if t < 10 * Config.DT:
-				p.crouch = 0.7
-			else:
-				tuck = 0.8
-				p.pitch = 0.2 if t < 0.4 else -0.15
+			jump = clampf(t / (10 * Config.DT), 0.0, 1.0) if t < 10 * Config.DT else 1.0 + clampf((t - 10 * Config.DT) / 0.6, 0.0, 1.0) * 2.6
+			p.brow = -1.0
 			on["hoof_FL"] = 0.8
 			on["hoof_FR"] = 0.8
 		Boss.S.TURN:
@@ -271,6 +283,8 @@ func _process(delta: float) -> void:
 			on["horn_l"] = 0.6
 			on["horn_r"] = 0.6
 		Boss.S.CHARGE_WIND:
+			p.brow = -1.0
+			p.lid = 0.6
 			p.head_dip = 0.6
 			p.crouch = 0.25
 			p.flare = 1.0
@@ -281,6 +295,8 @@ func _process(delta: float) -> void:
 			hot = 0.6
 		Boss.S.CHARGE:
 			gait = 2.0
+			p.brow = -1.0
+			p.lid = 0.6
 			p.head_dip = 0.55
 			p.flare = 1.0
 			for k in ["horn_l", "horn_r", "hoof_FL", "hoof_FR", "hoof_BL", "hoof_BR"]:
@@ -288,7 +304,8 @@ func _process(delta: float) -> void:
 			col = Color("ff8a50") if enraged else Color("cfe4ff")
 			hot = 1.0
 		Boss.S.STOMP_WIND:
-			p.pitch = 0.65 * clampf(t / 0.5, 0.0, 1.0)
+			rear = clampf(t / 0.5, 0.0, 1.0)
+			p.brow = -1.0
 			p.head_up = 0.35
 			p.jaw = 0.35
 			on["hoof_FL"] = 1.0
@@ -298,7 +315,8 @@ func _process(delta: float) -> void:
 			var period := 0.4 if state == Boss.S.STOMP else 0.6667
 			var off := 0.0 if state == Boss.S.STOMP else 0.5
 			var cyc := fposmod(t - off + period * 0.5, period) / period
-			p.pitch = (0.75 if state == Boss.S.SLAMS else 0.55) * maxf(0.0, sin(cyc * PI)) if t > 0.15 else maxf(0.0, 0.65 - t * 5.0)
+			rear = ((1.0 if state == Boss.S.SLAMS else 0.75) * maxf(0.0, sin(cyc * PI)) if t > 0.15 else maxf(0.0, 1.0 - t * 7.0))
+			p.brow = -1.0
 			p.jaw = 0.4
 			p.head_up = 0.2
 			for k in ["hoof_FL", "hoof_FR"]:
@@ -321,12 +339,19 @@ func _process(delta: float) -> void:
 			col = CYAN if not enraged else Color("ff9a8a")
 			hot = 1.6
 		Boss.S.CALL:
-			p.pitch = 0.5 * sin(clampf(t / 1.0, 0.0, 1.0) * PI)
+			rear = 0.75 * sin(clampf(t / 1.0, 0.0, 1.0) * PI)
+			p.brow = 1.0
+			p.lid = 0.0
+			p.tongue = 1.0
 			p.head_up = 0.8
 			p.jaw = 0.75
 			col = Color("c8c0ff")
 			hot = 1.2
 		Boss.S.ROAR:
+			rear = 0.45 * sin(clampf(t / 0.9, 0.0, 1.0) * PI)
+			p.brow = 1.0
+			p.lid = 0.0
+			p.tongue = 1.0
 			p.head_up = 0.6 * sin(clampf(t / 1.0, 0.0, 1.0) * PI)
 			p.jaw = 0.85 * sin(clampf(t / 1.0, 0.0, 1.0) * PI)
 			p.thrash = sin(t * 26.0) * 0.12 if t > 0.25 and t < 0.9 else 0.0
@@ -339,6 +364,8 @@ func _process(delta: float) -> void:
 			col = VIOLET if int(extra[2]) > 0 else col
 			hot = 1.0
 		Boss.S.GORE_WIND:
+			p.brow = -1.0
+			p.lid = 0.6
 			p.head_dip = 0.55
 			p.head_yaw = -0.6
 			p.crouch = 0.2
@@ -347,6 +374,8 @@ func _process(delta: float) -> void:
 			on["horn_r"] = 1.0
 			hot = 0.7
 		Boss.S.GORE:
+			p.brow = -1.0
+			p.lid = 0.5
 			var k := clampf(t / 0.2, 0.0, 1.0)
 			p.head_yaw = lerpf(-0.6, 0.9, k)
 			p.head_dip = 0.45 - 0.5 * k
@@ -371,6 +400,9 @@ func _process(delta: float) -> void:
 			col = TEAL if not enraged else col
 			hot = 1.0
 		Boss.S.STAGGER:
+			rear = 0.45 * maxf(0.0, 1.0 - t / 0.45) * minf(1.0, t / 0.12)
+			p.brow = 0.8
+			p.lid = 0.0
 			shake = 0.05
 			p.roll = sin(t * 9.0) * 0.12
 			p.crouch = 0.35
@@ -378,7 +410,10 @@ func _process(delta: float) -> void:
 			p.thrash = sin(t * 7.0) * 0.3
 		Boss.S.PHASE:
 			var k := clampf((t - 0.3) / 0.5, 0.0, 1.0) * (1.0 - clampf((t - 1.6) / 0.5, 0.0, 1.0))
-			p.pitch = 0.75 * k
+			rear = k
+			p.brow = 1.0
+			p.lid = 0.0
+			p.tongue = k
 			p.head_up = 0.8 * k
 			p.jaw = 0.9 * k
 			p.thrash = sin(t * 30.0) * 0.15 * k
@@ -389,7 +424,8 @@ func _process(delta: float) -> void:
 			hot = 2.0 * k
 		Boss.S.LEAP_WIND:
 			var k := clampf(t / 1.4, 0.0, 1.0)
-			p.crouch = 1.1 * k
+			jump = k
+			p.brow = -1.0
 			p.head_dip = 0.25
 			p.flare = 1.0
 			p.jaw = 0.4 * k
@@ -402,17 +438,15 @@ func _process(delta: float) -> void:
 				var a := root.position + Vector3(randf_range(-9, 9), randf_range(0.5, 9), randf_range(-9, 9))
 				_arc(a, root.position + Vector3(0, 4.0, 0), GOLD, 0.12)
 		Boss.S.LEAP:
-			var u := clampf(t / (Boss.LEAP_AIR * Config.DT), 0.0, 1.0)
-			tuck = 1.0
-			p.pitch = 0.35 - u * 0.7
+			var u := clampf(t / (_leap_air_t() * Config.DT), 0.0, 1.0)
+			jump = 1.0 + u * 2.0
 			p.head_up = 0.3
-			p.tail_up = -0.5
 			col = GOLD
 			hot = 2.0
 			for kk in ["hoof_FL", "hoof_FR", "hoof_BL", "hoof_BR", "horn_l", "horn_r", "tail"]:
 				on[kk] = 1.0
 		Boss.S.LEAP_LAND:
-			p.crouch = 1.2 * (1.0 - clampf(t / 0.6, 0.0, 1.0))
+			jump = 3.0 + clampf(t / 0.6, 0.0, 1.0)
 			p.head_dip = 0.4
 			col = GOLD
 			hot = 1.2
@@ -420,7 +454,10 @@ func _process(delta: float) -> void:
 			var k := clampf(t / 0.5, 0.0, 1.0) * (1.0 - clampf((t - 4.0) / 0.3, 0.0, 1.0))
 			p.head_up = 0.95 * k
 			p.jaw = 0.95 * k
-			p.pitch = 0.25 * k
+			rear = k * (1.0 - clampf((t - 1.5) / 0.35, 0.0, 1.0))   # up on the haunches, then down hard to howl
+			p.brow = 1.0
+			p.lid = 0.0
+			p.tongue = k
 			p.thrash = sin(t * 24.0) * 0.06 * k
 			shake = 0.03 * k
 			col = VIOLET
@@ -429,6 +466,8 @@ func _process(delta: float) -> void:
 				var a := root.position + Vector3(randf_range(-2, 2), 6.0, randf_range(-3, 3))
 				_arc(a, a + Vector3(randf_range(-2, 2), randf_range(0.5, 2.0), randf_range(-2, 2)), VIOLET, 0.1)
 		Boss.S.PAW:
+			p.brow = -1.0
+			p.lid = 0.65
 			p.head_dip = 0.65
 			p.crouch = 0.2
 			p.flare = 1.0
@@ -440,6 +479,8 @@ func _process(delta: float) -> void:
 			on["horn_r"] = 1.0
 		Boss.S.RUSH:
 			gait = 2.0
+			p.brow = -1.0
+			p.lid = 0.6
 			p.head_dip = 0.6
 			p.flare = 1.0
 			col = GOLD
@@ -457,6 +498,8 @@ func _process(delta: float) -> void:
 			p.roll = 0.5 * k
 			p.head_dip = 0.9 * k
 			p.jaw = 0.6
+			p.lid = 0.3 + 0.7 * k
+			p.brow = 0.3
 			col = Color("cfe4ff")
 			hot = 1.5 * (1.0 - k)
 	if enraged and state not in [Boss.S.LEAP_WIND, Boss.S.LEAP, Boss.S.LEAP_LAND, Boss.S.HOWL, Boss.S.SLAMS, Boss.S.PAW, Boss.S.RUSH]:
@@ -464,43 +507,13 @@ func _process(delta: float) -> void:
 	if hot > 0.3:
 		on["eye_l"] = 1.0
 		on["eye_r"] = 1.0
-	if gait == 0.0 and speed > 1.0:
-		gait = 1.0 if speed < 10.0 else 2.0
-	# legs: gait cycles, pawing, tucked
-	var legs := [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
-	var rear := float(p.get("pitch", 0.0))
-	if gait > 0.0:
-		var before_ph := phase
-		var dirk := -1.0 if mv.dot(fwd) < -0.5 else 1.0
-		phase += delta * (4.5 if gait < 1.5 else 9.5) * dirk
-		var amp := 0.45 if gait < 1.5 else 0.85
-		var offs := [0.0, PI, PI, 0.0] if gait < 1.5 else [0.0, 0.6, PI, PI + 0.6]
-		for i in 4:
-			var ph: float = phase + offs[i]
-			legs[i] = [sin(ph) * amp, maxf(0.0, -cos(ph)) * amp * 1.3]
-			if sin(before_ph + offs[i]) < 0.0 and sin(ph) >= 0.0:
-				_hoof_fall(model.anchors["hoof_" + BossModel.LEGS[i]], gait > 1.5)
-		p.bob = float(p.get("bob", 0.0)) + absf(sin(phase)) * (0.12 if gait < 1.5 else 0.35)
-	else:
-		if rear > 0.2:   # rearing: the front legs come up and paddle
-			for i in 2:
-				legs[i] = [-0.9 - 0.2 * sin(state_t * 8.0 + i), 1.3]
-		if scrape >= 0:
-			legs[scrape] = [0.35 + sin(t * 9.0) * 0.55, maxf(0.0, cos(t * 9.0)) * 0.9]
-			_step_t -= delta
-			if _step_t <= 0.0:
-				_step_t = 0.35
-				var h: Node3D = model.anchors["hoof_" + BossModel.LEGS[scrape]]
-				MotionFx.puff(main, Vector3(h.global_position.x, pos.y, h.global_position.z), 3, 1.0)
-				_sound("scrape", h.global_position, -4.0)
-	if tuck > 0.0:
-		for i in 4:
-			var back := i >= 2
-			legs[i] = [(0.9 if back else -0.9) * tuck, 1.5 * tuck]
-	if state == Boss.S.STAGGER:
-		for i in 4:
-			legs[i] = [sin(state_t * 10.0 + i * 1.7) * 0.25, 0.3]
-	# idle life: snorts and head shakes now and then
+	for k in ["horn2_l", "horn2_r", "spike"]:   # v0.12.0: the second pair and the nose spike burn with the horns
+		on[k] = float(on.get("horn_l", 0.0))
+	if state in [Boss.S.CHARGE, Boss.S.RUSH, Boss.S.GORE, Boss.S.GORE_WIND, Boss.S.LUNGE]:
+		on["spike"] = 1.0
+	# v0.12.0: the legs walk, trot and gallop on IK-planted hooves, and the whole body carries its weight (_locomote)
+	var legs := _locomote(delta, gait, mv, speed, scrape, tuck, rear, jump)
+	# idle life: snorts and head shakes now and then, pawing the ground
 	if state == Boss.S.IDLE:
 		_snort_t -= delta
 		if _snort_t <= 0.0:
@@ -512,9 +525,13 @@ func _process(delta: float) -> void:
 	flinch = maxf(flinch - delta * 4.0, 0.0)
 	p.roll = float(p.get("roll", 0.0)) + randf_range(-shake, shake) * 3.0 + sin(state_t * 30.0) * 0.06 * flinch
 	p.head_dip = float(p.get("head_dip", 0.0)) + flinch * 0.25
+	_face_life(delta, p)
 	model.position = Vector3(randf_range(-shake, shake), lift, 0)
 	_smooth_pose(p, delta)
-	model.apply(_pose, legs, Time.get_ticks_msec() * 0.001, delta)
+	var pose := _pose.duplicate()
+	for k in _add:
+		pose[k] = float(pose.get(k, 0.0)) + float(_add[k])
+	model.apply(pose, legs, Time.get_ticks_msec() * 0.001, delta)
 	# his colours, the cracks of light that open when he's enraged, a flash when hit hard
 	_crack = move_toward(_crack, 1.0 if enraged else 0.0, delta * 0.6)
 	_flash = maxf(_flash - delta * 5.0, 0.0)
@@ -559,12 +576,378 @@ var _pose := {}
 
 ## The pose eases toward what the state wants (snappier for big moves).
 func _smooth_pose(p: Dictionary, delta: float) -> void:
-	for k in ["pitch", "crouch", "head_dip", "head_up", "head_yaw", "jaw", "bend", "roll", "thrash", "lash", "tail_up", "flare", "bob", "arch", "twist"]:
+	for k in ["pitch", "crouch", "head_dip", "head_up", "head_yaw", "jaw", "bend", "roll", "thrash", "lash", "tail_up", "flare", "bob",
+			"arch", "twist", "brow", "lid", "tongue", "hump_roll", "surge"]:
 		var want := float(p.get(k, 0.0 if k != "jaw" else 0.05))
 		var cur := float(_pose.get(k, want))
-		var rate := 30.0 if k in ["roll", "thrash", "bob"] else 11.0
+		var rate := 30.0 if k in ["roll", "thrash", "bob"] else (16.0 if k in ["brow", "lid", "jaw"] else 11.0)
 		_pose[k] = lerpf(cur, want, clampf(delta * rate, 0.0, 1.0))
 
+
+
+# ================================================================ v0.12.0: locomotion and weight
+## Gaits: [phase offsets FL, FR, BL, BR], duty factor (share of the cycle a hoof is down), stride (m) at the reference
+## speed, the reference speed (m/s), hoof lift (m), carpus fold, hock fold. Walk: the 4-beat lateral sequence (LH, LF,
+## RH, RF); trot: diagonal pairs; gallop: transverse (LH, RH, LF, RF) with a suspension phase after the forefeet push.
+const GAITS := {
+	"walk": [[0.25, 0.75, 0.0, 0.5], 0.66, 4.2, 6.0, 0.6, 1.2, 0.6],
+	"trot": [[0.0, 0.5, 0.5, 0.0], 0.45, 5.4, 10.0, 0.75, 1.5, 0.6],
+	"gallop": [[0.36, 0.48, 0.0, 0.11], 0.28, 9.5, 19.0, 1.25, 1.8, 1.1],
+}
+# leg poses relative to the leg's root (shoulder / hip joint), in the model's axes (before S); [offset, flex, curl]
+const FRONT_TUCK := [Vector3(0, -1.25, -0.8), 1.9, 1.0]
+const FRONT_REACH := [Vector3(0, -3.1, -1.25), 0.15, 0.2]
+const HIND_PUSH := [Vector3(0, -3.55, 1.6), 0.05, 0.6]
+const HIND_TUCK := [Vector3(0, -2.3, -0.6), 1.15, 0.8]
+const HIND_KICK := [Vector3(0, -1.35, 3.35), 0.0, 0.3]
+var _feet: Array = []          # per leg: w (planted, world), sw (swinging), s, dur, from, land, lift, ov (posed by an attack)
+var _gname := "walk"
+var _gw := {"walk": 0.0, "trot": 0.0, "gallop": 0.0}
+var _yaw_prev := 0.0
+var _omega := 0.0              # turning rate (rad/s)
+var _fs_prev := 0.0
+var _acc := 0.0                # forward acceleration (m/s2), smoothed
+var _brace := 0.0
+var _skid_t := 0.0
+var _rear_s := 0.0
+var _rear_peak := false
+var _buck_t := 99.0
+var _toss_t := 9.0             # the impale toss: someone skewered on the nose spike and flung off it
+const BUCK_N := 3              # bucks in a row
+const BUCK_T := 0.78           # seconds each
+var _buck_sun := 0.0
+var _sway := Vector2.ZERO      # momentum spring: x pitch, y roll
+var _sway_v := Vector2.ZERO
+var _add := {}                 # pose offsets from the gait and momentum, added after smoothing
+var _dust_t := 0.0
+var _breath_t := 2.0
+
+
+func _foot_home_w(i: int, ground: float) -> Vector3:
+	var h := model.to_global(BossModel.foot_home(BossModel.LEGS[i]))
+	return Vector3(h.x, ground, h.z)
+
+
+func _plus(k: String, v: float) -> void:
+	_add[k] = float(_add.get(k, 0.0)) + v
+
+
+## Where a foot starting a swing now should land: under its home `tau` seconds from now, the body having moved on at
+## v and turned at _omega.
+func _predict(home_w: Vector3, tau: float, v3: Vector3) -> Vector3:
+	var rel := home_w - root.position
+	rel.y = 0.0
+	return Vector3(root.position.x, home_w.y, root.position.z) + Basis(Vector3.UP, _omega * tau) * rel + v3 * tau
+
+
+func _start_swing(f: Dictionary, lift: float, dur: float) -> void:
+	f.sw = true
+	f.s = 0.0
+	f.from = f.w
+	f.land = f.w
+	f.lift = lift
+	f.dur = dur
+
+
+## Every frame: picks the gait from his speed, steps each hoof (planted ones stay put in the world, lifted ones swing
+## on a lift-and-slam arc to where they'll be needed), rears, jumps, bucks, braces and skids, and sways with momentum.
+## Returns BossModel.apply's leg targets; fills _add (gait bob, roll, pitch rocking, lean, sway).
+func _locomote(delta: float, gait: float, mv: Vector2, speed: float, scrape: int, tuck: float, rear: float, jump: float) -> Array:
+	_add = {}
+	var v3 := Vector3(mv.x, 0, mv.y)
+	var ground := pos.y
+	var yr := root.rotation.y
+	var dt := maxf(delta, 1e-4)
+	_omega = lerpf(_omega, wrapf(yr - _yaw_prev, -PI, PI) / dt, clampf(delta * 10.0, 0.0, 1.0))
+	_yaw_prev = yr
+	var fwd3 := Vector3(-sin(yr), 0, -cos(yr))
+	var fs := v3.dot(fwd3)
+	_acc = lerpf(_acc, (fs - _fs_prev) / dt, clampf(delta * 6.0, 0.0, 1.0))
+	_fs_prev = fs
+	if _acc < -16.0 and fs > 4.0:
+		_skid_t = maxf(_skid_t, 0.45)
+	_skid_t -= delta
+	_brace = move_toward(_brace, 1.0 if _skid_t > 0.0 else 0.0, delta * (8.0 if _skid_t > 0.0 else 3.0))
+	# momentum: a damped spring (overshoots a little): nose down braking, squatting back speeding up, leaning into turns
+	var want := Vector2(clampf(_acc * 0.004, -0.12, 0.08), clampf(_omega * speed * 0.012, -0.22, 0.22))
+	_sway_v += ((want - _sway) * 60.0 - _sway_v * 9.0) * delta
+	_sway += _sway_v * delta
+	_plus("pitch", _sway.x + 0.12 * _brace)
+	_plus("roll", _sway.y)
+	_plus("hump_roll", _sway.y * 0.6 - _sway_v.y * 0.05)   # the hump jiggles after the body
+	_plus("lash", -_sway_v.y * 0.6 - _sway_v.x * 0.3)      # the tail swings on
+	_plus("bend", clampf(_omega * 0.22, -0.3, 0.3))
+	_plus("head_yaw", clampf(_omega * 0.15, -0.3, 0.3))
+	_plus("crouch", 0.22 * _brace)
+	_plus("head_up", 0.3 * _brace)
+	# rearing on the haunches: the spine up ~40 degrees, the hind legs bent under him, the tail braced, the forelegs
+	# striking the air; a heavy slam of both forefeet coming down
+	_rear_s = lerpf(_rear_s, rear, clampf(delta * 12.0, 0.0, 1.0))
+	var slam := false
+	if _rear_s > 0.5:
+		_rear_peak = true
+	elif _rear_peak and _rear_s < 0.12:
+		_rear_peak = false
+		slam = true
+	_plus("pitch", 0.7 * _rear_s)
+	_plus("crouch", 0.55 * _rear_s)
+	_plus("tail_up", -0.35 * _rear_s)
+	_plus("head_up", 0.25 * _rear_s)
+	# the jump: crouch on the haunches, the hind legs drive, forelegs tucked under the chest, reached out to land
+	var jf := 0.0     # front leg pose weight
+	var jh := 0.0
+	var front_pose: Array = FRONT_TUCK
+	var hind_pose: Array = HIND_TUCK
+	if jump >= 0.0:
+		if jump < 1.0:
+			_plus("crouch", 1.0 * jump)
+			_plus("pitch", 0.18 * jump)
+			_plus("head_dip", 0.15 * jump)
+		elif jump < 1.25:
+			var k := (jump - 1.0) / 0.25
+			_plus("pitch", 0.18 + 0.2 * k)
+			_plus("crouch", 1.0 - k)
+			hind_pose = HIND_PUSH
+			jh = k
+			jf = k
+		elif jump < 2.6:
+			var k := (jump - 1.25) / 1.35
+			_plus("pitch", lerpf(0.38, -0.12, k))
+			jf = 1.0
+			jh = 1.0
+			hind_pose = HIND_PUSH if k < 0.25 else HIND_TUCK
+			_plus("tail_up", -0.4)
+		elif jump < 3.0:
+			var k := (jump - 2.6) / 0.4
+			_plus("pitch", -0.12 - 0.12 * k)
+			front_pose = FRONT_REACH
+			jf = 1.0
+			jh = 1.0 - 0.3 * k
+		else:   # landing: forefeet first, knees giving, the hindquarters following down
+			var k := clampf(jump - 3.0, 0.0, 1.0)
+			_plus("pitch", -0.24 * (1.0 - k) * (1.0 - k))
+			_plus("crouch", 0.9 * sin(k * PI) * (1.0 - k * 0.5))
+			jh = maxf(0.0, 0.7 - k * 2.5)
+	if tuck > 0.0:
+		jf = maxf(jf, tuck)
+		jh = maxf(jh, tuck)
+	var airborne := jf > 0.5 or jh > 0.5
+	# the buck: three in a row; each: head down, the rump and both hind legs flung high and straight back, a twist,
+	# the tail whipping, a hard landing on the forelegs with dust
+	var bk := 0.0
+	if _buck_t < BUCK_N * BUCK_T:
+		var prev := _buck_t
+		_buck_t += delta
+		var n := int(_buck_t / BUCK_T)
+		var b := fmod(_buck_t, BUCK_T)
+		var side := _buck_sun if n % 2 == 0 else -_buck_sun
+		if b < 0.14:
+			_plus("crouch", 0.35 * b / 0.14)
+			_plus("head_dip", 0.6 * b / 0.14)
+		elif b < 0.55:
+			var k := sin((b - 0.14) / 0.41 * PI)
+			bk = clampf(k * 1.6, 0.0, 1.0)
+			_plus("bob", 1.1 * k)
+			_plus("pitch", -0.5 * k)
+			_plus("head_dip", 0.65)
+			_plus("twist", 0.55 * side * k)
+			_plus("roll", 0.18 * side * k)
+			_plus("tail_up", 0.7 * k)
+			_plus("lash", 1.2 * side * sin((b - 0.14) / 0.41 * TAU))
+		else:
+			var k := (b - 0.55) / (BUCK_T - 0.55)
+			_plus("crouch", 0.4 * sin(k * PI))
+			_plus("pitch", -0.12 * sin(k * PI))
+			_plus("head_dip", 0.65 * (1.0 - k))
+		if fmod(prev, BUCK_T) < 0.5 and b >= 0.5:   # the forefeet take the landing
+			for i in 2:
+				var f: Dictionary = _feet[i] if _feet.size() > i else {}
+				if not f.is_empty():
+					_hoof_fall(f.w, true)
+			fx._shake_near_scaled(root.position, 0.2)
+	if _toss_t < 0.55:   # skewered: a heave of the head up and to the side flings them off the spike
+		_toss_t += delta
+		var k := sin(clampf(_toss_t / 0.55, 0.0, 1.0) * PI)
+		_plus("head_up", 1.0 * k)
+		_plus("head_dip", -0.35 * k)
+		_plus("thrash", 0.35 * k)
+		_plus("pitch", 0.08 * k)
+	# ---- the gait
+	if _feet.is_empty():
+		for i in 4:
+			var h := _foot_home_w(i, ground)
+			_feet.append({"w": h, "sw": false, "s": 0.0, "dur": 0.0, "from": h, "land": h, "lift": 0.0, "ov": false})
+	var spd := maxf(speed, absf(_omega) * 3.2)
+	var gal := state in [Boss.S.CHARGE, Boss.S.RUSH, Boss.S.HOME, Boss.S.LUNGE] and speed > 5.0
+	if gal or spd > 13.0:
+		_gname = "gallop"
+	elif spd > 7.5 and not (_gname == "gallop" and spd > 11.0):
+		_gname = "trot" if spd > 8.0 or _gname != "walk" else "walk"
+	elif spd < 6.5:
+		_gname = "walk"
+	var g: Array = GAITS[_gname]
+	var moving := spd > 0.45 and _brace < 0.3 and not airborne
+	for k in _gw:
+		_gw[k] = move_toward(float(_gw[k]), 1.0 if (moving and k == _gname) else 0.0, delta * 3.0)
+	var duty := float(g[1])
+	var stride := float(g[2]) * clampf(spd / float(g[3]), 0.45, 1.25)
+	var freq := spd / maxf(stride, 0.5)
+	if moving:
+		phase += freq * delta
+	var t_st := duty / maxf(freq, 0.1)
+	var swinging := 0
+	for f in _feet:
+		if f.sw:
+			swinging += 1
+	var legs := []
+	for i in 4:
+		var leg: String = BossModel.LEGS[i]
+		var f: Dictionary = _feet[i]
+		var home_w := _foot_home_w(i, ground)
+		if airborne or (f.w as Vector3).distance_to(home_w) > 9.0:   # in the air or snapped far: start from home
+			f.w = home_w
+			f.sw = false
+		var u := fposmod(phase + float(g[0][i]), 1.0)
+		var want_sw := moving and u >= duty
+		if not f.sw and not f.ov and not airborne:
+			if _brace > 0.3:   # skidding: the planted hooves slide with him, the forelegs braced out in front
+				var to := home_w + fwd3 * (1.1 if i < 2 else -0.2)
+				f.w = ((f.w as Vector3) + v3 * delta).lerp(to, clampf(delta * 5.0, 0.0, 1.0))
+				_dust_t -= delta
+				if i < 2 and _dust_t <= 0.0 and v3.length() > 1.5:
+					_dust_t = 0.05
+					MotionFx.puff(main, f.w, 2, 0.8)
+			elif want_sw and (u - duty) / (1.0 - duty) < 0.6:
+				_start_swing(f, float(g[4]), (1.0 - u) / maxf(freq, 0.1))
+				swinging += 1
+			elif (f.w as Vector3).distance_to(home_w) > (3.2 if moving else 0.45) and (moving or swinging == 0):
+				_start_swing(f, float(g[4]) * 0.7 if moving else 0.35, 0.25 if moving else 0.42)
+				swinging += 1
+		var wp: Vector3 = f.w
+		var flex := 0.0
+		var curl := 0.0
+		if f.sw:
+			if want_sw:
+				f.dur = (1.0 - u) / maxf(freq, 0.1)
+			else:
+				f.dur = maxf(float(f.dur) - delta, 0.0)
+			f.s = minf(1.0, float(f.s) + (1.0 - float(f.s)) * delta / maxf(float(f.dur), delta))
+			f.land = _predict(home_w, float(f.dur) + (t_st * 0.5 if moving else 0.0), v3 if moving else Vector3.ZERO)
+			if moving and i < 2:   # the forelegs reach out ahead (most in the gallop)
+				f.land = (f.land as Vector3) + fwd3 * (0.9 * float(_gw["gallop"]) + 0.25 * float(_gw["trot"]))
+			var e := smoothstep(0.0, 1.0, float(f.s))
+			wp = (f.from as Vector3).lerp(f.land, e)
+			var arc := sin(PI * pow(float(f.s), 0.75))   # up early, a late hard drop: the slam
+			wp.y = ground + float(f.lift) * arc
+			var kf := float(f.lift) / float(g[4])
+			flex = arc * float(g[5] if i < 2 else g[6]) * kf
+			curl = arc * 0.9 * kf
+			if float(f.s) >= 0.999:
+				f.w = f.land
+				f.sw = false
+				var big := _gname == "gallop" or state in [Boss.S.CHARGE, Boss.S.RUSH]
+				_hoof_fall(f.land, big)
+				if _gname == "walk" and i < 2 and randf() < 0.25:
+					model.breath(0.35)
+		var tl := model.to_local(wp)
+		tl.y += BossModel.HOOF_Y
+		var spec := {"t": tl, "flex": flex, "curl": curl}
+		# attacks and stunts pose legs on top of the gait
+		var ov := false
+		if i < 2 and jf > 0.0:
+			spec.rel = front_pose[0]
+			spec.k = jf
+			spec.flex = lerpf(flex, float(front_pose[1]), jf)
+			spec.curl = lerpf(curl, float(front_pose[2]), jf)
+		if i >= 2 and jh > 0.0:
+			spec.rel = hind_pose[0]
+			spec.k = jh
+			spec.flex = lerpf(flex, float(hind_pose[1]), jh)
+			spec.curl = lerpf(curl, float(hind_pose[2]), jh)
+		if i < 2 and _rear_s > 0.2 and jf <= 0.0:   # forelegs up and forward, knees bent, striking in turn
+			var a := state_t * 8.5 + (0.0 if i == 0 else PI)
+			var k := clampf((_rear_s - 0.2) / 0.3, 0.0, 1.0)
+			spec.rel = Vector3(0, -1.6 + 0.45 * sin(a), -1.25 - 0.5 * cos(a))
+			spec.k = k
+			spec.flex = lerpf(flex, 1.55 + 0.3 * sin(a + 0.6), k)
+			spec.curl = lerpf(curl, 0.8, k)
+			ov = k > 0.5
+		if i >= 2 and bk > 0.0:
+			spec.rel = HIND_KICK[0]
+			spec.k = bk
+			spec.flex = lerpf(flex, float(HIND_KICK[1]), bk)
+			spec.curl = lerpf(curl, float(HIND_KICK[2]), bk)
+			ov = bk > 0.5
+		if i == scrape:   # pawing: drag the hoof back through the dirt, lift it forward, again
+			var home := BossModel.foot_home(leg)
+			var c := fposmod(state_t / 0.6, 1.0)
+			var tt := home
+			if c < 0.55:
+				tt.z = home.z - 1.0 + 1.7 * (c / 0.55)
+				spec.flex = 0.2
+			else:
+				var sc := (c - 0.55) / 0.45
+				tt.z = home.z + 0.7 - 1.7 * sc
+				tt.y = home.y + 0.8 * sin(PI * sc)
+				spec.flex = 1.3 * sin(PI * sc)
+				spec.curl = 0.8 * sin(PI * sc)
+			spec.t = tt
+			ov = true
+			if c < 0.1:
+				_step_t -= delta
+				if _step_t <= 0.0:
+					_step_t = 0.5
+					var hp3 := model.to_global(tt)
+					MotionFx.puff(main, Vector3(hp3.x, ground, hp3.z), 3, 1.0)
+					_sound("scrape", hp3, -4.0)
+		if state == Boss.S.STAGGER:
+			spec.t = (spec.t as Vector3) + Vector3(sin(state_t * 11.0 + i * 1.7) * 0.25, 0, cos(state_t * 9.0 + i) * 0.3)
+		if f.ov and not ov:   # back on the ground where the hoof came down
+			var hw := (model.anchors["hoof_" + leg] as Node3D).global_position
+			f.w = Vector3(hw.x, ground, hw.z)
+			f.sw = false
+			if i < 2 and slam:
+				_hoof_fall(f.w, true)
+				fx._shake_near_scaled(f.w, 0.25)
+				_sound("hoof", f.w, 2.0)
+			elif i >= 2 and _buck_t < BUCK_N * BUCK_T:
+				_hoof_fall(f.w, true)
+		f.ov = ov
+		legs.append(spec)
+	# the body over the legs: head bob and hump roll walking, a bounce trotting, the gallop's rocking and spine flex
+	var ph := TAU * phase
+	var ww := float(_gw["walk"])
+	var wt := float(_gw["trot"])
+	var wg := float(_gw["gallop"])
+	_plus("head_dip", ww * 0.07 * cos(2.0 * ph - TAU * 0.5) + wt * 0.03 * sin(2.0 * ph) + wg * 0.13 * sin(ph + 0.4))
+	_plus("bob", ww * -0.05 * cos(2.0 * ph - TAU * 0.6) + wt * -0.09 * cos(2.0 * ph) + wg * 0.45 * cos(ph - TAU * 0.9))
+	_plus("hump_roll", ww * 0.045 * sin(ph) + wt * 0.02 * sin(ph))
+	_plus("twist", ww * 0.05 * sin(ph))
+	_plus("pitch", wg * 0.09 * sin(ph - 0.3))
+	_plus("arch", wg * 0.1 * cos(ph))
+	_plus("surge", wg * 0.12 * sin(ph))
+	return legs
+
+
+## The eyes on his target, the head turning to follow it, breath steaming from his nostrils.
+func _face_life(delta: float, p: Dictionary) -> void:
+	var tid := int(extra[4]) if extra.size() > 4 else 0
+	var tgt = null
+	if fx != null and fx.avatars.has(tid):
+		tgt = (fx.avatars[tid] as Node3D).global_position + Vector3(0, 1.4, 0)
+	model.look_target = tgt
+	if tgt != null and state in [Boss.S.IDLE, Boss.S.WALK, Boss.S.STRAFE, Boss.S.BACKOFF, Boss.S.TURN, Boss.S.CHARGE_WIND,
+			Boss.S.PAW, Boss.S.RECOVER, Boss.S.BALLS, Boss.S.LUNGE, Boss.S.STOMP_WIND, Boss.S.BEAM_WIND]:
+		var d: Vector3 = (tgt as Vector3) - root.position
+		var rel := wrapf(atan2(-d.x, -d.z) - root.rotation.y, -PI, PI)
+		p.head_yaw = float(p.get("head_yaw", 0.0)) + clampf(rel, -0.75, 0.75) * 0.8
+	_breath_t -= delta
+	if _breath_t <= 0.0:
+		var hard := state in [Boss.S.CHARGE, Boss.S.RUSH, Boss.S.CHARGE_WIND, Boss.S.PAW, Boss.S.RECOVER, Boss.S.HOME]
+		_breath_t = 0.4 if hard else randf_range(2.0, 3.0)
+		model.breath(0.9 if hard else 0.45)
+	if float(p.get("jaw", 0.0)) > 0.55 and randf() < delta * 7.0:   # roaring: steam from the open mouth
+		model.breath(1.0, true)
 
 func _arc(a: Vector3, b: Vector3, c: Color, life: float) -> void:
 	var arc := fx._ribbons([[MagicFx._fractal(a, b, 3, 0.3), 0.04]], c, 6.0)
@@ -573,8 +956,7 @@ func _arc(a: Vector3, b: Vector3, c: Color, life: float) -> void:
 	tw.tween_callback(arc.queue_free)
 
 
-func _hoof_fall(hoof: Node3D, big: bool) -> void:
-	var at := hoof.global_position
+func _hoof_fall(at: Vector3, big: bool) -> void:
 	Fx.burst(main, at, Vector3.UP, Color("cfe4ff"), 8 if big else 4, 4.0 if big else 2.5, 0.04)
 	MotionFx.puff(main, Vector3(at.x, pos.y, at.z), 3 if big else 2, 1.2)
 	if big:
@@ -587,16 +969,14 @@ func _snort() -> void:
 	if root == null:
 		return
 	_sound("snort", root.position, -2.0)
-	var nose: Vector3 = model.anchors["eye_l"].global_position.lerp(model.anchors["eye_r"].global_position, 0.5)
-	nose += Vector3(-sin(yaw), -0.5, -cos(yaw)) * 1.2
-	fx._smoke(nose, 2, 0.3, 0.6, 0.35)
+	model.breath(1.0)
 
 
 func _update_beam(col: Color) -> void:
 	beam.visible = state == Boss.S.BEAM
 	if not beam.visible:
 		return
-	var o: Vector3 = model.anchors["horn_l"].global_position.lerp(model.anchors["horn_r"].global_position, 0.5) + Vector3(0, -1.2, 0)
+	var o: Vector3 = (model.points["brow"] as Node3D).global_position
 	o += Vector3(-sin(yaw), 0, -cos(yaw)) * 1.0
 	var e := Vector3(root.position.x, pos.y + 0.1, root.position.z) + Vector3(-sin(beam_a), 0, -cos(beam_a)) * 24.0
 	beam.global_transform = WizardGarb._xf(o, e)
@@ -609,6 +989,12 @@ func _update_beam(col: Color) -> void:
 
 
 var _leap_shadow: MeshInstance3D
+var _leap_pillar: MeshInstance3D
+
+
+## This leap's ticks in the air (v0.12.0: longer for a longer bound; sent as extra[7]).
+func _leap_air_t() -> int:
+	return int(extra[7]) if extra.size() > 7 else Boss.LEAP_AIR
 
 
 func _update_marker() -> void:
@@ -616,11 +1002,33 @@ func _update_marker() -> void:
 	marker.visible = leaping
 	if _leap_shadow != null:
 		_leap_shadow.visible = state == Boss.S.LEAP
+	if _leap_pillar != null:
+		_leap_pillar.visible = leaping
+	_leap_arrow(leaping)
 	if not leaping:
 		return
+	# v0.12.0: a tall gold light pillar over the landing spot, visible from anywhere on the map
+	if _leap_pillar == null:
+		_leap_pillar = MeshInstance3D.new()
+		var pc := CylinderMesh.new()
+		pc.top_radius = 1.2
+		pc.bottom_radius = 2.2
+		pc.height = 120.0
+		pc.radial_segments = 16
+		pc.cap_top = false
+		pc.cap_bottom = false
+		_leap_pillar.mesh = pc
+		var pm := MagicFx._glow_mat(GOLD, 3.0, 0.28)
+		pm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		pm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_leap_pillar.material_override = pm
+		_leap_pillar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		main.add_child(_leap_pillar)
+	_leap_pillar.global_position = Vector3(float(extra[0]), 60.0, float(extra[1]))
+	(_leap_pillar.material_override as StandardMaterial3D).albedo_color.a = 0.2 + 0.12 * absf(sin(Time.get_ticks_msec() * 0.006))
 	var land := Vector3(float(extra[0]), 0.06, float(extra[1]))
 	marker.global_position = land
-	var total := (90 + Boss.LEAP_AIR) * Config.DT
+	var total := (90 + _leap_air_t()) * Config.DT
 	var k := clampf((state_t + (90 * Config.DT if state == Boss.S.LEAP else 0.0)) / total, 0.0, 1.0)
 	var fill: Node3D = marker.get_node("fill")
 	fill.scale = Vector3(4.0 * k, 1, 4.0 * k)
@@ -644,7 +1052,7 @@ func _update_marker() -> void:
 			_leap_shadow.material_override = m
 			_leap_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			main.add_child(_leap_shadow)
-		var u := clampf(state_t / (Boss.LEAP_AIR * Config.DT), 0.0, 1.0)
+		var u := clampf(state_t / (_leap_air_t() * Config.DT), 0.0, 1.0)
 		_leap_shadow.global_position = land + Vector3(0, 0.03, 0)
 		var r := lerpf(1.0, Boss.RADIUS + 2.5, u * u)
 		_leap_shadow.scale = Vector3(r, 1, r)
@@ -655,6 +1063,50 @@ func _update_marker() -> void:
 			var back := Vector3(c.x - land.x, 0, c.z - land.z).normalized()
 			var tail := c + back * randf_range(6.0, 12.0) + Vector3(randf_range(-2, 2), randf_range(-1.5, 3.0), randf_range(-2, 2))
 			_arc(c + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)), tail, GOLD if randf() < 0.6 else Color.WHITE, 0.18)
+
+
+## v0.12.0: an arrow at the edge of the screen pointing to where he will land (or to him, while he is far away and
+## off screen), with the distance.
+var _arrow: Label
+
+
+func _leap_arrow(leaping: bool) -> void:
+	var cam := get_viewport().get_camera_3d()
+	var to := Vector3.ZERO
+	var show := false
+	if root != null and cam != null:
+		to = Vector3(float(extra[0]), 2.0, float(extra[1])) if leaping else root.position + Vector3(0, 3.0, 0)
+		show = leaping or cam.global_position.distance_to(to) > 45.0
+		if show and not cam.is_position_behind(to):
+			var sp := cam.unproject_position(to)
+			var vr := get_viewport().get_visible_rect().size
+			show = sp.x < 0 or sp.y < 0 or sp.x > vr.x or sp.y > vr.y
+	if _arrow == null:
+		if not show:
+			return
+		_arrow = Label.new()
+		_arrow.add_theme_font_size_override("font_size", 30)
+		_arrow.add_theme_color_override("font_outline_color", Color.BLACK)
+		_arrow.add_theme_constant_override("outline_size", 8)
+		var layer := CanvasLayer.new()
+		layer.layer = 5
+		add_child(layer)
+		layer.add_child(_arrow)
+	_arrow.visible = show
+	if not show:
+		return
+	var vr := get_viewport().get_visible_rect().size
+	var c := vr / 2.0
+	var cb := cam.global_transform.basis
+	var rel := to - cam.global_position
+	var dir := Vector2(rel.dot(cb.x), -rel.dot(cb.y) * 0.3 - absf(rel.dot(cb.z)) * 0.0)
+	if rel.dot(-cb.z) < 0.0 and absf(dir.x) < 1.0:
+		dir.x = 1.0
+	dir = dir.normalized() if dir.length() > 0.01 else Vector2.RIGHT
+	var edge := Vector2(clampf(c.x + dir.x * (c.x - 90.0), 60.0, vr.x - 160.0), clampf(c.y + dir.y * (c.y - 60.0), 60.0, vr.y - 60.0))
+	_arrow.text = (">> %d m" if dir.x >= 0 else "<< %d m") % int(Vector2(rel.x, rel.z).length())
+	_arrow.add_theme_color_override("font_color", GOLD if leaping else Color("ff8a6b"))
+	_arrow.position = edge
 
 
 func _update_path(col: Color) -> void:
@@ -695,40 +1147,100 @@ func _update_swirl(delta: float, col: Color) -> void:
 		((_swirl[i] as MeshInstance3D).material_override as ShaderMaterial).set_shader_parameter("storm", col)
 
 
+## Rings: a glowing band on the ground; v0.12.0 the map-wide waves (kind 1 the landing ring, gold; kind 2 the slam
+## waves, white-blue) also get a bright glowing wall ~1.4 m high that stays readable hundreds of metres away, a
+## constant thickness however big they grow, a ripple of dust just ahead, and a rising rumble as one nears you.
+var _ring_heard := {}
+
+
 func _draw_rings() -> void:
 	while ring_nodes.size() < rings.size():
+		var holder := Node3D.new()
 		var mi := MeshInstance3D.new()
+		mi.name = "band"
 		var tm := TorusMesh.new()
-		tm.inner_radius = 0.88
-		tm.outer_radius = 1.0
 		tm.rings = 64
+		tm.ring_segments = 4
 		mi.mesh = tm
 		var m := MagicFx._glow_mat(Color("bfd8ff"), 3.0, 0.75)
 		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		mi.material_override = m
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		main.add_child(mi)
-		ring_nodes.append(mi)
+		holder.add_child(mi)
+		var wall := MeshInstance3D.new()
+		wall.name = "wall"
+		var cm := CylinderMesh.new()
+		cm.cap_top = false
+		cm.cap_bottom = false
+		cm.height = 1.4
+		cm.radial_segments = 192
+		cm.rings = 1
+		wall.mesh = cm
+		var wm := MagicFx._glow_mat(Color("bfd8ff"), 3.0, 0.5)
+		wm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		wm.cull_mode = BaseMaterial3D.CULL_DISABLED
+		wall.material_override = wm
+		wall.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		holder.add_child(wall)
+		main.add_child(holder)
+		ring_nodes.append(holder)
+	var me := Vector3.INF
+	if fx.avatars.has(net.my_id):
+		me = (fx.avatars[net.my_id] as Node3D).position
 	for i in ring_nodes.size():
-		var mi: MeshInstance3D = ring_nodes[i]
-		mi.visible = i < rings.size()
-		if mi.visible:
-			var rr = rings[i]
-			var r := float(rr[0]) if rr is Array else float(rr)
-			var c := Vector3(float(rr[1]), 0, float(rr[2])) if rr is Array else root.position
-			var jump: bool = rr is Array and int(rr[3]) == 1
-			mi.global_position = Vector3(c.x, 0.2, c.z)
-			mi.scale = Vector3(r, 0.9 if jump else 0.6, r)
-			var m: StandardMaterial3D = mi.material_override
-			var cc := GOLD if jump else Color("bfd8ff")
-			m.albedo_color = Color(cc.r, cc.g, cc.b, 0.9 * clampf(1.0 - r / 24.0, 0.0, 1.0))
-			m.emission = cc
-			if randf() < 0.5:   # dust and sparks thrown up along it
-				var a := randf() * TAU
-				var at := Vector3(c.x + cos(a) * r, 0.1, c.z + sin(a) * r)
-				Fx.burst(main, at, Vector3.UP, cc, 3, 3.0, 0.04)
-				if randf() < 0.3:
-					MotionFx.puff(main, at, 1, 0.4)
+		var holder: Node3D = ring_nodes[i]
+		holder.visible = i < rings.size()
+		if not holder.visible:
+			continue
+		var rr = rings[i]
+		var r := float(rr[0]) if rr is Array else float(rr)
+		var c := Vector3(float(rr[1]), 0, float(rr[2])) if rr is Array else root.position
+		var kind: int = int(rr[3]) if rr is Array else 0
+		var wide := kind >= 1
+		var mi: MeshInstance3D = holder.get_node("band")
+		var wall: MeshInstance3D = holder.get_node("wall")
+		var tm: TorusMesh = mi.mesh
+		var th := 0.35 if r < 30.0 else 0.6   # a constant band width, a little wider far out
+		tm.inner_radius = maxf(r - th, 0.05)
+		tm.outer_radius = r + th
+		tm.rings = 64 if r < 30.0 else 256
+		holder.global_position = Vector3(c.x, 0.2, c.z)
+		mi.scale = Vector3(1, 0.9 if wide else 0.6, 1)
+		var cc := GOLD if kind == 1 else Color("bfd8ff")
+		var m: StandardMaterial3D = mi.material_override
+		m.albedo_color = Color(cc.r, cc.g, cc.b, 0.9 if wide else 0.9 * clampf(1.0 - r / 24.0, 0.0, 1.0))
+		m.emission = cc
+		wall.visible = wide
+		if wide:
+			var cm: CylinderMesh = wall.mesh
+			cm.top_radius = r
+			cm.bottom_radius = r
+			wall.position = Vector3(0, 0.5, 0)
+			var wm: StandardMaterial3D = wall.material_override
+			wm.albedo_color = Color(cc.r, cc.g, cc.b, 0.35 + 0.15 * sin(Time.get_ticks_msec() * 0.02))
+			wm.emission = cc
+		# dust and sparks thrown up along it: near our player when it's a map-wide wave, anywhere on a small one
+		if randf() < 0.5:
+			var a := randf() * TAU
+			if wide and me != Vector3.INF:
+				a = atan2(me.z - c.z, me.x - c.x) + randf_range(-0.25, 0.25)
+			var at := Vector3(c.x + cos(a) * r, 0.1, c.z + sin(a) * r)
+			Fx.burst(main, at, Vector3.UP, cc, 3, 3.0, 0.04)
+			if randf() < 0.3:
+				MotionFx.puff(main, at, 1, 0.4)
+		if wide and me != Vector3.INF:
+			var gap := Vector2(me.x - c.x, me.z - c.z).length() - r
+			if gap > 0.0 and gap < 12.0 and randf() < 0.3:   # a ripple running ahead of it
+				var a2 := atan2(me.z - c.z, me.x - c.x) + randf_range(-0.15, 0.15)
+				MotionFx.puff(main, Vector3(c.x + cos(a2) * (r + 3.0), 0.05, c.z + sin(a2) * (r + 3.0)), 1, 0.3)
+			var key := "%d:%d:%d" % [int(c.x * 10), int(c.z * 10), kind]
+			if gap > 0.0 and gap < 30.0 and not _ring_heard.has(key):
+				_ring_heard[key] = true
+				_sound("whoosh", me, -8.0)
+				_sound("slam", me, -6.0, gap / Boss.WAVE_V)
+				_sound("whoosh", me, 2.0, maxf(gap / Boss.WAVE_V - 0.5, 0.0))
+	if rings.is_empty():
+		_ring_heard.clear()
 
 
 func _draw_balls(col: Color) -> void:
@@ -901,6 +1413,11 @@ func _on_fx(kind: String, a: Array) -> void:
 				_banner("STATIC STUN!", VIOLET, 1.6)
 		"boss_launch":   # thrown by the rush
 			var at: Vector3 = a[1]
+			if alive and model != null:   # v0.12.0: impaled on the nose spike, then tossed off it
+				_toss_t = 0.0
+				var tip := (model.anchors["spike"] as Node3D).global_position
+				Fx.burst(main, tip, Vector3.UP, Color.WHITE, 16, 6.0, 0.05)
+				fx._flash_light(tip, Color("cfe4ff"), 4.0, 6.0, 0.2)
 			Fx.burst(main, at + Vector3(0, 1, 0), a[2], GOLD, 30, 9.0, 0.06)
 			fx._flash_light(at + Vector3(0, 1.5, 0), GOLD, 6.0, 10.0, 0.25)
 			fx._shake_near_scaled(at, 0.7)
@@ -964,6 +1481,7 @@ func _on_fx(kind: String, a: Array) -> void:
 			_sound("roar2", a[0], 0.0)
 			_sound("whoosh", a[0], 2.0)
 		"boss_skid":
+			_skid_t = 0.6
 			fx._smoke(a[0], 8, 2.4, 1.2, 0.55)
 			MotionFx.land(main, a[0], 2.2)
 			fx._scorch_ragged(a[0], 2.5, 6)
@@ -1012,6 +1530,10 @@ func _on_fx(kind: String, a: Array) -> void:
 			fx._smoke((a[0] as Vector3) + b * 5.0, 4, 2.0, 0.6, 0.4)
 		"boss_snort":
 			_snort()
+			# v0.12.0: snorting at apples underfoot while he ambles: a buck (sometimes a sunfishing twist)
+			if state in [Boss.S.IDLE, Boss.S.WALK, Boss.S.TURN] or (state == Boss.S.STRAFE and state_t > 0.3):
+				_buck_t = 0.0
+				_buck_sun = (1.0 if randf() < 0.5 else -1.0) * (1.0 if randf() < 0.5 else 0.45)
 		"boss_hop":
 			_sound("whoosh", a[0], 0.0)
 			MotionFx.land(main, a[0], 1.5)
