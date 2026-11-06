@@ -174,7 +174,7 @@ accent in your own player colour, so two players in the same costume can tell ea
 
 On the 3D figure the cloth (robes, cloaks, the tabard, the kilt, tails) is simulated with fixed lengths (it never
 stretches, even mid-jump), weight and thickness, kept clear of the legs and arms; sleeves are tubes round the arms with a
-bell cuff the hand comes out of. Pip's costumes are painted into his sprite sheets frame by frame
+bell cuff the hand comes out of. Since 0.12.8 it lies on the whole body as drawn (see "Cloth on the body" below). Pip's costumes are painted into his sprite sheets frame by frame
 (`tools/make_costumes.py`), with the accent as a second, tinted sprite over him.
 
 **The shield (0.8.1).** The bubble pours out of the staff's raised orb and covers you head to foot. It's a
@@ -576,6 +576,7 @@ These render a picture and quit. Leave out `--headless`.
 | `<godot> --path . -s tools/figure_poses.gd -- out.png <pose> [view_degrees] [no-markers]` | A close-up of the 3D figure in one pose, with markers for the hands and the weapon grip. |
 | `<godot> --path . -s tools/figure_strip.gd -- <out_prefix> <weapon> <combo> [view] [every]` | A filmstrip of one move, every Nth frame saved as a PNG. |
 | `<godot> --path . -s tools/pip_feet_check.gd -- out.png` | Pip at the origin with a camera at ground level, to check that his feet sit on the ground line. |
+| `<godot> --path . -s tools/cloth_shots.gd -- <dir> <prefix> [weapons, e.g. 2,0 or all] [movie or fps]` | v0.12.8 the 3D figure's cloth through every move (`tools/cloth_rig.gd`), each moment from the front, back, both sides and three-quarters (red dots: cloth inside the body); `movie`: every frame of one costume from a turning camera; `fps`: eight figures on screen, the frame rate. |
 
 ### Live tests with scripted players (bots)
 
@@ -894,6 +895,45 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
   letters). Challengers and spawned units get funny names ("Sir Reginald the Moist", "Baron von Shin Who Forgot Why"),
   and every golem has its own ("Pebbles McGee (Jacob's golem)"; titans: "Mount Kevin") (`scripts/names.gd`).
   Test: `tools/dev_test.gd`; demo bot: `--bot console`.
+
+## Cloth on the body (0.12.8)
+
+The cloth (`scripts/wizard_garb.gd`) feels the body in the pose of the frame being drawn: after the figure is posed,
+`FigureAvatar._body_colliders()` hands it capsules that follow the drawn parts: the chest and the tunic's hem round the
+hips (wider than deep, so each is two capsules side by side), the waist, thighs, shins and boots, the upper arms and
+forearms with the hands (wider in a robe's sleeves), the shoulders (the knight's pauldrons), the head, hair and neck,
+and the quiver on the back. Every cloth point is kept a cloth's thickness (plus 1.2 cm) outside all of them, in the last
+solver pass and once more after the length constraints, so nothing drawn cuts into the body.
+
+- **One-sided cloth stays on its side.** The cloak and the tabard's back panel are pushed out *behind* each capsule, the
+  front panel *in front*, the headband and bandana tails *behind the head*, the sash *in front of the hip*: a point that
+  ended up inside or even past a capsule's middle (a leg or an arm that moved far in one frame) goes back round to its
+  own side, never through. A limb held level (a raised knee, an arm out) pushes straight out instead, so a knee can't
+  flip a panel up over itself. Against the arms the front panel goes *behind* (the arm stays in front of the tabard); the
+  body always has the last word over the arms.
+- **The knight's tabard is belted.** It used to hang loose from the chest, so a lean swung it into the hips and a swing's
+  twist wound it diagonally across the body (and its leg pushes were aimed from a point in front of the body, which
+  shoved both panels into the chest: the swordsman's "cape" clipped through him). Now each panel lies on the body from
+  the chest to the belt, following the chest and the hips as they lean and twist, and only the skirt below the belt (to
+  the knees) swings: heavy, damped, never more than ~45 degrees out, trailing a dash less than light cloth does.
+- **Turning**: like the dash carry (v0.12.0), the cloth turns with the body by all but 3 rad/s of a snap turn, so a quick
+  turn swings it a little instead of flinging the panels and the cloak out like wings.
+- **Hanging**: cloth hangs along the figure's own upright, so a lying body's robe lies along it; lengths are fixed from
+  the standing body (the cloak's length used to follow the chest's height and went to nothing when knocked down). After
+  a tumble the body comes upright the short way round (it used to unwind every spin, through the ground head first).
+- **Robes**: the arms are tried first (cloth to their inner side), then the legs and the body; the free arms hang a
+  touch further out in a long robe. The quiver sits over a cloak, not through it. The headband's and bandana's tails
+  start outside the hair.
+- **Cheaper**: each piece only tries the capsules near it (bounding boxes), per-frame constants are worked out once, and
+  the cloth is drawn as one indexed mesh in one call (it used to send ~2500 vertices one call at a time): a wizard's or
+  hooded robe costs about half what it did.
+- Pip's costumes are painted into his sheets (`tools/make_costumes.py`), no simulation; they were checked in all
+  directions.
+
+Tests: `tools/cloth_test.gd` puts every costume through every move with the real simulation (`tools/cloth_rig.gd`) at 60
+and 30 fps and checks that no cloth point ends up inside the body, none is a bad number, and none gets further from its
+anchor than its own length; `tools/cloth_shots.gd` takes the pictures (five sides at once, red dots on any point inside
+the body), a turning-camera film of one costume, or an eight-figure frame rate.
 
 ## What's new in 0.12.7: ammo
 
