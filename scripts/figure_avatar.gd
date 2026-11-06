@@ -713,6 +713,48 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 			p.hand_r = Vector3(0.26, 1.0, -0.26 - swing * 0.3)
 			p.wdir = Vector3(0, 0.2, -1.0)
 
+	# v0.12.5 braced (blocking): knees bent, leaning into it, the weapon up in front to catch the blow
+	if st.guard > 0:
+		var g := clampf(float(st.guard) / float(Sim.GUARD_UP), 0.0, 1.0)
+		var q := p.duplicate()
+		q.crouch = 0.14
+		q.lean = -0.08
+		q.twist = 0.0
+		q.pole_r = Vector3(0.6, -0.4, 0.5)
+		q.pole_l = Vector3(-0.6, -0.4, 0.5)
+		match w:
+			Weapons.SWORD:   # the blade across the body, point to the left, edge out
+				q.hand_r = Vector3(0.2, 1.32, -0.4)
+				q.wdir = Vector3(-1.0, 0.35, -0.1)
+				q.wroll = Vector3(0, 0, -1)
+				q.hand_l = Vector3(-0.18, 1.38, -0.42)
+			Weapons.CLUB:    # two-handed, held crosswise like a bar
+				q.hand_r = Vector3(0.22, 1.3, -0.38)
+				q.wdir = Vector3(-1.0, 0.3, 0.0)
+				q.hand_l = Vector3(0.0, 1.36, -0.4)
+			Weapons.STAFF:   # a quarterstaff block: level across the chest, both hands wide
+				q.hand_r = Vector3(0.26, 1.3, -0.38)
+				q.wdir = Vector3(-1.0, 0.12, 0.0)
+				q.hand_l = Vector3(-0.26, 1.33, -0.38)
+			Weapons.BOW:     # the stave held up in front, upright
+				q.hand_l = Vector3(-0.08, 1.32, -0.42)
+				q.wdir = Vector3(0.15, 1.0, -0.1)
+				q.hand_r = Vector3(0.16, 1.42, -0.3)
+			_:               # fists, slingshot, wand: forearms up before the face, elbows in
+				q.hand_l = Vector3(-0.1, 1.48, -0.34)
+				q.hand_r = Vector3(0.12, 1.45, -0.32)
+				q.pole_r = Vector3(0.3, -1.0, 0.4)
+				q.pole_l = Vector3(-0.3, -1.0, 0.4)
+				q.guard = true
+				if w == Weapons.WAND:
+					q.wdir = Vector3(0, 1.0, -0.2)
+				elif w == Weapons.SLING:
+					q.wdir = Vector3(0, 1.0, -0.25)
+		for key in ["hand_r", "hand_l", "crouch", "lean"]:   # rising into it over GUARD_UP ticks
+			if p.has(key) and (q[key] is Vector3 or q[key] is float):
+				q[key] = lerp(p[key], q[key], g)
+		return q
+
 	# a hand placed for a weapon: its elbow points back and a little out (not where the free swing put it)
 	if w in [Weapons.SWORD, Weapons.CLUB, Weapons.STAFF, Weapons.WAND]:
 		p.pole_r = Vector3(0.3, -0.2, 1.0)

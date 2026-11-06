@@ -124,5 +124,5 @@ func _draw() -> void:
 		info += "   recharge %d s" % int(round(int(s0.get("recharge", 0)) * Config.DT))
 	var top := slot_rect(0, n).position.y
 	_text(Vector2(0, top - 8), info, 17, Color("ffe9a8"), HORIZONTAL_ALIGNMENT_CENTER, size.x)
-	var hint := "Ctrl+1-%d pick    R next    Shift+R back    hold R: wheel    RMB + wheel: scroll" % n
+	var hint := "Mouse wheel: spells    R next    Shift+R back    hold R: wheel    Ctrl+1-%d pick    1-7: weapons" % n
 	_text(Vector2(0, top - 28), hint, 12, Color(0.85, 0.88, 1.0, 0.7), HORIZONTAL_ALIGNMENT_CENTER, size.x)

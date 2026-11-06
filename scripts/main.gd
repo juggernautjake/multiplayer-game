@@ -74,18 +74,20 @@ var prize: PrizeScreen     # victory (the prize) and defeat screens
 var audit := {}   # --log: counts of every replicated event this client received (network audit)
 # v0.12.2 selection and orders (see "controls"): the spell hotbar, the radial wheels, taps and holds
 const HOLD_MS := 220         # a key held this long opens its wheel; let go sooner: a tap
-const HELP_LINE := "WASD move  Shift sprint  Space jump  Q dash  LMB attack / cast  RMB aim  E use  V view  P PvP  Esc menu  F1 all controls\nWeapons: 1-7, mouse wheel, tap Tab last, hold Tab wheel     Spells: Ctrl+1-8, R next, Shift+R back, hold R wheel     Golems: tap G follow / stay, hold G orders, middle mouse attack / go"
+const HELP_LINE := "WASD move  Shift sprint  Space jump  Q dash  LMB attack / cast  RMB block  E use  V view  P PvP  Esc menu  F1 all controls\nWeapons: 1-7, mouse wheel, tap Tab last, hold Tab wheel     Spells (staff / wand): mouse wheel, R next, Shift+R back, hold R wheel, Ctrl+1-8     Golems: tap G follow / stay, hold G orders, middle mouse attack / go"
 ## Every control, for the F1 panel (and the Esc menu's Controls button). Keep in step with README "Controls".
 const CONTROLS := [
 	["Move", "WASD (relative to the camera); Shift sprint, Space jump, Q dash"],
-	["Look / aim", "Mouse orbits the camera; right mouse aims (zoom, finer mouse, face the crosshair)"],
+	["Look / aim", "Mouse orbits the camera; drawing a bow or slingshot zooms in"],
 	["Attack / cast", "Left mouse: swing (click again for the combo), hold to draw a bow or slingshot, hold to cast"],
+	["Block", "Hold right mouse: brace behind your weapon, facing the crosshair (a slow walk, no attacking). Hits from the"],
+	["", "front lose 65% with a sword, club or staff, 40% with fists, a bow, a slingshot or the wand; none from behind"],
 	["Use", "E: pick up a weapon, open the vault, press the Duel Stone, eat fruit"],
 	["Weapons", "1-7 fists, club, sword, bow, slingshot, staff, wand (the ones you have)"],
-	["", "Mouse wheel: next / previous weapon you own     Tap Tab: back to the last weapon"],
+	["", "Mouse wheel (not holding the staff or wand): next / previous weapon     Tap Tab: back to the last weapon"],
 	["", "Hold Tab: the weapon wheel (point with the mouse, let go of Tab or click to take it)"],
 	["Spells", "(staff or wand in hand; the hotbar over your health shows them all)"],
-	["", "Ctrl+1-8: that spell     Tap R: next spell     Shift+R: previous     Right mouse + wheel: scroll"],
+	["", "Mouse wheel: next / previous spell     Tap R: next     Shift+R: previous     Ctrl+1-8: that spell"],
 	["", "Hold R: the spell wheel (locked spells show the level that unlocks them)"],
 	["Golems", "Tap G: Follow me <-> Stay here     Middle mouse: attack the enemy under the crosshair, else go there"],
 	["", "Hold G: the order wheel: Follow me, Stay here, Go there, Attack that, Regroup"],
@@ -431,7 +433,8 @@ func _process(_delta: float) -> void:
 	var me := Vector3.ZERO
 	if avatars.has(net.my_id):
 		me = (avatars[net.my_id] as Node3D).position
-	aiming = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	# zoomed aim (v0.12.5): while a bow or slingshot is drawn (the right mouse button blocks now)
+	aiming = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and net.predicted != null and net.predicted.charge > 0
 	cam.fov = lerpf(cam.fov, 46.0 if aiming else 70.0, clampf(_delta * 12.0, 0.0, 1.0))
 	# the camera follows a smoothed focus point: steady, without lagging behind fast moves
 	cam_focus = me if cam_focus == Vector3.INF else cam_focus.lerp(me, 1.0 - exp(-_delta * 18.0))
@@ -516,7 +519,10 @@ func _sample_input() -> Array:
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and Time.get_ticks_msec() > attack_block_until and not (radial and radial.visible):
 			b |= Sim.Btn.ATTACK
 		if Input.is_physical_key_pressed(KEY_E): b |= Sim.Btn.INTERACT
-		if view == View.FIRST or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT): b |= Sim.Btn.FACE_CAM
+		if view == View.FIRST: b |= Sim.Btn.FACE_CAM
+		# v0.12.5: the right mouse button braces behind your weapon (block); it used to aim (the bow and slingshot
+		# now zoom in on their own while drawn)
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not (radial and radial.visible): b |= Sim.Btn.BLOCK
 	return [b, cam_yaw, aim_pitch, weapon_slot, aim_yaw, face_yaw, int(spell_sel.get(weapon_slot, 0)), aim_point]
 
 
@@ -741,6 +747,20 @@ func _bot_show() -> Array:
 				return [Sim.Btn.BACK, cam_yaw, 0.0, weapon_slot]
 			_:
 				return [Sim.Btn.RIGHT, cam_yaw, 0.0, weapon_slot]
+	if _args().has("guard") and t >= 60:   # v0.12.5: braced with every weapon in turn, the camera going round
+		var gs := [Weapons.FISTS, Weapons.SWORD, Weapons.CLUB, Weapons.BOW, Weapons.SLING, Weapons.STAFF, Weapons.WAND]
+		var k := (t - 60) / 100
+		if k >= gs.size():
+			get_tree().quit()
+			return [0, cam_yaw, 0.0, weapon_slot]
+		weapon_slot = gs[k]
+		cam_dist = 4.6
+		cam_yaw = ((t - 60) % 100) / 100.0 * TAU
+		var shots_g := str(_args().get("shots", ""))
+		if shots_g != "" and (t - 60) % 100 in [30, 55, 80]:
+			get_viewport().get_texture().get_image().save_png(shots_g.path_join("guard_%s_%02d.png" % [Weapons.NAMES[weapon_slot], (t - 60) % 100]))
+		var fy := 0.0
+		return [Sim.Btn.BLOCK if (t - 60) % 100 > 12 else 0, cam_yaw, 0.0, weapon_slot, fy, fy, 0, me + Vector3(0, 1, -8)]
 	if t < 60:
 		cam_yaw = 0.0
 	elif t < 180 and _args().has("orbit"):   # standing still while the camera goes all the way round (front, side, back)
@@ -958,7 +978,7 @@ func _bot_ui() -> Array:
 
 
 ## The end of --bot ui: real key and mouse events through the input pipeline (Input.parse_input_event), checking the
-## taps and holds: Ctrl+3 picks spell 3, the wheel steps the weapon, a tap of Tab goes back, a tap of R steps the
+## taps and holds: Ctrl+3 picks spell 3, the wheel steps the spell (a magic weapon in hand), a tap of Tab goes back, a tap of R steps the
 ## spell, Shift+R steps back, holding G opens the order wheel and letting go in the middle takes nothing.
 var _ui_check := {}
 
@@ -985,15 +1005,19 @@ func _bot_ui_keys() -> void:
 			e.pressed = true
 			Input.parse_input_event(e)
 		920:
-			say.call(weapon_slot == Weapons.STAFF, "the mouse wheel steps to the previous weapon (%s)" % Weapons.NAMES[weapon_slot])
+			# v0.12.5: with the staff or wand in hand the wheel steps the spell, not the weapon
+			say.call(weapon_slot == Weapons.WAND and int(spell_sel.get(Weapons.WAND, -1)) == 1, "the mouse wheel steps the wand's spell back (%d), the wand stays in hand" % int(spell_sel.get(Weapons.WAND, -1)))
 			key.call(KEY_TAB, true)
 		924:
 			key.call(KEY_TAB, false)
 		932:
-			say.call(weapon_slot == Weapons.WAND and not radial.visible, "a tap of Tab goes back to the last weapon (%s)" % Weapons.NAMES[weapon_slot])
+			say.call(weapon_slot != Weapons.WAND and not radial.visible, "a tap of Tab goes back to the last weapon (%s)" % Weapons.NAMES[weapon_slot])
+			key.call(KEY_7, true)
+			key.call(KEY_7, false)
 			_ui_check["s"] = int(spell_sel.get(Weapons.WAND, 0))
 			key.call(KEY_R, true)
 		935:
+			say.call(weapon_slot == Weapons.WAND, "7 takes the wand again (%s)" % Weapons.NAMES[weapon_slot])
 			key.call(KEY_R, false)
 		942:
 			say.call(int(spell_sel.get(Weapons.WAND, 0)) == int(_ui_check["s"]) + 1, "a tap of R picks the next spell (%d)" % int(spell_sel.get(Weapons.WAND, 0)))
@@ -1467,7 +1491,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			pass
 		elif mb.ctrl_pressed or not _playing():   # Ctrl + wheel: camera distance
 			cam_dist = clampf(cam_dist + 0.6 * step, 2.5, 14.0)
-		elif Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and Weapons.is_magic(weapon_slot):   # aiming: spells
+		elif Weapons.is_magic(weapon_slot):   # v0.12.5: staff or wand in hand: the wheel picks the spell
 			_step_spell(step)
 		else:
 			_cycle_weapon(step)
@@ -2486,6 +2510,16 @@ func _update_combat_hud() -> void:
 			lvl_line += "   kills %d / %d to the next level" % [kn, int(Weapons.LEVEL_KILLS[lv])]
 		else:
 			lvl_line += "   (ultimate unlocked)"
+		hud_spells.text = ("STUNNED\n" if st.stun > 0 else "") + lvl_line
+	elif Weapons.is_arm(st.weapon):   # v0.12.5: fists, club, sword, bow and slingshot level up too (more damage)
+		var arms: Array = net.roster.get(net.my_id, {}).get("arms", [0, 0, 0, 0, 0])
+		var kn := int(arms[st.weapon]) if st.weapon < arms.size() else 0
+		var lv := Weapons.level_for(kn)
+		var lvl_line := "%s level %d   damage +%d%%" % [Weapons.NAMES[st.weapon], lv, int(round((float(Weapons.ARM_DAMAGE[lv - 1]) - 1.0) * 100.0))]
+		if lv < Weapons.MAX_LEVEL:
+			lvl_line += "   kills %d / %d to the next level" % [kn, int(Weapons.LEVEL_KILLS[lv])]
+		else:
+			lvl_line += "   (max level)"
 		hud_spells.text = ("STUNNED\n" if st.stun > 0 else "") + lvl_line
 	else:
 		hud_spells.text = "STUNNED" if st.stun > 0 else ""

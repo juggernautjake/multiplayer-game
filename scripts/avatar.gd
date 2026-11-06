@@ -319,8 +319,12 @@ func _pip_tumble(delta: float, cam: Camera3D) -> void:
 				sp.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 
 
-## Briefly tint red (hit).
+## Briefly tint red (hit). v0.12.5: braced, a blow knocks him back a step instead (it hit the weapon).
 func flash() -> void:
+	if state != null and state.guard >= Sim.GUARD_UP:
+		_v_nudge -= 2.2
+		_v_sq -= 0.8
+		return
 	_flash = 0.18
 
 
@@ -368,6 +372,8 @@ func animate(delta: float, cam: Camera3D) -> void:
 	var a := _clip(_dir_for(cam))
 	if _anim == "getUp" and state != null:   # getting up follows the knock-down's clock
 		_frame = clampi(int((1.0 - float(state.down) / Sim.DOWN_GETUP) * a.frames), 0, a.frames - 1)
+	elif _anim == "land" and state != null and state.guard > 0:   # v0.12.5 braced: hold the deepest crouch
+		_frame = mini(1, a.frames - 1)
 	elif _anim.ends_with("Draw") and state != null:
 		# the draw follows how far the string is pulled, not the clock
 		var d := Weapons.get_data(state.weapon)
@@ -467,6 +473,8 @@ func _pick(speed: float) -> String:
 			return "getUp"
 		return "lieDown" if st.down > Sim.DOWN_TICKS - 24 or not grounded else "lieIdle"
 	if st != null:
+		if st.guard > 0 and grounded:   # v0.12.5 braced: the crouched landing pose, held (see animate)
+			return "land"
 		var melee := Weapons.is_melee(st.weapon)
 		if melee and st.atk > 0:
 			var mv := Weapons.move(st.weapon, st.combo)
@@ -663,6 +671,12 @@ func _update_prop(delta: float) -> void:
 		hx = _anchor.x + (-3.0 if use_left != mirror_view else 3.0)
 		hy = _anchor.y - 40.0
 		lift = 0.05 * sin(Time.get_ticks_msec() * 0.03)
+	if state.guard > 0:   # v0.12.5 braced: the weapon held up across his chest, in front of him, to catch the blow
+		var g := clampf(float(state.guard) / float(Sim.GUARD_UP), 0.0, 1.0)
+		hx = lerpf(hx, _anchor.x + (-3.0 if use_left != mirror_view else 3.0), g)
+		hy = lerpf(hy, _anchor.y - 30.0, g)
+		lift = 0.0
+		side = 0.0
 	var px := (hx - _anchor.x) * PIXEL * sprite.scale.x
 	var py := (_anchor.y - hy) * PIXEL * sprite.scale.y
 	# in front of him: a clear 12 cm toward the camera (it used to be 3 cm, which could lose the depth test to his body
@@ -697,6 +711,12 @@ func _procedural(delta: float, speed: float) -> void:
 		_shot_seen = st.swing_n
 	if st != null and st.charge > 0 and Weapons.is_ranged(st.weapon):   # leaning into the draw
 		_sq = lerpf(_sq, 0.97, clampf(delta * 6.0, 0.0, 1.0))
+	# v0.12.5 braced (blocking): sunk low and wide behind the weapon, knees bent; a small jolt back when a blow lands
+	if st != null and st.guard > 0 and st.dead == 0:
+		if st.guard <= 2:
+			_v_sq -= 1.0   # dropping into the stance
+		_sq = lerpf(_sq, 0.9, clampf(delta * 14.0, 0.0, 1.0))
+		_nudge = lerpf(_nudge, -0.05, clampf(delta * 10.0, 0.0, 1.0))
 	var sq := FigureAvatar.spring_f(_sq, _v_sq, 1.0, 0.09, delta)
 	_sq = clampf(sq[0], 0.7, 1.3)
 	_v_sq = sq[1]

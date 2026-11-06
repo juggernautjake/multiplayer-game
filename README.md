@@ -44,13 +44,13 @@ Contents:
 | Mouse | orbit the camera around you (action-RPG style, like Valheim / Dark Souls) |
 | WASD, Shift, Space, Q | move relative to the camera (you turn to face the way you walk), sprint, jump, dash |
 | Left mouse | attack the way you face (in place, or stepping into it if you're moving); click again for the combo; hold to draw a bow or slingshot, let go to shoot. While you hold it, your character turns toward the crosshair |
-| Right mouse | aim: face where the camera looks, zoom in, finer mouse |
+| Right mouse | hold: **block** (brace behind your weapon, facing the crosshair; a slow walk, no attacking). A hit from the front loses 65% with a sword, club or staff, 40% with fists, a bow, a slingshot or the wand (half that against Thunderhorn); none from behind. Drawing a bow or slingshot zooms in on its own |
 | E | pick up the weapon you're standing at (ammo is picked up by walking over it); next to a fallen fruit with no weapon in reach, eat it (+18 HP; walking over a fallen apple while hurt eats it too) |
 | 1-7 | fists, club, sword, bow, slingshot, staff, wand (the ones you have) |
-| Mouse wheel | next / previous weapon you own |
+| Mouse wheel | staff or wand in hand: next / previous spell; otherwise next / previous weapon you own |
 | Tab | tap: back to the last weapon; hold: the **weapon wheel** (point with the mouse, let go to take it) |
 | Ctrl+1-8 | (staff or wand in hand) pick that spell |
-| R | tap: next spell; Shift+R: previous; hold: the **spell wheel**. Right mouse + wheel also scrolls the spells |
+| R | tap: next spell; Shift+R: previous; hold: the **spell wheel** |
 | G | tap: your golems Follow me / Stay here; hold: the **golem order wheel** |
 | Middle mouse | golems: attack the enemy under the crosshair, or go to the spot on the ground there |
 | V, Ctrl + mouse wheel | first / third person, camera distance |
@@ -823,3 +823,23 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
   camera shots, sounds): he slams the Duel Stone, it turns evil, and six corrupted minions rise to fight you. See
   [The Duel Stone's corruption](#the-duel-stones-corruption-0123). Test: `tools/cutscene_test.gd`; demo bot
   `--bot boss --cutscene`.
+
+## What's new in 0.12.4 and 0.12.5
+
+- **0.12.4: Pip's carried weapon** sits on his far side when his back is to the camera (his body hides it; it used to
+  be drawn across his back).
+- **Every weapon levels up**: fists, club, sword, bow and slingshot count their own knock-outs (players, challengers,
+  minions; not golems or dummies) at the same steps as the staff and wand (3, 7, 12) and hit harder: x1.25, x1.5, x1.8
+  (`Weapons.ARM_DAMAGE`; every melee move, the club smash's shockwave, arrows and stones at any draw). The level-up
+  column and "SWORD LEVEL 2! Damage +25%"; the HUD shows the level and kills to the next (`Net.arm_level`, `_arm_kill`,
+  `ServerPlayer.arms`, in the roster).
+- **Blocking** (hold right mouse): brace behind your weapon (`Sim.Btn.BLOCK`, `PlayerState.guard`, synced). Braced:
+  facing the crosshair, a slow walk (`GUARD_SLOW`), no attacking or casting; it takes `GUARD_UP` ticks to rise and
+  can't start mid-swing, drawing, casting, shielded, stunned, knocked down or dashing. A hit from the front
+  (`GUARD_ARC` 75 degrees each way) lets through 35% with a sword, club or staff, 60% with fists, bow, slingshot or wand
+  (`Weapons.BLOCK_KEEP`; against Thunderhorn only half the saving), with 40% of the knockback; none from behind. Sparks,
+  a flash, "BLOCKED -N" and a clang (metal) or a knock (wood). Pip sinks into a crouch with the weapon up across his
+  chest and jolts back when hit; the 3D figure holds the sword or club crosswise, the staff level like a quarterstaff,
+  the bow upright, forearms up for the rest. Demo: `--bot show --guard`.
+- **Controls**: the mouse wheel picks spells while the staff or wand is in hand (weapons otherwise); 1-7 pick weapons;
+  the bow and slingshot zoom in on their own while drawn (right mouse blocks now).

@@ -117,6 +117,107 @@ func _initialize() -> void:
 	b.state.dead = 0
 	net._damage(2, 10, 1, Vector3(1, 0, 0), 0.0)   # a sword kill: doesn't count for magic
 	check(a.kills == [3, 5], "a kill with a sword doesn't count toward magic levels")
+	# v0.12.5: fists, club, sword, bow and slingshot level up too (3, 7, 12 kills) and just hit harder
+	a.arms = [0, 0, 0, 0, 0]
+	for i in 3:
+		b.state.hp = 5
+		b.state.dead = 0
+		net.hit_weapon = Weapons.SWORD
+		net._damage(2, 10, 1, Vector3(1, 0, 0), 0.0)
+		net.hit_weapon = -1
+	check(a.arms[Weapons.SWORD] == 3 and Net.arm_level(a, Weapons.SWORD) == 2 and a.kills == [3, 5],
+		"3 sword kills: sword level 2 (%s), magic levels untouched" % str(a.arms))
+	check(Net.arm_level(a, Weapons.CLUB) == 1, "the club is still level 1 (each weapon has its own kills)")
+	check(Weapons.level_for(7) == 3 and Weapons.level_for(12) == 4, "levels 3 and 4 at 7 and 12 kills, like the staff and wand")
+	# a real slash from a level-2 sword: 8 x 1.25 = 10
+	a.state.pos = Vector3(30, 0, 30)
+	a.state.yaw = 0.0
+	a.state.weapon = Weapons.SWORD
+	a.state.combo = 0
+	b.state.pos = Vector3(30, 0, 28.6)
+	b.state.hp = Sim.MAX_HP
+	b.state.dead = 0
+	b.hist = []
+	var inp := Sim.PlayerInput.new()
+	inp.view_tick = net.server_tick
+	net._melee(a, inp)
+	check(Sim.MAX_HP - b.state.hp == 10, "a level-2 sword slash hits for 10 instead of 8 (%d)" % (Sim.MAX_HP - b.state.hp))
+	check(net.hit_weapon == -1, "and the weapon credit is cleared after the swing")
+	# a level-1 slash with fists is unchanged: 6
+	a.state.weapon = Weapons.FISTS
+	b.state.hp = Sim.MAX_HP
+	net._melee(a, inp)
+	check(Sim.MAX_HP - b.state.hp == 6, "a level-1 jab still hits for 6 (%d)" % (Sim.MAX_HP - b.state.hp))
+	# an arrow knock-out counts for the bow
+	b.state.pos = Vector3(60, 0, 60)
+	b.state.hp = 5
+	b.state.dead = 0
+	var ar := Net.Proj.new()
+	ar.id = 970
+	ar.owner = 1
+	ar.kind = 0
+	ar.weapon = Weapons.BOW
+	ar.tick0 = net.server_tick
+	ar.pos0 = Vector3(60, 1.2, 66)
+	ar.vel0 = Vector3(0, 0, -40)
+	ar.damage = 9
+	ar.last = ar.pos0
+	net.projectiles[ar.id] = ar
+	for t in 30:
+		net.server_tick += 1
+		net._server_projectiles()
+	check(b.state.dead > 0 and a.arms[Weapons.BOW] == 1 and a.kills == [3, 5], "an arrow knock-out counts toward the bow (%s)" % str(a.arms))
+	check(net.hit_weapon == -1, "and the credit is cleared after the projectiles move")
+	a.state.weapon = Weapons.FISTS
+	b.state.pos = Vector3.ZERO
+
+	# v0.12.5 blocking: hold BLOCK to brace; a hit from the front loses 65% (sword, club, staff) or 40% (the rest)
+	b.state.dead = 0
+	b.state.hp = Sim.MAX_HP
+	b.state.yaw = 0.0   # facing -Z
+	b.state.weapon = Weapons.SWORD
+	b.state.owned = 0x7f
+	var blk := Sim.PlayerInput.new(1, Sim.Btn.BLOCK, 0.0, 0.0, Weapons.SWORD, 0, 0.0, 0.0, 0, Vector3.ZERO)
+	for t in Sim.GUARD_UP:
+		Sim.step(b.state, blk)
+	check(b.state.guard >= Sim.GUARD_UP, "holding block raises the guard (%d ticks)" % b.state.guard)
+	net._damage(2, 20, 1, Vector3(0, 0, 1), 4.0)   # pushed toward +Z: the blow came from in front (-Z)
+	check(Sim.MAX_HP - b.state.hp == 7, "a 20 hit on a sword block from the front: 7 gets through (%d)" % (Sim.MAX_HP - b.state.hp))
+	b.state.hp = Sim.MAX_HP
+	b.state.weapon = Weapons.BOW
+	net._damage(2, 20, 1, Vector3(0, 0, 1), 4.0)
+	check(Sim.MAX_HP - b.state.hp == 12, "on a bow block: 12 gets through (%d)" % (Sim.MAX_HP - b.state.hp))
+	b.state.hp = Sim.MAX_HP
+	net._damage(2, 20, 1, Vector3(0, 0, -1), 4.0)   # from behind
+	check(Sim.MAX_HP - b.state.hp == 20, "from behind the block does nothing (%d)" % (Sim.MAX_HP - b.state.hp))
+	b.state.hp = Sim.MAX_HP
+	b.state.weapon = Weapons.STAFF
+	net._damage(2, 20, Boss.ID, Vector3(0, 0, 1), 4.0)
+	check(Sim.MAX_HP - b.state.hp == 14, "Thunderhorn's 20 on a staff block: only half the saving, 14 gets through (%d)" % (Sim.MAX_HP - b.state.hp))
+	b.state.hp = Sim.MAX_HP
+	# braced: no attacks, a slow walk; letting go drops it
+	var both := Sim.PlayerInput.new(2, Sim.Btn.BLOCK | Sim.Btn.ATTACK | Sim.Btn.FORWARD | Sim.Btn.SPRINT, 0.0, 0.0, Weapons.STAFF, 0, 0.0, 0.0, 0, Vector3.ZERO)
+	b.state.weapon = Weapons.SWORD
+	var n0 := b.state.swing_n
+	for t in 30:
+		Sim.step(b.state, both)
+	check(b.state.swing_n == n0 and b.state.atk == 0, "no swinging while braced")
+	var hs := Vector2(b.state.vel.x, b.state.vel.z).length()
+	check(absf(hs - Sim.WALK_SPEED * Sim.GUARD_SLOW) < 0.2, "braced: a slow walk, no sprint (%.1f m/s)" % hs)
+	Sim.step(b.state, Sim.PlayerInput.new(3, 0, 0.0, 0.0, Weapons.SWORD, 0, 0.0, 0.0, 0, Vector3.ZERO))
+	check(b.state.guard == 0, "letting go drops the guard")
+	b.state.guard = 1
+	net._damage(2, 20, 1, Vector3(0, 0, 1), 4.0)
+	check(Sim.MAX_HP - b.state.hp == 20, "a guard just starting to rise doesn't block yet (%d)" % (Sim.MAX_HP - b.state.hp))
+	b.state.guard = 0
+	b.state.hp = Sim.MAX_HP
+	b.state.pos = Vector3.ZERO
+	b.state.vel = Vector3.ZERO
+	# the snapshot carries it
+	b.state.guard = 9
+	var snap := Codec.decode_snapshot(Codec.encode_snapshot(1, 0, [[2, b.state]]))
+	check(int((snap.ents[2] as Sim.PlayerState).guard) == 9, "the guard goes out in snapshots")
+	b.state.guard = 0
 	# the stun bursts in an area: someone 2 m from where it lands is caught
 	a.state.pos = Vector3(60, 0, 60)
 	b.state.pos = Vector3(60, 0, 48)

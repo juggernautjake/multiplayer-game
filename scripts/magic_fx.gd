@@ -130,6 +130,8 @@ func _on_fx(kind: String, a: Array) -> void:
 				Fx.burst(main, av.position + Vector3(0, 1.0, 0), Vector3.UP, Color("8fd8ff"), 22, 3.0, 0.05)
 		"shield_hit":
 			_shield_hit(int(a[0]), a[1], float(a[2]) if a.size() > 2 else 8.0)
+		"block":
+			_block(int(a[0]), a[1], int(a[2]), int(a[3]))
 		"stun_beam":
 			_stun_beam(a[1], a[2], int(a[3]) != 0)
 		"teleport":
@@ -1039,6 +1041,31 @@ func _heal_pulse(id: int, at: Vector3, r: float, got: Array) -> void:
 		Synth.play(main, _heal_snd, -10.0)
 
 
+var _block_snd := {}
+
+
+## v0.12.5 a blow caught on a block: sparks off the weapon (a shower for the sword, club and staff, a few dull chips
+## for the rest), a quick flash, "BLOCKED" and how much it saved, the defender jolted back, and a clang (metal / wood)
+## or a dull knock.
+func _block(id: int, at: Vector3, w: int, saved: int) -> void:
+	var hard := Weapons.block_keep(w) < 0.5
+	var col := Color("fff0b0") if hard else Color("d8c7a0")
+	var out := Vector3.UP
+	if avatars.has(id):
+		var av := avatars[id] as Node3D
+		out = (at - av.position - Vector3(0, 1.15, 0)).normalized() + Vector3(0, 0.6, 0)
+		if av.has_method("hitstop"):
+			av.hitstop(0.06, false)
+	Fx.burst(main, at, out, col, 22 if hard else 9, 5.5 if hard else 3.0, 0.035)
+	_flash_light(at, col, 2.5 if hard else 1.0, 4.0, 0.15)
+	Fx.word(main, at + Vector3(0, 0.9, 0), "BLOCKED" + (" -%d" % saved if saved > 0 else ""), Color("ffe08a") if hard else Color("e6dccb"))
+	var kind := "clang" if hard else "thock"
+	if not _block_snd.has(kind):
+		_block_snd[kind] = Synth.fx(kind)
+	if avatars.has(net.my_id) and (avatars[net.my_id] as Node3D).position.distance_to(at) < 35.0:
+		Synth.play(main, _block_snd[kind], -6.0 if hard else -4.0)
+
+
 ## v0.12.0 Life Drain on an ally: a green-gold healing stream from the caster's wand into them, motes flowing along
 ## it, a soft green light and "+N" over them.
 func _drain_ally(hand: Vector3, at: Vector3, heal: int, target: int) -> void:
@@ -1172,6 +1199,8 @@ func _level_up(id: int, w: int, lv: int, spell: String) -> void:
 	_flash_light(at + Vector3(0, 2, 0), Color("ffd86a"), 6.0, 10.0, 1.2)
 	Fx.burst(main, at + Vector3(0, 1.0, 0), Vector3.UP, Color("ffe9a0"), 50, 6.0, 0.05)
 	var what := ("%s LEVEL %d!" % [Weapons.NAMES[w].to_upper(), lv]) + ("  New spell: " + spell if spell != "" else "")
+	if Weapons.is_arm(w):   # v0.12.5: the other weapons just hit harder
+		what += "  Damage +%d%%" % int(round((float(Weapons.ARM_DAMAGE[clampi(lv, 1, Weapons.MAX_LEVEL) - 1]) - 1.0) * 100.0))
 	Fx.word(main, at + Vector3(0, 2.6, 0), what, Color("ffd86a"))
 	if id == net.my_id and main.has_method("toast"):
 		main.toast(what + ("  (R to pick it)" if spell != "" else ""))

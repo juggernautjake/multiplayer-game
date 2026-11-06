@@ -73,7 +73,7 @@ static func roar(kind := 0) -> AudioStreamWAV:
 static func fx(kind: String) -> AudioStreamWAV:
 	var dur: float = {"snort": 0.45, "hoof": 0.35, "scrape": 0.5, "crackle": 1.0, "charge": 1.6, "whoosh": 0.7,
 		"zap": 0.25, "slam": 1.4, "chirp": 0.18, "stun": 0.9, "pant": 1.4, "eat": 0.35, "buzz": 0.6, "heal": 0.55,
-		"beam_hum": 1.05, "beam": 1.6, "beam_long": 2.75, "pop": 0.35}.get(kind, 0.5)
+		"beam_hum": 1.05, "beam": 1.6, "beam_long": 2.75, "pop": 0.35, "clang": 0.6, "thock": 0.22}.get(kind, 0.5)
 	var n := int(RATE * dur)
 	var d := PackedFloat32Array()
 	d.resize(n)
@@ -90,6 +90,12 @@ static func fx(kind: String) -> AudioStreamWAV:
 		lp2 += (noise - lp2) * 0.03
 		var v := 0.0
 		match kind:
+			"clang":   # v0.12.5 a blow blocked on a blade or staff: a bright metallic ring (inharmonic partials) on a hit
+				v = (sin(t * TAU * 1180.0) * 0.32 + sin(t * TAU * 1730.0) * 0.22 + sin(t * TAU * 2610.0) * 0.14 + sin(t * TAU * 3920.0) * 0.08) \
+					* exp(-t * 9.0) + noise * exp(-t * 90.0) * 0.9
+			"thock":   # v0.12.5 a blow caught on fists, a bow or a slingshot: a dull, woody knock
+				ph += (210.0 - 90.0 * u) / RATE
+				v = sin(ph * TAU) * exp(-t * 28.0) * 1.0 + lp * exp(-t * 50.0) * 1.6
 			"snort":   # breath through big nostrils: band noise, a quick swell and a rattle
 				var env := minf(t / 0.03, 1.0) * exp(-t * 7.0)
 				v = (lp - lp2) * 2.2 * env * (0.75 + 0.25 * sin(t * TAU * 38.0))

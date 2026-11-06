@@ -106,6 +106,35 @@ const MAX_MANA := 100
 ## Each level adds that weapon's next spell.
 const LEVEL_KILLS := [0, 3, 7, 12]   # v0.12.0: 3, then 4 more, then 5 more (was 3, 8, 18)
 const MAX_LEVEL := 4
+## v0.12.5 (Jacob): the other weapons (fists, club, sword, bow, slingshot) level up too, at the same kill counts, and
+## just hit harder: every hit (each melee move, the club smash's shockwave, an arrow or a stone at any draw) times
+## ARM_DAMAGE[level - 1]. Kills are knock-outs of players, challengers and minions, as for the staff and wand.
+const ARM_DAMAGE := [1.0, 1.25, 1.5, 1.8]
+
+
+## v0.12.5 blocking (Jacob): braced, a hit from the front lets only this much of its damage through. The sword, the
+## club and the staff (something solid to catch a blow on) block more than fists, the bow, the slingshot and the wand.
+## Thunderhorn hits too hard to stop as well: against him a block saves only half as much. Blocked hits push you back
+## GUARD_KNOCK as far. From behind or the side (outside GUARD_ARC degrees each way of where you face), no block at all.
+const BLOCK_KEEP := { FISTS: 0.6, CLUB: 0.35, SWORD: 0.35, BOW: 0.6, SLING: 0.6, STAFF: 0.35, WAND: 0.6 }
+const GUARD_ARC := 75.0
+const GUARD_KNOCK := 0.4
+
+
+## What part of a frontal hit gets through a block with weapon w (boss: from Thunderhorn).
+static func block_keep(w: int, boss := false) -> float:
+	var k := float(BLOCK_KEEP.get(w, 0.6))
+	return lerpf(k, 1.0, 0.5) if boss else k
+
+
+## Does this weapon level up by damage (not spells)?
+static func is_arm(w: int) -> bool:
+	return w >= FISTS and w <= SLING
+
+
+## A fists/club/sword/bow/slingshot hit of `base` at weapon level `lv`.
+static func arm_damage(base: int, lv: int) -> int:
+	return int(round(float(base) * float(ARM_DAMAGE[clampi(lv, 1, MAX_LEVEL) - 1])))
 const MANA_EVERY := 5      # ticks per point of mana back (12 a second), not while casting
 ## v0.8.1: the bubble is centred SHIELD_CENTER_Y above the feet and big enough to hold the whole caster, the raised
 ## staff (its orb sits at the top of the bubble), the hat and the robe. The server tests hits against this same sphere.

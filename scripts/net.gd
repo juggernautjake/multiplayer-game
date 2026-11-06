@@ -61,6 +61,7 @@ class ServerPlayer:
 	var outfit := 0             # Pip's outfit: the host 0, then 1, 2, 3 by who joined
 	var pvp := false            # player-versus-player on: can hurt and be hurt by other players with it on
 	var kills := [0, 0]         # kills with the staff, with the wand (they level the weapon up)
+	var arms := [0, 0, 0, 0, 0] # v0.12.5: kills with fists, club, sword, bow, slingshot (by Weapons id): damage levels
 	var npc := false            # v0.10.0: a Duel Stone challenger (no network peer: its NpcAI makes its inputs)
 	var ai: NpcAI
 	var air := false            # in the air last tick (landing on the Storm Altar presses it)
@@ -96,6 +97,7 @@ class Proj:
 	var vel0 := Vector3.ZERO
 	var g := 0.0
 	var damage := 0
+	var weapon := -1            # v0.12.5: the bow or slingshot that shot it (its kills level that weapon)
 	var last := Vector3.ZERO
 	var immune := 0             # a shield's holder it bounced off: it can't hurt them (or bounce off them) again
 	var bounces := 0
@@ -204,6 +206,8 @@ func host(port: int, player_name: String, with_player := true) -> Error:
 				players[1].state.rocks = 30
 		if OS.get_cmdline_user_args().has("--max-level"):   # testing: every spell unlocked
 			players[1].kills = [Weapons.LEVEL_KILLS[-1], Weapons.LEVEL_KILLS[-1]]
+			var top: int = Weapons.LEVEL_KILLS[-1]
+			players[1].arms = [top, top, top, top, top]
 			players[1].state.staff_lvl = Weapons.MAX_LEVEL
 			players[1].state.wand_lvl = Weapons.MAX_LEVEL
 		predicted = players[1].state.copy()
@@ -368,7 +372,8 @@ func roster_update(list: Array) -> void:
 	for e in list:
 		roster[int(e[0])] = { "name": str(e[1]), "color": e[2], "character": str(e[3]) if e.size() > 3 else "pip",
 			"outfit": int(e[4]) if e.size() > 4 else 0, "pvp": bool(e[5]) if e.size() > 5 else false,
-			"kills": e[6] if e.size() > 6 else [0, 0], "kind": int(e[7]) if e.size() > 7 else 0 }   # kind: 0 player, 1 challenger, 2 minion
+			"kills": e[6] if e.size() > 6 else [0, 0], "kind": int(e[7]) if e.size() > 7 else 0,   # kind: 0 player, 1 challenger, 2 minion
+			"arms": e[8] if e.size() > 8 else [0, 0, 0, 0, 0] }   # v0.12.5: kills with fists, club, sword, bow, slingshot
 	roster_changed.emit(roster)
 
 
@@ -586,7 +591,7 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 func _server_send_roster() -> void:
 	var list := []
 	for p: ServerPlayer in players.values():
-		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp, p.kills, 2 if p.minion else (1 if p.npc else 0)])
+		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp, p.kills, 2 if p.minion else (1 if p.npc else 0), p.arms])
 	roster_update.rpc(list)
 	if is_host_player:
 		roster_update(list)
@@ -749,18 +754,23 @@ func _melee(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
 			if td.length() <= float(w.range) + 0.5 and (td.length() < 0.6 or absf(face.angle_to(td)) <= deg_to_rad(float(w.arc) / 2.0)):
 				ecology.hit_tree(i, int(w.damage), server_tick, Vector3(td.x, 0, td.y))
 		ecology.hit_fruit(me, face, float(w.range), float(w.arc), float(w.knock), server_tick)
+	# v0.12.5: the weapon's level makes every hit harder, and a knock-out with it counts toward its next level
+	var wpn := p.state.weapon
+	var dmg := Weapons.arm_damage(int(w.damage), arm_level(p, wpn)) if Weapons.is_arm(wpn) else int(w.damage)
+	hit_weapon = wpn if Weapons.is_arm(wpn) else -1
 	for t in targets:
 		var d: Vector3 = t[1] - me
 		var flat := Vector2(d.x, d.z)
 		var in_reach := flat.length() <= float(w.range) + Sim.RADIUS and absf(d.y) <= 1.8 \
 			and (flat.length() <= 0.6 or absf(face.angle_to(flat)) <= deg_to_rad(float(w.arc) / 2.0))
 		if in_reach:
-			_damage(t[0], int(w.damage), p.id, Vector3(flat.x, 0, flat.y), float(w.knock))
+			_damage(t[0], dmg, p.id, Vector3(flat.x, 0, flat.y), float(w.knock))
 		elif w.shape == "smash":
 			# the smash's shockwave catches anyone standing close to where the club hits the ground
 			var off: Vector3 = t[1] - impact
 			if Vector2(off.x, off.z).length() <= float(w.aoe) and absf(off.y) < 1.2:
-				_damage(t[0], maxi(int(w.damage) / 2, 3), p.id, Vector3(off.x, 0, off.z), float(w.knock) * 0.6)
+				_damage(t[0], maxi(dmg / 2, 3), p.id, Vector3(off.x, 0, off.z), float(w.knock) * 0.6)
+	hit_weapon = -1
 
 
 ## A bow or slingshot is released: launch the projectile (speed and damage from how far it was drawn).
@@ -776,7 +786,8 @@ func _shoot(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
 	pr.pos0 = Weapons.muzzle(p.state.pos, inp.yaw)
 	pr.vel0 = Weapons.aim_dir(inp.aim_yaw, inp.pitch) * float(sd[0])
 	pr.g = float(w.gravity)
-	pr.damage = int(sd[1])
+	pr.weapon = p.state.weapon
+	pr.damage = Weapons.arm_damage(int(sd[1]), arm_level(p, pr.weapon))   # v0.12.5: harder at higher levels
 	pr.last = pr.pos0
 	projectiles[pr.id] = pr
 	proj_spawn.rpc(pr.id, pr.owner, pr.kind, pr.tick0, pr.pos0, pr.vel0, pr.g)
@@ -789,6 +800,7 @@ func _shoot(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
 func _server_projectiles() -> void:
 	for id in projectiles.keys():
 		var pr: Proj = projectiles[id]
+		hit_weapon = pr.weapon if Weapons.is_arm(pr.weapon) else -1   # v0.12.5: its knock-outs level the bow / slingshot
 		var n := server_tick - pr.tick0
 		var cur := Weapons.proj_pos(pr.pos0, pr.vel0, pr.g, n)
 		var prev := pr.last
@@ -865,6 +877,7 @@ func _server_projectiles() -> void:
 				_burst(pr, cur)
 			else:
 				_end_proj(pr, cur, false)
+	hit_weapon = -1
 
 
 func _in_box(pt: Vector3) -> bool:
@@ -1084,6 +1097,13 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		if left <= 0:
 			return
 		amount = maxi(int(ceil(float(left) / (rate * 5.0))), 1)   # it shattered: the rest gets through
+	elif target > 0 and players.has(target) and amount > 0 and guarding(players[target].state, dir):
+		# v0.12.5: braced and facing the blow: the weapon catches most of it (Weapons.block_keep), a clang and sparks
+		var gs: Sim.PlayerState = players[target].state
+		var full := amount
+		amount = maxi(int(round(float(amount) * Weapons.block_keep(gs.weapon, from == Boss.ID))), 1)
+		knock *= Weapons.GUARD_KNOCK
+		_fx("block", [target, gs.pos + Vector3(-sin(gs.yaw), 0, -cos(gs.yaw)) * 0.45 + Vector3(0, 1.15, 0), gs.weapon, full - amount])
 	if target < 0:
 		pos = WorldLayout.DUMMIES[-target - 1] + Vector3(0, 1.3, 0)
 		last_dealt = amount
@@ -1106,6 +1126,8 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 			killed = true
 			if dmg_src >= 0 and players.has(from) and from != target:
 				_magic_kill(players[from], dmg_src)
+			elif hit_weapon >= 0 and players.has(from) and from != target:
+				_arm_kill(players[from], hit_weapon)
 		Sim.quantize(q.state)
 		pos = q.state.pos + Vector3(0, 1.3, 0)
 	hit_fx.rpc(target, amount, pos, dir, killed, from)
@@ -1937,6 +1959,38 @@ func _magic_kill(p: ServerPlayer, w: int) -> void:
 		var name := " & ".join(Weapons.spells_at(w, lv))   # v0.12.0: a level may bring two spells
 		_fx("level_up", [p.id, w, lv, name])
 		print("%s's %s reached level %d: %s" % [p.name, Weapons.NAMES[w], lv, name])
+	_server_send_roster()
+
+
+## v0.12.5: is this player braced (the guard fully up) and facing a hit pushing them along `dir` (from the attacker
+## toward them)? No direction (a hit from right on top of them): yes.
+static func guarding(s: Sim.PlayerState, dir: Vector3) -> bool:
+	if s.guard < Sim.GUARD_UP or s.dead > 0:
+		return false
+	var from := Vector2(-dir.x, -dir.z)
+	if from.length() < 1e-4:
+		return true
+	var face := Vector2(-sin(s.yaw), -cos(s.yaw))
+	return face.dot(from.normalized()) >= cos(deg_to_rad(Weapons.GUARD_ARC))
+
+
+var hit_weapon := -1   # v0.12.5: while a fists/club/sword swing or an arrow/stone deals damage: that weapon, else -1
+
+
+## v0.12.5: the level of a fists/club/sword/bow/slingshot from its kills (same steps as the staff and wand: 3, 7, 12).
+static func arm_level(p: ServerPlayer, w: int) -> int:
+	return Weapons.level_for(int(p.arms[w])) if Weapons.is_arm(w) else 1
+
+
+## v0.12.5: a knock-out with fists, club, sword, bow or slingshot: count it; at 3, 7 and 12 the weapon levels up and hits
+## harder (Weapons.ARM_DAMAGE), with the same burst of light and the news on the killer's screen.
+func _arm_kill(p: ServerPlayer, w: int) -> void:
+	var before := arm_level(p, w)
+	p.arms[w] += 1
+	var lv := arm_level(p, w)
+	if lv > before:
+		_fx("level_up", [p.id, w, lv, ""])
+		print("%s's %s reached level %d: damage x%.2f" % [p.name, Weapons.NAMES[w], lv, float(Weapons.ARM_DAMAGE[lv - 1])])
 	_server_send_roster()
 
 

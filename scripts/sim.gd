@@ -4,7 +4,8 @@
 class_name Sim
 
 ## FACE_CAM: face where the camera looks (aiming, first person) instead of the way you walk.
-enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64, ATTACK = 128, INTERACT = 256, FACE_CAM = 512 }
+## BLOCK (v0.12.5, the right mouse button): brace behind your weapon (Weapons.block_keep), facing the crosshair.
+enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64, ATTACK = 128, INTERACT = 256, FACE_CAM = 512, BLOCK = 1024 }
 
 ## What a step reports, for the server to act on (hit test, launch a projectile) and the client to show.
 enum Ev { NONE, MELEE_HIT, SHOT, CAST }
@@ -41,6 +42,12 @@ const DOWN_GETUP := 45
 const BOUNCE_MIN := 4.0
 const BOUNCE_K := 0.5
 const RICOCHET_K := 0.6
+# v0.12.5 blocking: hold the block button to brace (not mid-swing, drawing, casting, shielded, stunned, down or
+# dashing; a dash drops the guard). Braced: no attacking or casting, walking at GUARD_SLOW (no sprint), facing the
+# crosshair. `guard` counts the ticks it has been up; a hit only counts as blocked from GUARD_UP on (raising it takes
+# a moment), and only from the front (Weapons.GUARD_ARC).
+const GUARD_SLOW := 0.5
+const GUARD_UP := 5
 
 
 ## One tick of player intent. yaw: the camera's heading (radians, 0 = looking down -Z): WASD move relative to it.
@@ -103,6 +110,7 @@ class PlayerState:
 	var zap := 0            # v0.11.0: static build-up (ZAP_STACK a hit), ZAP_STUN while static-stunned
 	var zap_cd := 0         # ticks before the static starts draining
 	var down := 0           # ticks left knocked down (launched): no control, getting up at the end
+	var guard := 0          # v0.12.5: ticks the block has been held up (0 = not blocking), up to 255
 
 	func copy() -> PlayerState:
 		var s := PlayerState.new()
@@ -136,6 +144,7 @@ class PlayerState:
 		s.zap = zap
 		s.zap_cd = zap_cd
 		s.down = down
+		s.guard = guard
 		return s
 
 
@@ -190,9 +199,11 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 	var wish := Vector2(-csy * f + ccy * r, -ccy * f - csy * r)
 	var w := Weapons.get_data(s.weapon)
 	var mv := Weapons.move(s.weapon, s.combo)
-	var busy: bool = s.charge > 0 or (s.atk > 0 and w.kind != "ranged")
+	var busy: bool = s.charge > 0 or (s.atk > 0 and w.kind != "ranged") or s.guard > 0
 	var speed := SPRINT_SPEED if inp.buttons & Btn.SPRINT and not busy else WALK_SPEED
-	if busy or s.shield > 0:
+	if s.guard > 0:
+		speed *= GUARD_SLOW   # braced: a slow, guarded walk
+	elif busy or s.shield > 0:
 		speed *= w.slow   # drawing a bow, mid-swing, casting or holding the shield up: slower
 	if s.slow > 0:
 		speed *= SLOW_FACTOR
@@ -315,6 +326,12 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 		s.combo_t = 0
 	var w := Weapons.get_data(s.weapon)
 	var attack := inp.buttons & Btn.ATTACK != 0
+	# v0.12.5: bracing behind the weapon (any weapon, fists too): no attacking or casting while it's up
+	var brace: bool = inp.buttons & Btn.BLOCK != 0 and s.atk == 0 and s.charge == 0 and s.shield == 0 \
+		and s.stun == 0 and s.down == 0 and s.dash_ticks == 0
+	s.guard = mini(s.guard + 1, 255) if brace else 0
+	if s.guard > 0:
+		return ev
 	if w.kind == "magic":
 		var lvl := s.staff_lvl if s.weapon == Weapons.STAFF else s.wand_lvl
 		if s.atk == 0 and s.shield == 0 and inp.spell != s.spell and Weapons.unlocked(s.weapon, inp.spell, lvl):
@@ -444,7 +461,7 @@ static func _face(s: PlayerState, inp: PlayerInput, wish: Vector2, w: Dictionary
 	# out on the client). Not the camera heading (the camera sits over the shoulder, so up close that misses the target
 	# by the shoulder offset) and not the line from the weapon's tip (up close that swung the body sideways). Shots
 	# still fly from the tip at the crosshair point (inp.aim_yaw, used where the projectile is made).
-	if inp.buttons & Btn.FACE_CAM or s.charge > 0:
+	if inp.buttons & Btn.FACE_CAM or s.charge > 0 or s.guard > 0:   # (braced: facing what you're guarding against)
 		s.yaw = inp.face_yaw
 		return
 	# holding attack: keep turning toward where the camera looks, mid-swing too, so swinging the camera round steers the

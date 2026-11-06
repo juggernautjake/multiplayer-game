@@ -92,6 +92,7 @@ static func encode_snapshot(tick: int, ack: int, ents: Array) -> PackedByteArray
 		b.put_u16(s.zap)
 		b.put_u8(s.zap_cd)
 		b.put_u8(s.down)
+		b.put_u8(s.guard)   # v0.12.5: blocking
 	return b.data_array
 
 
@@ -136,5 +137,6 @@ static func decode_snapshot(data: PackedByteArray) -> Dictionary:
 		s.zap = b.get_u16()
 		s.zap_cd = b.get_u8()
 		s.down = b.get_u8()
+		s.guard = b.get_u8()
 		ents[id] = s
 	return { "tick": tick, "ack": ack, "ents": ents }
