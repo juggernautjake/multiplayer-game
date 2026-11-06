@@ -171,6 +171,7 @@ func update(delta: float, f: Dictionary) -> void:
 		_have_tail = false
 		return
 	var dt := clampf(delta, 0.001, 1.0 / 30.0)
+	_frame_dt = maxf(delta, 1.0 / 240.0)
 	match kind:
 		Kind.WIZARD, Kind.BOTH:
 			_robe(f, dt)
@@ -199,6 +200,37 @@ func update(delta: float, f: Dictionary) -> void:
 			_satchel_bounce(f, dt)
 
 
+# ================================================================ v0.12: cloth keeps up with fast moves
+## Cloth may lag the body by what a sprint would give it, never more: on a dash, a teleport, a frame hitch or a net
+## correction the body moves far further than that in one frame, and the cloth used to be left behind and then whip
+## back. `_carry(step)` is the part of the body's step to move every free point (and its previous position) along by
+## before integrating, so only a run's worth of lag is left to swing.
+var lag_speed := 7.0   # m/s of body motion the cloth is allowed to trail
+var _frame_dt := 1.0 / 60.0
+
+
+func _carry(step: Vector3) -> Vector3:
+	var keep := lag_speed * _frame_dt
+	var l := step.length()
+	return step * ((l - keep) / l) if l > keep else Vector3.ZERO
+
+
+static func _shift(p: PackedVector3Array, o: PackedVector3Array, from: int, d: Vector3) -> void:
+	if d == Vector3.ZERO:
+		return
+	for k in range(from, p.size()):
+		p[k] += d
+		o[k] += d
+
+
+static func _shift_arr(p: Array, o: Array, from: int, d: Vector3) -> void:
+	if d == Vector3.ZERO:
+		return
+	for k in range(from, p.size()):
+		p[k] = (p[k] as Vector3) + d
+		o[k] = (o[k] as Vector3) + d
+
+
 # ================================================================ the robe
 func _ring_pt(ring: Array, a: float) -> Vector3:
 	return (ring[0] as Vector3) + (ring[1] as Basis) * Vector3(cos(a) * float(ring[2]), 0, sin(a) * float(ring[3]))
@@ -221,6 +253,9 @@ func _robe(f: Dictionary, dt: float) -> void:
 		_last_anchor = anchor
 	var step := anchor - _last_anchor   # the body's own motion this frame: damping is relative to it
 	_last_anchor = anchor
+	var carry := _carry(step)
+	_shift(_p, _o, pinned * STRANDS, carry)
+	step -= carry
 	var heavy := 1.0
 	var up := ((rings[pinned - 1] as Array)[1] as Basis).y.normalized()
 	var vel: Vector3 = f.get("vel", Vector3.ZERO)
@@ -268,6 +303,14 @@ func _robe(f: Dictionary, dt: float) -> void:
 				if p.y < ground + 0.02:
 					p.y = ground + 0.02
 				_p[k] = p
+	# last, no segment longer than its rest length (the side constraints and colliders can leave one stretched)
+	for i in range(pinned, rows):
+		var want := ((rings[i] as Array)[0] as Vector3).distance_to((rings[i - 1] as Array)[0]) * 1.01
+		for j in STRANDS:
+			var k := i * STRANDS + j
+			var d: Vector3 = _p[k] - _p[k - STRANDS]
+			if d.length() > want:
+				_p[k] = _p[k - STRANDS] + d * (want / d.length())
 	_draw_loop(_robe_mesh, _p, rows, pinned, f.get("robe_col", robe_color(kind)), true)
 
 
@@ -412,6 +455,9 @@ func _cloak(f: Dictionary, dt: float) -> void:
 	if step.length() > 2.5:
 		_have_cloak = false
 		return
+	var carry := _carry(step)
+	_shift(_cp, _co, CLOAK_COLS, carry)
+	step -= carry
 	var vel: Vector3 = f.get("vel", Vector3.ZERO)
 	var billow := clampf((Vector2(vel.x, vel.z).length() - 3.0) / 10.0, 0.0, 1.0)
 	for c in CLOAK_COLS:
@@ -454,6 +500,10 @@ func _cloak(f: Dictionary, dt: float) -> void:
 				if p.y < float(f.ground) + 0.03:
 					p.y = float(f.ground) + 0.03
 				_cp[k] = p
+	for k in range(CLOAK_COLS, n):   # no segment longer than its rest length
+		var d: Vector3 = _cp[k] - _cp[k - CLOAK_COLS]
+		if d.length() > seg:
+			_cp[k] = _cp[k - CLOAK_COLS] + d * (seg / d.length())
 	_draw_sheet(_cloak_mesh, _cp, rows, CLOAK_COLS, f.get("cloak_col", GREY_CLOAK))
 
 
@@ -594,6 +644,9 @@ func _hat(f: Dictionary, dt: float) -> void:
 		_have_hat = true
 	var seg := float(f.hat_h) / float(HAT_N - 1)
 	var step := base - (_hat_p[0] as Vector3)
+	var carry := _carry(step)
+	_shift_arr(_hat_p, _hat_o, 1, carry)
+	step -= carry
 	_hat_p[0] = base
 	_hat_o[0] = base
 	for k in range(1, HAT_N):
@@ -697,6 +750,9 @@ func _hood_up(f: Dictionary, dt: float) -> void:
 			_tail_o.append(q)
 		_have_tail = true
 	var step := start - (_tail_p[0] as Vector3)
+	var carry := _carry(step)
+	_shift_arr(_tail_p, _tail_o, 1, carry)
+	step -= carry
 	_tail_p[0] = start
 	_tail_o[0] = start
 	for k in range(1, TAIL_N):
@@ -746,6 +802,9 @@ func _sheet(id: String, left: Vector3, right: Vector3, length: float, f: Diction
 	var P: PackedVector3Array = sh.p
 	var O: PackedVector3Array = sh.o
 	var step := left - P[0]
+	var carry := _carry(step)
+	_shift(P, O, SHEET_COLS, carry)
+	step -= carry
 	for c in SHEET_COLS:
 		var top := left.lerp(right, float(c) / (SHEET_COLS - 1))
 		P[c] = top
@@ -808,6 +867,9 @@ func _chain(id: String, start: Vector3, dir: Vector3, n: int, seg: float, r: flo
 			ch.o.append(start + d * seg * k)
 		ch.have = true
 	var step := start - (ch.p[0] as Vector3)
+	var carry := _carry(step)
+	_shift_arr(ch.p, ch.o, 1, carry)
+	step -= carry
 	ch.p[0] = start
 	ch.o[0] = start
 	for k in range(1, n + 1):

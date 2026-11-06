@@ -22,6 +22,7 @@ the script through `OS.get_cmdline_user_args()`.
 | [fruit_test.gd](#fruit_testgd) | test | no | Checks fruit physics in the yard. |
 | [eco_test.gd](#eco_testgd) | test | no | Runs the yard for 20 minutes and checks that everything happens. |
 | [invite_test.gd](#invite_testgd) | test | no | Checks that invite codes round-trip. |
+| [cloth_test.gd](#cloth_testgd) | test | no | Dashes a robed body and checks the cloth keeps up without stretching. |
 | [figure_poses.gd](#figure_posesgd) | renderer | yes | One pose of the 3D figure, saved as a PNG. |
 | [figure_strip.gd](#figure_stripgd) | renderer | yes | A filmstrip of one move of the 3D figure. |
 | [pip_feet_check.gd](#pip_feet_checkgd) | renderer | yes | Pip at ground level, to check his feet sit on the ground. |
@@ -306,3 +307,11 @@ dashing one by few); the Storm Leap over six simulated fights (2-5 leaps, at lea
 players are hurt); the landing ring hits a grounded player and misses one who jumps it; the rush (a side-dash makes
 him miss; standing, you're hit for 30, thrown more than 10 m, knocked down 2.3 s, then up and moving); targeting
 (with two players the one hurting him gets more attention but not all; a stunned, low-health player is left alone).
+
+
+## cloth_test.gd
+
+`<godot> --headless --path . --script tools/cloth_test.gd`: v0.12.0. Hangs the wizard's robe and cloak from a still body,
+then dashes it (24 m/s for 0.15 s), snaps it 1.5 m sideways (a net correction) and dashes again, at 60 and 30 fps. Every
+cloth point must stay within its rest length of the point above it, and the hem must trail the body by under 0.7 m
+(without the v0.12 carry it trailed over a metre and whipped back).
