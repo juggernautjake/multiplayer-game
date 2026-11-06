@@ -268,6 +268,7 @@ func _initialize() -> void:
 	check(stun_t < 15, "a stunned, low-health player is mostly left alone (%d of 60 picks)" % stun_t)
 
 	_stun_meter_tests(net)
+	_golem_tests(net)
 	_dodge_tests()
 	_throw_tests()
 	_maximin_tests()
@@ -275,6 +276,185 @@ func _initialize() -> void:
 	_home_tests()
 	print("%d failed" % bad)
 	quit(bad)
+
+
+## v0.12.2 golems are first-class foes: he goes after a golem that's hurting him (but not only it), every damaging
+## attack hurts a golem in its reach (titans less), the charge throws them, and he kills a normal golem in good time
+## through the real server loop, with nobody getting level credit for it.
+func _golem_hit(b: Boss, gid: int) -> int:
+	var dmg := 0
+	for h in b.hits:
+		if int(h[0]) == -1000 - gid:
+			dmg += int(h[1])
+	return dmg
+
+
+## One attack against one golem: state set up by `setup`, ticked up to `n` ticks -> [damage to the golem, launched].
+func _golem_attack(setup: Callable, gpos_rel: Vector3, n: int, titan := false) -> Array:
+	var c := Boss.arena_c()
+	var b := Boss.new(c, 1, 5)
+	b.yaw = 0.0   # facing -Z
+	var gp := c + gpos_rel
+	var me := [[1, c + Vector3(30, 0, 30), true, false, 100]]   # a player well out of it all
+	var gl := [[7, gp, titan, 150 if titan else 40]]
+	setup.call(b, gp)
+	var dmg := 0
+	var thrown := false
+	for k in n:
+		b.tick(1 + k, me, gl)
+		dmg += _golem_hit(b, 7)
+		for l in b.launches:
+			if int(l[0]) == -1007:
+				thrown = true
+		b.hits.clear(); b.fx.clear(); b.zaps.clear(); b.launches.clear(); b.strikes.clear(); b.slows.clear()
+		b.felled.clear(); b.splats.clear()
+		if dmg > 0 and k > 40:
+			break
+	return [dmg, thrown]
+
+
+func _golem_tests(net: Net) -> void:
+	var c := Boss.arena_c()
+	# ---- targeting: a golem slamming him gets real attention; the fairness cap keeps the player in it
+	var b := Boss.new(c, 1, 11)
+	b.state = Boss.S.IDLE
+	var me := [[1, c + Vector3(0, 0, 13), true, false, 100]]
+	var gl := [[7, c + Vector3(3.5, 0, -3.0), false, 40]]
+	var on_g := 0
+	var on_p := 0
+	for k in 3600:
+		if k % 40 == 0:
+			b.note_golem_hit(7, 8)   # the golem's slams
+		b.tick(k, me, gl)
+		b.hits.clear(); b.fx.clear(); b.zaps.clear(); b.launches.clear(); b.strikes.clear(); b.slows.clear()
+		b.felled.clear(); b.splats.clear()
+		b.hp = maxi(b.hp, int(b.max_hp * 0.9))
+		b.leaps = Boss.LEAP_MAX
+		me[0][1] = (me[0][1] as Vector3) * Vector3(1, 0, 1)
+		if b.target == -1007:
+			on_g += 1
+		elif b.target == 1:
+			on_p += 1
+	var gk := float(on_g) / float(maxi(on_g + on_p, 1))
+	check(gk > 0.25, "a golem slamming him: he goes after it (%.0f%% of the time)" % (gk * 100))
+	check(gk < 0.6, "but the fairness cap keeps him on the player too (%.0f%% on the player)" % (100 - gk * 100))
+	var b2 := Boss.new(c, 1, 11)
+	var idle_g := 0
+	for k in 60:
+		b2._retarget([[1, c + Vector3(0, 0, 9), true, false, 100]], [[7, c + Vector3(-25, 0, 20), false, 40]])
+		if b2.target == -1007:
+			idle_g += 1
+	check(idle_g < 10, "a far golem that isn't hurting him is mostly ignored (%d of 60 picks)" % idle_g)
+	var b3 := Boss.new(c, 1, 11)
+	var wall := 0
+	for k in 60:   # a golem standing between him and the player
+		b3._retarget([[1, c + Vector3(0, 0, -16), true, false, 100]], [[7, c + Vector3(0.5, 0, -7), false, 40]])
+		if b3.target == -1007:
+			wall += 1
+	check(wall > 20, "a golem standing between him and a player draws him (%d of 60 picks)" % wall)
+
+	# ---- every damaging attack hurts a golem in its reach
+	var cases := {
+		"charge": [func(bb: Boss, _g: Vector3):
+			bb.state = Boss.S.CHARGE; bb.charge_dir = Vector2(0, -1); bb.charge_hit = {}, Vector3(0, 0, -10), 60],
+		"rush": [func(bb: Boss, _g: Vector3):
+			bb.state = Boss.S.RUSH; bb.charge_dir = Vector2(0, -1); bb.charge_hit = {}; bb.rush_target = 1, Vector3(0, 0, -10), 60],
+		"gore": [func(bb: Boss, _g: Vector3):
+			bb.state = Boss.S.GORE; bb.t = 4, Vector3(0.5, 0, -4.5), 10],
+		"stomp ring": [func(bb: Boss, _g: Vector3):
+			bb.state = Boss.S.STOMP_WIND; bb.t = 200, Vector3(6, 0, 3), 90],
+		"map-wide wave": [func(bb: Boss, _g: Vector3):
+			bb.state = Boss.S.HOWL; bb.t = 1; bb.orb_plan = 0
+			bb.rings.append([Boss.RADIUS, {}, Vector3(bb.pos.x, 0, bb.pos.z), Boss.WAVE_V, 12, 2, Boss.wave_max(bb.pos)]), Vector3(0, 0, -60), 200],
+		"horn beam": [func(bb: Boss, _g: Vector3):
+			bb.state = Boss.S.BEAM; bb.t = 0; bb.beam_from = 0.0; bb.beam_to = 0.0; bb.beam_a = 0.0, Vector3(0, 0, -16), 20],
+		"ball lightning": [func(bb: Boss, g: Vector3):
+			bb.state = Boss.S.STAGGER; bb.t = -999
+			bb.balls.append([g + Vector3(0, 1.1, 4), Vector3(0, 0, -4), 300, false]), Vector3(-12, 0, -10), 120],
+		"static ball": [func(bb: Boss, g: Vector3):
+			bb.state = Boss.S.STAGGER; bb.t = -999
+			bb.balls.append([g + Vector3(0, 1.1, 4), Vector3(0, 0, -4), 300, true]), Vector3(-12, 0, -10), 120],
+		"homing orbs": [func(bb: Boss, g: Vector3):
+			bb.state = Boss.S.STAGGER; bb.t = -999; bb.target = -1007
+			bb.gols = Boss.golem_foes([[7, g, false, 40]])
+			for i in 4:
+				bb._launch_orb([[1, bb.pos + Vector3(30, 0, 30), true, false, 100]], i), Vector3(-14, 0, -8), 400],
+		"tail lash": [func(bb: Boss, _g: Vector3):
+			bb.state = Boss.S.TAIL; bb.t = 8; bb.move_side = 1.0, Vector3(0, 0, 4.5), 10],
+		"static field": [func(bb: Boss, _g: Vector3):
+			bb.state = Boss.S.STAGGER; bb.t = -999, Vector3(Boss.RADIUS + 0.6, 0, 0), 40],
+		"leap landing": [func(bb: Boss, _g: Vector3):
+			bb.state = Boss.S.LEAP; bb.t = 0; bb.leap_from = bb.pos; bb.leap_to = bb.pos; bb.leap_air = 3, Vector3(1.5, 0, 1.5), 6],
+	}
+	var normal := {}
+	for k in cases:
+		var cs: Array = cases[k]
+		var r := _golem_attack(cs[0], cs[1], cs[2])
+		normal[k] = int(r[0])
+		check(int(r[0]) > 0, "%s hurts a golem in reach (%d)" % [k, int(r[0])])
+		if k in ["charge", "rush"]:
+			check(bool(r[1]), "%s throws the golem" % k)
+	var rt := _golem_attack(cases["gore"][0], cases["gore"][1], cases["gore"][2], true)
+	check(int(rt[0]) > 0 and int(rt[0]) < int(normal["gore"]), "a Stone Titan takes less (gore: %d vs %d)" % [int(rt[0]), int(normal["gore"])])
+	# called lightning: a strike under the golem he's fighting, and the server's bolt hurts it
+	var bc := Boss.new(c, 1, 5)
+	bc.state = Boss.S.CALL
+	bc.t = 19
+	bc.target = -1007
+	bc.tick(1, [[1, c + Vector3(20, 0, 0), true, false, 100]], [[7, c + Vector3(-9, 0, -6), false, 40]])
+	var under := false
+	for st in bc.strikes:
+		if _flat_d(st[0], c + Vector3(-9, 0, -6)) < 0.5:
+			under = true
+	check(under, "called lightning: a warning circle under the golem he's fighting")
+
+	# ---- through the server: a strike, a toss, and he kills a golem in good time; no level credit
+	net.boss = null
+	net.summon_boss()
+	var nb: Boss = net.boss
+	nb.state = Boss.S.IDLE
+	nb.rng.seed = 77
+	var pl: Net.ServerPlayer = net.players[1]
+	pl.state = Sim.spawn_state(1)
+	pl.state.pos = nb.pos + Vector3(0, 0, 26)
+	var kills0: Array = pl.kills.duplicate()
+	var wl := pl.state.wand_lvl
+	var sl := pl.state.staff_lvl
+	var g := net.golems.spawn(1, nb.pos + Vector3(-12, 0, -6), 0.0, net.server_tick)
+	g.state = Golems.State.IDLE
+	var hp0 := g.hp
+	net.pending_spells.append([net.server_tick + 1, "boss_strike", g.pos, 0])
+	net._server_spells()
+	net.server_tick += 1
+	net._server_spells()
+	check(g.hp < hp0, "the server's called-lightning bolt hurts a golem under it (%d -> %d)" % [hp0, g.hp])
+	g.hp = hp0
+	var gp0 := g.pos
+	net._toss_golem(g.id, Vector3(1, 0, 0))
+	var peak := 0.0
+	for i in 90:
+		net._tick_golem_tosses()
+		peak = maxf(peak, g.pos.y)
+	check(peak > 1.0 and g.pos.y == 0.0 and _flat_d(g.pos, gp0) > 3.0, "a thrown golem flies (%.1f m up, %.1f m off) and lands" % [peak, _flat_d(g.pos, gp0)])
+	g.stun = 0
+	var dead_at := -1
+	for i in 60 * 40:
+		pl.state.hp = Sim.MAX_HP   # keep the player in the fight
+		pl.state.dead = 0
+		net._server_tick()
+		if not net.golems.list.has(g.id) or net.golems.list[g.id].state == Golems.State.DIE:
+			dead_at = i
+			break
+		if net.boss == null:
+			break
+	check(dead_at >= 0 and dead_at < 60 * 30, "he kills a golem that fights him in %.1f s" % (dead_at / 60.0))
+	check(pl.kills == kills0 and pl.state.wand_lvl == wl and pl.state.staff_lvl == sl, "and nobody gets level credit for it")
+	net.boss = null
+	net.golems.list.clear()
+
+
+func _flat_d(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
 
 
 ## v0.12.0 the stun meter: 9 Stun hits don't, the 10th dazes him 7 s; it holds, drains, interrupts anything (the

@@ -1760,6 +1760,9 @@ func _server_spells() -> void:
 					for q: ServerPlayer in players.values():
 						if q.state.dead == 0 and not q.npc and _dist_to_body(e[2], q.state.pos) <= 2.5:
 							_damage(q.id, 18, Boss.ID, q.state.pos - e[2], 4.0)
+					for g: Golems.G in golems.list.values():   # v0.12.2: golems too (titans tougher)
+						if g.state != Golems.State.DIE and Vector2(g.pos.x - e[2].x, g.pos.z - e[2].z).length() <= 2.5:
+							_damage(-1000 - g.id, 11 if g.titan else 18, Boss.ID, g.pos - e[2], 0.0)
 				"meteor":
 					var sp := Weapons.spell_named(Weapons.STAFF, "Meteor")
 					_fx("meteor", [e[2], float(sp.radius), int(sp.burn_ticks), float(sp.burn_radius)])
@@ -1793,6 +1796,8 @@ func _server_spells() -> void:
 			_damage(tid, int(h[2]), g.owner, h[3], 0.0)
 		else:
 			_damage(tid, int(h[2]), g.owner, h[3], Golems.TITAN_KNOCK if g.titan else Golems.KNOCK)
+			if tid == Boss.ID and boss != null:   # v0.12.2: he knows which golem hit him
+				boss.note_golem_hit(g.id, last_dealt)
 		dmg_src = -1
 		_fx("golem_slam", [g.id, g.pos + Vector3(-sin(g.yaw), 0, -cos(g.yaw)) * (Golems.TITAN_REACH if g.titan else 0.7), g.titan])
 	if server_tick % 3 == 0 and (not golems.list.is_empty() or _golems_were):
@@ -2139,8 +2144,8 @@ func _server_boss() -> void:
 				Weapons.is_magic(s.weapon) and (s.atk > 0 or s.shield > 0), s.stun > 0 or s.down > 0])
 	var gl := []
 	for g: Golems.G in golems.list.values():
-		if g.state != Golems.State.DIE:
-			gl.append([g.id, g.pos])
+		if g.state != Golems.State.DIE and g.state != Golems.State.RISE:
+			gl.append([g.id, g.pos, g.titan, g.hp])   # v0.12.2: foes to him (titans tougher)
 	boss.trees = []   # v0.12.0: the standing trees and fallen apples round the arena (he knows apples heal)
 	boss.apples = []
 	if ecology:
@@ -2168,8 +2173,12 @@ func _server_boss() -> void:
 	boss.felled.clear()
 	boss.splats.clear()
 	for l in boss.launches:   # the rush: thrown across the arena, knocked down
-		boss_launch(int(l[0]), l[1])
+		if int(l[0]) <= -1000:
+			_toss_golem(-1000 - int(l[0]), l[1])
+		else:
+			boss_launch(int(l[0]), l[1])
 	boss.launches.clear()
+	_tick_golem_tosses()
 	for sl in boss.slows:
 		if players.has(sl[0]) and players[sl[0]].state.shield == 0:
 			players[sl[0]].state.slow = maxi(players[sl[0]].state.slow, int(sl[1]))
@@ -2264,6 +2273,42 @@ func boss_launch(id: int, dir: Vector3) -> void:
 	s.down = Sim.DOWN_TICKS
 	Sim.quantize(s)
 	_fx("boss_launch", [id, s.pos, d])
+
+
+## v0.12.2 a golem caught by his charge or rush is thrown (a titan less far) and lies stunned till it lands and
+## a moment after; deterministic, server side, its arc sent with the golems' positions.
+var golem_toss := {}   # golem id -> velocity
+
+
+func _toss_golem(gid: int, dir: Vector3) -> void:
+	if not golems.list.has(gid):
+		return
+	var g: Golems.G = golems.list[gid]
+	var d := Vector3(dir.x, 0, dir.z).normalized()
+	golem_toss[gid] = d * (6.0 if g.titan else 15.0) + Vector3(0, 4.0 if g.titan else 9.0, 0)
+	g.stun = maxi(g.stun, 2)
+	_fx("boss_launch", [-1000 - gid, g.pos, d])
+
+
+func _tick_golem_tosses() -> void:
+	for gid in golem_toss.keys():
+		var g: Golems.G = golems.list.get(gid, null)
+		if g == null:
+			golem_toss.erase(gid)
+			continue
+		var v: Vector3 = golem_toss[gid]
+		var np := g.pos + Vector3(v.x, 0, v.z) * Config.DT
+		if golems._free_static(g, np):
+			g.pos = np
+		g.pos.y += v.y * Config.DT
+		v.y -= Sim.GRAVITY * Config.DT
+		if g.pos.y <= 0.0 and v.y < 0.0:
+			g.pos.y = 0.0
+			g.stun = maxi(g.stun, 40)   # dazed a moment on landing
+			golem_toss.erase(gid)
+			continue
+		g.stun = maxi(g.stun, 2)
+		golem_toss[gid] = v
 
 
 ## After a defeat: everyone back on their feet at the spawn with full health, the boss gone and the altar ready again.

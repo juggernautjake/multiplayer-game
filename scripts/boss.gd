@@ -74,7 +74,17 @@
 ## lightning, balls); anyone casting; a finishing bonus for low health (under 35%) but never for someone stunned or
 ## knocked down (he lets them get up); no line of sight is a big minus. With two or more players a running share of
 ## his attention is kept: whoever has had more than their share is marked down, and after ~6 s on one target the
-## pull to switch grows, so nobody is hunted forever. A golem right in his face counts too.
+## pull to switch grows, so nobody is hunted forever.
+##
+## GOLEMS (v0.12.2): every golem (players' wand golems and Stone Titans, challengers' golems) is a first-class foe.
+## _retarget scores them beside the players by threat (recent damage they did him, gthreat, fading like a player's),
+## distance, being in his face and standing between him and a player, with a fairness cap: once more than GOLEM_SHARE
+## of his recent attention went to golems, golems are marked down hard, so a wall of golems can't soak him while the
+## players hit him for free. EVERY damaging attack hurts golems in reach exactly as it hurts players (charge and rush,
+## which also throw them: launches with golem ids, Net tosses them; gore; stomp and phase rings and the map-wide waves;
+## the horn beam; called lightning, which also falls on the golems he's fighting; ball lightning and the homing orbs,
+## which home on and hit them; the tail lash; the static field; the leap's landing). Titans take TITAN_K of it. Golem
+## ids are -1000 - golem id, as everywhere; a golem he kills gives nobody level credit (Net._damage never does).
 ##
 ## Weaknesses (hurt()): Lightning x1/4 (he's made of it), Meteor x1.5, Fireball burns 3 s, Frost Nova slows a lot for
 ## 4 s (not a charge or the rush), wand Stuns fill the stun meter (stunned(): the only way to stop a charge or the
@@ -215,6 +225,14 @@ var slows: Array = []            # [player id, ticks]
 var strikes: Array = []          # [point, delay ticks]: called lightning
 var zaps: Array = []             # [player id, damage, dir, blocked]: static hits
 var launches: Array = []         # [player id, dir]: the rush
+# v0.12.2 golems as foes (header): this tick's golems in the people format [-1000 - id, pos, alive, shielded, hp, dash,
+# casting, helpless, titan]; their recent damage to him; decaying attention on golems / on players
+const GOLEM_SHARE := 0.4
+const TITAN_K := 0.6
+var gols: Array = []
+var gthreat := {}
+var g_att := 0.0
+var p_att := 0.0
 
 
 func _init(at: Vector3, n_players: int, seed_v := 0) -> void:
@@ -310,6 +328,25 @@ func hurt(amount: int, from: int, spell: String) -> int:
 	return dmg
 
 
+## v0.12.2 a golem's slam hurt him (Net calls this with what he really took): its threat, like a player's.
+func note_golem_hit(golem_id: int, dmg: int) -> void:
+	var k := -1000 - golem_id
+	gthreat[k] = float(gthreat.get(k, 0.0)) + dmg
+
+
+## Golems as Net sends them ([id, pos] and optionally titan, hp) -> foes in the people format (see `gols`).
+static func golem_foes(golems: Array) -> Array:
+	var out := []
+	for g in golems:
+		out.append([-1000 - int(g[0]), g[1], true, false, int(g[3]) if g.size() > 3 else Golems.HP, 0, false, false,
+			bool(g[2]) if g.size() > 2 else false])
+	return out
+
+
+static func _is_golem(p: Array) -> bool:
+	return int(p[0]) <= -1000
+
+
 ## v0.12.0 a wand Stun caught him: one point on the stun meter; at STUN_NEED he is dazed for 7 s (header).
 func stunned(_now: int) -> void:
 	if state in [S.ENTER, S.DEATH, S.DAZED]:
@@ -392,13 +429,15 @@ func tick(now: int, people: Array, golems: Array) -> void:
 		else:
 			stun_m = maxf(stun_m - 1.0 / STUN_DRAIN, 0.0)
 	var living := people.filter(func(p): return p[2])
+	gols = golem_foes(golems)
+	var foes: Array = living + gols   # v0.12.2: everything his attacks can hurt (players and golems)
 	_track(living)
 	var n_hits := hits.size()
 	var n_zaps := zaps.size()
 	var n_launch := launches.size()
 	# the static field: a shock to anyone right next to him, twice a second (not while he's dazed)
 	if now % 30 == 0 and state not in [S.ENTER, S.LEAP, S.DAZED]:
-		for p in living:
+		for p in foes:
 			var d := _flat(p[1] - pos)
 			if d.length() < RADIUS + 1.4 and (p[1] as Vector3).y < pos.y + 3.0:
 				hits.append([p[0], 6 if enraged else 4, Vector3(d.x, 0, d.y), 2.0])
@@ -406,9 +445,9 @@ func tick(now: int, people: Array, golems: Array) -> void:
 	if storm and now % 50 == 0 and not living.is_empty():
 		var p: Array = living[rng.randi() % living.size()]
 		strikes.append([(p[1] as Vector3) + Vector3(rng.randf_range(-4, 4), 0, rng.randf_range(-4, 4)), 50])
-	_tick_balls(living)
-	_tick_rings(living, golems)
-	_tick_orbs(living)
+	_tick_balls(foes)
+	_tick_rings(foes)
+	_tick_orbs(living, foes)
 	var tp = _target_pos(living, golems)
 	var wk := windup_k()
 	_trees_and_apples(living)
@@ -495,7 +534,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				_go(S.CHARGE)
 		S.CHARGE:
 			_step(charge_dir * GALLOP * (1.3 if enraged else 1.0))   # v0.12.0: frost no longer slows a charge
-			for p in living:
+			for p in foes:   # v0.12.2: golems too (thrown like players)
 				var d := _flat(p[1] - pos)
 				if (d.length() < RADIUS + 1.4 or _on_spike(d, charge_dir)) and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
 					charge_hit[p[0]] = true
@@ -503,11 +542,6 @@ func tick(now: int, people: Array, golems: Array) -> void:
 					hits.append([p[0], 30 if enraged else 25, cdir, 0.0])
 					launches.append([p[0], cdir])   # v0.12.0: the charge throws you too
 			_trample_bystanders(RADIUS + 1.4, 25)
-			for g in golems:
-				var d := _flat(g[1] - pos)
-				if d.length() < RADIUS + 1.2 and not charge_hit.has(-1000 - int(g[0])):
-					charge_hit[-1000 - int(g[0])] = true
-					hits.append([-1000 - int(g[0]), 25, Vector3(charge_dir.x, 0, charge_dir.y), 0.0])
 			var past := true
 			if tp != null:
 				var d := _flat(tp - pos)
@@ -552,7 +586,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				beam_a = lerp_angle(beam_to, beam_from, clampf(float(t - 90) / 70.0, 0.0, 1.0))
 			if t % 6 == 0:
 				var dir := Vector2(-sin(beam_a), -cos(beam_a))
-				for p in living:
+				for p in foes:
 					if beam_hits(pos, beam_a, p[1], yaw):   # v0.12.0: the drawn beam, from the orb to the ground
 						hits.append([p[0], 7 if enraged else 5, Vector3(dir.x, 0, dir.y), 3.0])
 			if t >= length:
@@ -571,6 +605,9 @@ func tick(now: int, people: Array, golems: Array) -> void:
 						strikes.append([at + Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)), 60])
 						if variant == 1:
 							strikes.append([at + Vector3(rng.randf_range(-4, 4), 0, rng.randf_range(-4, 4)), 75])
+				for g in gols:   # v0.12.2: and on the golems he's fighting (Net's strikes hurt golems too)
+					if int(g[0]) == target or float(gthreat.get(int(g[0]), 0.0)) > 4.0:
+						strikes.append([(g[1] as Vector3) * Vector3(1, 0, 1), 60])
 			if t >= 60:
 				_after()
 		S.ROAR:
@@ -602,7 +639,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 		S.GORE:
 			if t == 6:
 				var fwd := Vector2(-sin(yaw), -cos(yaw))
-				for p in living:
+				for p in foes:
 					var d := _flat(p[1] - pos)
 					if ((d.length() < RADIUS + 4.6 and d.normalized().dot(fwd) > 0.25) or _on_spike(d, fwd)) and (p[1] as Vector3).y < 4.0:
 						hits.append([p[0], 20 if enraged else 16, Vector3(d.x + fwd.x, 0.3, d.y + fwd.y), 11.0])
@@ -617,7 +654,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				yaw += 0.07 * move_side   # he pivots into it
 			if t == 9:
 				var fwd := Vector2(-sin(yaw), -cos(yaw))
-				for p in living:
+				for p in foes:
 					var d := _flat(p[1] - pos)
 					if d.length() < RADIUS + 4.8 and d.normalized().dot(fwd) < 0.3 and (p[1] as Vector3).y < 3.0:
 						hits.append([p[0], 18 if enraged else 14, Vector3(d.x, 0.2, d.y), 12.0])
@@ -654,7 +691,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			if t >= leap_air:
 				pos = leap_to
 				fx.append(["boss_leap_land", [pos]])
-				for p in living:   # right under him
+				for p in foes:   # right under him
 					var d := _flat(p[1] - pos)
 					if d.length() < RADIUS + 1.2:
 						hits.append([p[0], 22, Vector3(d.x, 0, d.y), 12.0])
@@ -717,7 +754,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				_go(S.RUSH)
 		S.RUSH:
 			_step(charge_dir * RUSH_V)   # v0.12.0: nor the rush (only the stun meter stops them)
-			for p in living:
+			for p in foes:
 				var d := _flat(p[1] - pos)
 				if (d.length() < RADIUS + 1.3 or _on_spike(d, charge_dir)) and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
 					charge_hit[p[0]] = true
@@ -777,6 +814,11 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				fx.append(["boss_get_up", [pos]])
 				_go(S.IDLE)
 				moved = true
+	for i in range(n_hits, hits.size()):   # v0.12.2: Stone Titans are tougher
+		if int(hits[i][0]) <= -1000:
+			for g in gols:
+				if int(g[0]) == int(hits[i][0]) and bool(g[8]):
+					hits[i][1] = maxi(int(round(int(hits[i][1]) * TITAN_K)), 1)
 	_dodging(living, n_hits, n_zaps, n_launch)
 
 
@@ -1334,6 +1376,14 @@ func _track(living: Array) -> void:
 	hurt_recent *= 0.9992
 	for k in threat.keys():
 		threat[k] = float(threat[k]) * 0.9985
+	for k in gthreat.keys():
+		gthreat[k] = float(gthreat[k]) * 0.9985
+	g_att *= 0.997   # v0.12.2: the golem / player split of his recent attention (~5 s memory)
+	p_att *= 0.997
+	if target <= -1000:
+		g_att += 1.0
+	elif target > 0:
+		p_att += 1.0
 	for p in living:
 		var id: int = p[0]
 		var h := _p_hp(p)
@@ -1353,10 +1403,11 @@ func _track(living: Array) -> void:
 			far_t[id] = maxi(int(far_t.get(id, 0)) - 2, 0)
 	if target > 0:
 		attention[target] = int(attention.get(target, 0)) + 1
+	if target != 0:
 		focus_t += 1
 
 
-## Who he goes after (see the header): scores every living player; a golem right in his face counts too.
+## Who he goes after (see the header): scores every living player and every golem.
 func _retarget(living: Array, golems: Array) -> void:
 	var best := 0
 	var best_s := -INF
@@ -1388,11 +1439,31 @@ func _retarget(living: Array, golems: Array) -> void:
 		if s > best_s:
 			best_s = s
 			best = id
-	for g in golems:
-		var d := (g[1] as Vector3).distance_to(pos)
-		if d < RADIUS + 1.5 and -d + 2.0 > best_s:
-			best_s = -d + 2.0
-			best = -1000 - int(g[0])
+	# v0.12.2 golems, first-class: threat, distance, in his face, standing between him and a player; capped (header)
+	var g_share := g_att / maxf(g_att + p_att, 1.0)
+	for g in golem_foes(golems):
+		var id: int = g[0]
+		var at: Vector3 = g[1]
+		var d := _flat(at - pos).length()
+		var s := -d * 0.25 + float(gthreat.get(id, 0.0)) * 0.05
+		if d < RADIUS + 2.5:
+			s += 1.5
+		for p in living:   # in the way: on his line to a player, nearer than them
+			var to := _flat((p[1] as Vector3) - pos)
+			var along := _flat(at - pos).dot(to.normalized()) if to.length() > 0.1 else -1.0
+			if along > 0.0 and along < to.length() and absf(_flat(at - pos).cross(to.normalized())) < 3.0:
+				s += 2.0
+				break
+		if not _los(pos + Vector3(0, HEAD_Y, 0), at + Vector3(0, 1.0, 0)):
+			s -= 4.0
+		if not living.is_empty() and g_share > GOLEM_SHARE:
+			s -= (g_share - GOLEM_SHARE) * 30.0   # the fairness cap: the players get his attention back
+		if id == target:
+			s += 1.0 if focus_t < 360 else -float(focus_t - 360) / 120.0
+		s += rng.randf_range(0.0, 2.0)
+		if s > best_s:
+			best_s = s
+			best = id
 	if best != target:
 		focus_t = 0
 	target = best
@@ -1427,21 +1498,16 @@ func _turn_to(tp: Vector3, rate: float) -> void:
 
 # ================================================================ rings, balls, orbs
 ## Rings race out over the ground; they only hit those on the ground (jump them). [r, hit, centre, speed, dmg, kind]
-func _tick_rings(living: Array, golems: Array) -> void:
+func _tick_rings(foes: Array) -> void:   # v0.12.2: players and golems alike
 	for r in rings:
 		r[0] = float(r[0]) + float(r[3]) * Config.DT
 		var c: Vector3 = r[2]
-		for p in living:
+		for p in foes:
 			var dp: Vector3 = p[1]
 			var d := _flat(dp - c).length()
 			if absf(d - float(r[0])) < 0.7 and dp.y < c.y + 0.5 and not (r[1] as Dictionary).has(p[0]):
 				r[1][p[0]] = true
 				hits.append([p[0], int(r[4]), Vector3(dp.x - c.x, 0, dp.z - c.z), 7.0])
-		for g in golems:
-			var d := _flat((g[1] as Vector3) - c).length()
-			if absf(d - float(r[0])) < 0.7 and not (r[1] as Dictionary).has(-1000 - int(g[0])):
-				r[1][-1000 - int(g[0])] = true
-				hits.append([-1000 - int(g[0]), 13, Vector3.ZERO, 0.0])
 	rings = rings.filter(func(r): return float(r[0]) < (float(r[6]) if r.size() > 6 else 24.0))
 
 
@@ -1459,7 +1525,9 @@ func _tick_balls(living: Array) -> void:
 			var want := (((near[1] as Vector3) + Vector3(0, 1.1, 0)) - (b[0] as Vector3)).normalized() * 6.5
 			b[1] = (b[1] as Vector3).lerp(want, 0.03)
 			if nd < 1.0 and not _p_dash(near):   # v0.12.0: a dash slips through
-				if b[3]:
+				if _is_golem(near):   # v0.12.2: a golem just takes the hit (no Static on stone)
+					hits.append([near[0], 10 if b[3] else 12, b[1], 0.0])
+				elif b[3]:
 					zaps.append([near[0], 10, b[1], bool(near[3])])
 				else:
 					hits.append([near[0], 12, b[1], 3.0])
@@ -1471,7 +1539,11 @@ func _tick_balls(living: Array) -> void:
 
 ## The i-th orb of the howl: split evenly (round robin from a random start), flung up out of his back.
 func _launch_orb(living: Array, i: int) -> void:
-	var p: Array = living[(i + orb_rot) % living.size()]
+	var pool := living.duplicate()   # v0.12.2: the golems he's fighting get their share too
+	for g in gols:
+		if int(g[0]) == target or float(gthreat.get(int(g[0]), 0.0)) > 4.0:
+			pool.append(g)
+	var p: Array = pool[(i + orb_rot) % pool.size()]
 	var a := rng.randf() * TAU
 	var from := pos + Vector3(rng.randf_range(-1.5, 1.5), HEIGHT - 0.8, rng.randf_range(-1.5, 1.5))
 	var v := Vector3(cos(a) * 3.0, 7.0, sin(a) * 3.0)
@@ -1481,7 +1553,7 @@ func _launch_orb(living: Array, i: int) -> void:
 	orb_sent[int(p[0])] = int(orb_sent.get(int(p[0]), 0)) + 1
 
 
-func _tick_orbs(living: Array) -> void:
+func _tick_orbs(living: Array, foes: Array) -> void:   # v0.12.2: they home on and hit golems too
 	for o in orbs:
 		o[3] = int(o[3]) - 1
 		o[4] = int(o[4]) + 1
@@ -1491,7 +1563,7 @@ func _tick_orbs(living: Array) -> void:
 			ov *= 0.97
 		else:
 			var tgt = null
-			for p in living:
+			for p in foes:
 				if int(p[0]) == int(o[2]):
 					tgt = p
 			if tgt == null and not living.is_empty():   # their target fell: the nearest instead
@@ -1527,9 +1599,15 @@ func _tick_orbs(living: Array) -> void:
 		if _in_pillar(op):
 			o[3] = 0
 		if not o[5] and int(o[3]) > 0:
-			for p in living:
+			for p in foes:
 				var at: Vector3 = p[1]
-				if p[3]:   # a held shield: it bounces off
+				if _is_golem(p):
+					if op.distance_to(at + Vector3(0, 0.8, 0)) < 0.85:
+						hits.append([p[0], ORB_DMG, ov, 0.0])
+						fx.append(["boss_orb_pop", [op]])
+						o[3] = 0
+						break
+				elif p[3]:   # a held shield: it bounces off
 					var c := at + Vector3(0, Weapons.SHIELD_CENTER_Y, 0)
 					if op.distance_to(c) < Weapons.SHIELD_RADIUS:
 						var n := (op - c).normalized()
