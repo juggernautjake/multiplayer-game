@@ -196,7 +196,8 @@ func _on_states(tick: int, data: Array) -> void:
 		var id := int(e[0])
 		seen[id] = true
 		if not golems.has(id):
-			golems[id] = _make(int(e[1]), e.size() > 10 and int(e[10]) == 1, id)
+			golems[id] = _make(int(e[1]), e.size() > 10 and int(e[10]) == 1, id, float(e[11]) if e.size() > 11 else 1.0,
+				int(e[12]) if e.size() > 12 else 1)
 			(golems[id].root as Node3D).position = Vector3(e[2], e[3], e[4])
 		var g: Dictionary = golems[id]
 		g.pos = Vector3(e[2], e[3], e[4])
@@ -241,12 +242,14 @@ func _block(parent: Node3D, size: Vector3, at: Vector3, c: Color, mats: Array) -
 	return mi
 
 
-func _make(owner: int, titan := false, gid := -1) -> Dictionary:
+## v0.12.7 sz, lv: its summoner's mastery: `sz` times bigger (II / III), and at III glowing amber (a titan: molten
+## gold) seams in its chest and arms and a brighter glare.
+func _make(owner: int, titan := false, gid := -1, sz := 1.0, lv := 1) -> Dictionary:
 	var mats := []
 	var root := Node3D.new()
 	add_child(root)
 	var rig := Node3D.new()           # the golem itself, small (or a titan: huge, darker, with red eyes and a glow)
-	rig.scale = Vector3.ONE * (Golems.TITAN_SCALE if titan else Golems.SCALE)
+	rig.scale = Vector3.ONE * (Golems.TITAN_SCALE if titan else Golems.SCALE) * sz
 	root.add_child(rig)
 	var body := Node3D.new()           # everything above the hips; leans and rocks
 	body.position.y = 0.95
@@ -266,10 +269,21 @@ func _make(owner: int, titan := false, gid := -1) -> Dictionary:
 		var em := BoxMesh.new()
 		em.size = Vector3(0.09, 0.06, 0.03)
 		eye.mesh = em
-		eye.material_override = MagicFx._glow_mat(Color("ff3a1a") if titan else Color("ffb02e"), 5.0 if titan else 4.0)
+		eye.material_override = MagicFx._glow_mat(Color("ff3a1a") if titan else Color("ffb02e"), (5.0 if titan else 4.0) + 2.0 * (lv - 1))
 		eye.position = Vector3(x, 0.14, -0.225)
 		head.add_child(eye)
 		eyes.append(eye)
+	if lv >= 3:   # v0.12.7 mastery III: glowing seams across the chest and down the arms
+		var seam_c := Color("ffc040") if titan else Color("ffb02e")
+		for sp in [[Vector3(0.7, 0.05, 0.02), Vector3(0, 0.55, -0.31)], [Vector3(0.05, 0.5, 0.02), Vector3(0.12, 0.4, -0.31)],
+				[Vector3(0.05, 0.35, 0.02), Vector3(-0.2, 0.3, -0.31)]]:
+			var seam := MeshInstance3D.new()
+			var sm := BoxMesh.new()
+			sm.size = sp[0]
+			seam.mesh = sm
+			seam.material_override = MagicFx._glow_mat(seam_c, 4.0)
+			seam.position = sp[1]
+			body.add_child(seam)
 	var arms := []
 	for side in [-1.0, 1.0]:
 		var sh := Node3D.new()          # shoulder pivot
@@ -300,8 +314,10 @@ func _make(owner: int, titan := false, gid := -1) -> Dictionary:
 		rig.add_child(core)
 		for mc in mats:
 			mc[1] = (mc[1] as Color).darkened(0.25)
+	if lv >= 2:   # v0.12.7: its mastery after its name
+		label.text += "  " + Weapons.MASTERY_ROMAN[clampi(lv, 1, 3) - 1]
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.position.y = 4.2 if titan else 1.75
+	label.position.y = (4.2 if titan else 1.75) * (1.0 + (sz - 1.0) * 0.85)
 	label.font_size = 34
 	label.outline_size = 10
 	label.modulate = Color("d9cfc0")
@@ -315,13 +331,13 @@ func _make(owner: int, titan := false, gid := -1) -> Dictionary:
 	bar.scale = Vector3(0.6, 0.06, 1)
 	bar.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	bar.no_depth_test = true
-	bar.position.y = 3.95 if titan else 1.58
+	bar.position.y = (3.95 if titan else 1.58) * (1.0 + (sz - 1.0) * 0.85)
 	root.add_child(bar)
 	var icon := Sprite3D.new()   # v0.12.2: its order, over its name
 	icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	icon.no_depth_test = true
 	icon.pixel_size = 0.0065 if not titan else 0.009
-	icon.position.y = 4.65 if titan else 2.12
+	icon.position.y = (4.65 if titan else 2.12) * (1.0 + (sz - 1.0) * 0.85)
 	icon.visible = false
 	root.add_child(icon)
 	var o = orders.get(owner, null)
@@ -331,7 +347,8 @@ func _make(owner: int, titan := false, gid := -1) -> Dictionary:
 		"pos": root.position, "yaw": 0.0, "state": Golems.State.RISE, "t": 0.0, "hp": Golems.HP, "stun": false,
 		"mats": mats, "owner": owner, "label": label, "bar": bar, "phase": 0.0, "flash": 0.0, "pieces": [], "titan": titan,
 		"eyes": eyes, "seed": randf() * 10.0, "squash": 0.0, "swing": 0, "landed": true, "thumped": false,
-		"icon": icon, "icon_t": 0.0, "look_t": 0.0, "look_owner": false }
+		"icon": icon, "icon_t": 0.0, "look_t": 0.0, "look_owner": false,
+		"max_hp": int(round((Golems.TITAN_HP if titan else Golems.HP) * float(Weapons.spell_named_lv(Weapons.WAND, "Stone Titan" if titan else "Golem", lv).get("hp_k", 1.0)))) }
 
 
 ## v0.12.2: just after an order, the head turns to the spot / target / owner (within its neck's reach); the order
@@ -378,7 +395,7 @@ func _process(delta: float) -> void:
 		var speed := Vector2(root.position.x - before.x, root.position.z - before.z).length() / maxf(delta, 1e-4)
 		_pose(g, speed, delta)
 		_order_look(g, delta)
-		var k := float(g.hp) / float(Golems.TITAN_HP if g.titan else Golems.HP)
+		var k := clampf(float(g.hp) / float(g.get("max_hp", Golems.TITAN_HP if g.titan else Golems.HP)), 0.0, 1.0)
 		(g.bar as Sprite3D).scale.x = maxf(0.6 * k, 0.001)
 		(g.bar as Sprite3D).modulate = Color(0.9, 0.3, 0.2).lerp(Color(0.85, 0.8, 0.6), k)
 		g.flash = maxf(g.flash - delta, 0.0)

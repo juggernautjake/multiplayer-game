@@ -25,7 +25,8 @@ const HELP := {
 	"give": ["give <weapon|all> [target]", "hand over a weapon (with full ammo for the bow and slingshot)"],
 	"take": ["take <weapon|all> [target]", "take a weapon away (fists stay)"],
 	"level": ["level <weapon|all|magic|arms> <1-4|max> [target]", "set weapon levels (staff/wand: spells; the rest: damage)"],
-	"max": ["max [target]", "top out EVERYTHING: every weapon, every level 4, full ammo, health and mana (also: maxall)"],
+	"mastery": ["mastery <spell|staff|wand|all> <1-3|max> [target]", "set spell mastery (I-III; spell names may be partial: fire, tele)"],
+	"max": ["max [target]", "top out EVERYTHING: every weapon, every level 4, every spell mastery III, full ammo, health and mana (also: maxall)"],
 	"spawn": ["spawn <weapon|random|mix> [count] [tier 1-3] [friendly|neutral|hostile] [size N] [level 1-4] [name \"...\"]",
 		"spawn fighters in front of you, e.g.  spawn sword 3 friendly tier 3 level 4 size 1.5"],
 	"side": ["side <target> <friendly|neutral|hostile>", "change whose side units are on"],
@@ -69,6 +70,8 @@ static func run(net: Net, from: int, line: String) -> String:
 			return _give(net, from, a, cmd == "give")
 		"level", "lvl":
 			return _level(net, from, a)
+		"mastery", "master":
+			return _mastery(net, from, a)
 		"max":
 			return _max(net, from, a)
 		"spawn":
@@ -215,6 +218,15 @@ static func _weapons(word: String) -> Array:
 static func _help(a: Array) -> String:
 	if a.size() > 0 and HELP.has(str(a[0]).to_lower()):
 		var h: Array = HELP[str(a[0]).to_lower()]
+		if str(a[0]).to_lower() == "mastery":   # v0.12.7: what earns each spell's mastery, and what II / III do
+			var lines := ["%s\n  %s" % [h[0], h[1]], "Each spell levels up I -> II -> III from what it achieves (never on practice dummies):"]
+			for slot in Weapons.MASTERY_SLOTS:
+				var ws := Weapons.slot_spell(slot)
+				var sp := Weapons.spell(ws[0], ws[1])
+				var need: Array = sp.get("mastery", [0, 0])
+				lines.append("  %-13s %s: II at %d, III at %d" % [sp.name, sp.get("by", ""), need[0], need[1]])
+				lines.append("  %-13s II: %s   III: %s" % ["", sp.get("m2", {}).get("text", ""), sp.get("m3", {}).get("text", "")])
+			return "\n".join(lines)
 		return "%s\n  %s" % [h[0], h[1]]
 	var lines := ["Dev commands (` opens and closes this; Tab completes; Up/Down for history):"]
 	for k in HELP.keys():
@@ -300,6 +312,56 @@ static func _level(net: Net, from: int, a: Array) -> String:
 	return "%s level %d for %s" % [str(a[0]).to_lower(), lv, _names(ps)]
 
 
+## v0.12.7: the mastery slots a word means: all / spells, staff, wand, or a spell's name (any case; the start of it,
+## or any part, like "fire" or "tele"). -> [] if none.
+static func mastery_slots(word: String) -> Array:
+	var w := word.to_lower()
+	if w in ["all", "spells", "every", "everything", "magic"]:
+		return range(Weapons.MASTERY_SLOTS)
+	if w == "staff" or w == "wand":
+		var weapon := Weapons.STAFF if w == "staff" else Weapons.WAND
+		var out := []
+		for i in (Weapons.get_data(weapon).spells as Array).size():
+			out.append(Weapons.mastery_slot(weapon, i))
+		return out
+	var starts := []
+	var inside := []
+	for slot in Weapons.MASTERY_SLOTS:
+		var ws := Weapons.slot_spell(slot)
+		var nm := str(Weapons.spell(ws[0], ws[1]).name).to_lower()
+		if nm == w or nm.replace(" ", "") == w:
+			return [slot]
+		if nm.begins_with(w):
+			starts.append(slot)
+		elif w in nm:
+			inside.append(slot)
+	return starts if not starts.is_empty() else inside
+
+
+static func _mastery(net: Net, from: int, a: Array) -> String:
+	if a.size() < 2:
+		return "usage: " + HELP.mastery[0] + "   (help mastery: what earns it)"
+	var slots := mastery_slots(str(a[0]))
+	if slots.is_empty():
+		return "No spell called '%s' (a spell's name or its start, staff, wand or all)" % a[0]
+	var lw := str(a[1]).to_lower()
+	var lv := 3 if lw in ["max", "top", "iii"] else (2 if lw == "ii" else (1 if lw in ["i", "min", "reset"] else int(lw)))
+	if lv < 1 or lv > 3:
+		return "Mastery goes from 1 to 3"
+	var ps := _who(net, from, str(a[2]) if a.size() > 2 else "me")
+	if ps.is_empty():
+		return "Nobody matches '%s'" % a[2]
+	for p: Net.ServerPlayer in ps:
+		for s in slots:
+			net.set_mastery(p, s, lv)
+		if lv > 1:
+			var ws := Weapons.slot_spell(slots[0])
+			net._fx("mastery_up", [p.id, ws[0], ws[1], lv])
+	net._server_send_roster()
+	var what := str(Weapons.spell(Weapons.slot_spell(slots[0])[0], Weapons.slot_spell(slots[0])[1]).name) if slots.size() == 1 else str(a[0]).to_lower()
+	return "%s mastery %s for %s" % [what, Weapons.MASTERY_ROMAN[lv - 1], _names(ps)]
+
+
 static func _heal(p: Net.ServerPlayer) -> void:
 	p.state.hp = Sim.MAX_HP
 	p.state.mana = Sim.MANA_FULL
@@ -317,13 +379,14 @@ static func _max(net: Net, from: int, a: Array) -> String:
 		p.state.owned = (1 << Weapons.DATA.size()) - 1
 		for w in Weapons.DATA.size():
 			set_level(p, w, Weapons.MAX_LEVEL)
+		net.set_mastery(p, -1, 3)   # v0.12.7: every spell's mastery III too
 		p.state.arrows = Weapons.MAX_AMMO
 		p.state.rocks = Weapons.MAX_AMMO
 		p.state.recharge = [0, 0, 0, 0, 0, 0, 0, 0]
 		_heal(p)
 		net._fx("level_up", [p.id, p.state.weapon, Weapons.MAX_LEVEL, ""])
 	net._server_send_roster()
-	return "Everything maxed (every weapon, every level 4, full ammo, health and mana) for %s" % _names(ps)
+	return "Everything maxed (every weapon, every level 4, every spell mastery III, full ammo, health and mana) for %s" % _names(ps)
 
 
 static func _god(net: Net, from: int, a: Array) -> String:

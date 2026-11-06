@@ -408,6 +408,20 @@ challengers per tier with a lightning warning ring under them: they dash out mor
 at higher tiers (~12% / 37% / 70%), none when the charge isn't coming at them; archers aim at the target's current
 position (no lead) and their spread shrinks / draw rate rises with tier.
 
+## mastery_test.gd
+
+`<godot> --headless --path . --script tools/mastery_test.gd` (v0.12.7, offline, prints harmless RPC errors): spell
+mastery. The data (15 slots, 2 bits each, thresholds, each level's numbers); points from what a spell achieves (a
+fireball's damage on a challenger counts point for point, a dummy earns nothing, NPCs earn nothing, chain jumps
+double); levels at the thresholds; Lightning III's fork, Frost Nova III's freeze, Gravity Well III's two bursts; the
+teleport's reach in Sim at I / II / III (18 / 25 / 32 m), metres earned, the arrival burst near and far; Shield II's
+raise cost and III's discount, an arrow reflected into its shooter (PvP on); Stun points, a quarter of the damage on
+the stunned, Stun III charming a challenger (sides, `can_hurt`, `npc_foe`, its name) and letting it go on time, a PvP
+player only held longer; fog poison on an enemy only (the caster and an ally inside take none), blind-time and an
+ally's hit inside counting, Fog III's size and slow; 1 / 3 / 5 meteors; golem size, health and reach, the titan's
+stomp; Heal Aura points and III's cleanse; Spark Beam III's pierce and arc; Life Drain III's jump; the codec;
+mastery kept on respawn and after a restart; the dev console's `mastery`, `max` and `help mastery`.
+
 ## heal_test.gd
 
 `<godot> --headless --path . --script tools/heal_test.gd` (v0.12.0, offline, prints harmless RPC errors): the staff's

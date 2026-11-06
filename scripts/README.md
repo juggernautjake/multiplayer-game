@@ -1150,3 +1150,49 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   the stone's corruption (runes, darkening, cracks, motes, arcs, smoke; cleansed in gold), its prompt.
   `avatar.gd` / `figure_avatar.gd`: `puppet`, `tint`, `eye_points`. `synth.gd`: `corrupt(kind)`: drone, creak,
   whisper, snap, slam. `npc_ai.gd`: `reach`. `main.gd`: `--bot boss --cutscene`.
+
+## v0.12.7: spell mastery
+
+Every spell levels up I -> II -> III from what it achieves (README, "What's new in 0.12.7", has the table).
+
+- `weapons.gd`: each spell's `"mastery"` ([points for II, for III]), `"by"` (its metric, in words: README and `help
+  mastery`), `"m2"` / `"m3"` (what changes; merged in order, `"text"` is the toast's line). `MASTERY_SLOTS` (15: the
+  staff's spells, then the wand's), `MASTERY_ROMAN`; `mastery_slot(w, i)`, `slot_spell(slot)`, `mastery_of(packed,
+  slot)` (1-3), `with_mastery`, `mastery_all`, `mastery_need`, `mastery_for(slot, points)`; `spell_lv(w, i, lv)` (cached,
+  with `"lv"` set), `spell_at(w, i, packed)` (what Sim and Net read numbers from), `spell_named_lv`, `mastery_named`.
+- `sim.gd`: `PlayerState.mastery` (2 bits a spell, level - 1; copied). `_combat` reads the magic spell at the player's
+  mastery (the shield's raise cost) and `_cast_self` the teleport's reach: both predicted. `codec.gd`: a u32 in every
+  snapshot.
+- `net.gd`: `ServerPlayer.mxp` (points, floats), `mxp_dirty`, `stun_by` / `stun_until`, `regen_until` / `regen_by`,
+  `charm_until` / `charm_by` / `charm_old`; `Proj.lv` (a fireball's level). Roster rows e[12] (points, whole numbers)
+  and e[13] (charmed). Mastery is kept on respawn and `restart_after_defeat`; `--mastery N` sets the host's.
+  - Earning: `mastery_add(id, spell, pts)` (levels up with the `mastery_up` fx and a roster; NPCs earn nothing);
+    `set_mastery(p, slot | -1, lv)` (dev console, `--mastery`). `_damage` calls `_mastery_credit(target, from, dealt)`
+    for players / NPCs, golems (an enemy's) and Thunderhorn, never dummies: the spell dealing it (`xp_spell`, else
+    `dmg_spell`; `xp_k` 2 for chain jumps, 1.5 for long spark beams), the Stun holding the target (a quarter, if the
+    hit is from the stunner's side), the Fog it's blind in (a quarter, if from the cloud's side). Elsewhere:
+    teleport metres (`_cast`), stun seconds, frost-slow seconds, shield soak (`_shield_soak`, `strength`) and +4 per
+    bounce, heal restored (`_server_heal_auras`, the regen), ally heals from Life Drain, seconds a well drags someone.
+  - `_server_mastery()` (each tick from `_server_spells`): `_server_fog_mastery` (twice a second: blind-time, poison
+    via `_poison`, III slow), the Heal Aura III afterglow, charms running out (`_uncharm`), the roster once a second
+    while points change.
+  - Effects per spell: `_cast` reads `spell_at`; pending spells, wells and storms carry the level (lightning e[4],
+    chains e[8..10] (level, most jumps, the spell it counts as), meteor e[4..5] (level, damage share), burn e[4],
+    bomblet, storm_bolt e[4]; wells e[3..4]; storms e[4]). New: `_beam_targets` (piercing), `_nearest_enemy` (arcs,
+    jumps, the fork), `_arrival_burst` (teleport), `_charm` / `_uncharm` (Stun III: side, AI owner, name, colour,
+    restored after), Shield III reflection in `_shield_bounce`, the shield's discount in `_shield_soak`, Fireball III
+    bomblets in `_burst`, Lightning III fork, Frost Nova III freeze, Meteor 3 / 5 rocks, Gravity Well III twin bursts,
+    Arcane Storm III chained bolts, Life Drain III jump, Heal Aura III cleanse. `_server_npcs` skips an NPC with no
+    brain (`ai == null`: `--bot magic --foes`'s targets).
+- `golems.gd`: `G.lv`, `size`, `dmg_k`, `slam`, `stomp`, `stomp_dmg` from `spawn(..., sp)`; `_reach` scales with size,
+  `_dmg`, `_area` (golem III slam, titan III stomp; hits tagged "slam" / "stomp" in h[4]); `pack()` rows end with size
+  and level (e[11], e[12]). The titan's crush uses `_reach`.
+- `fog.gd`: records carry `"lv"` (to_args e[7]).
+- Clients: `magic_fx.gd` takes the level as an extra last argument on most events (`_lv(a, i)`), with new events
+  `mastery_up` (`_column` + the toast), `fork`, `bomblet`, `reflect`, `tp_blast`, `freeze`, `poison`, `charm` /
+  `uncharm` (the swirl: `_charm_swirls` from the roster's `charmed`), and `_shock_ring`; the shield bubble's tint by
+  level. `fireball_view.gd`: `set_level`. `golem_view.gd`: size and level from the rows (III seams, the level on the
+  name tag, the health bar's max). `fog_view.gd`: a green tinge and bubbles at II / III. `spell_bar.gd`: `mxp`, pips
+  and the progress bar (`_mastery`). `main.gd`: `_proj_node(kind, lv)`, the hotbar's points, F1 lines, `--foes`.
+- `dev_cmd.gd`: `mastery <spell|staff|wand|all> <1-3> [target]` (`mastery_slots(word)`: partial names), `max` sets III,
+  `help mastery` lists the metrics. Tests: `tools/mastery_test.gd`, `tools/dev_test.gd`.

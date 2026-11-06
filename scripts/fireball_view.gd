@@ -69,6 +69,22 @@ func _init() -> void:
 	add_child(sparks)
 
 
+## v0.12.7 the caster's Fireball mastery: II a bigger orb (Weapons "size") with a thicker trail of fire and smoke;
+## III bigger again, a white-hot core, a hotter light and a second, golden ember stream.
+func set_level(lv: int) -> void:
+	if lv <= 1:
+		return
+	scale = Vector3.ONE * float(Weapons.spell_named_lv(Weapons.STAFF, "Fireball", lv).get("size", 1.0))
+	add_child(_particles(50 * (lv - 1), 0.6, 0.2, 0.3, 1.0, Vector3(0, 1.0, 0), 0.12, Color(1.0, 0.6, 0.15, 0.9), Color(0.5, 0.08, 0.02, 0.0), true))
+	add_child(_particles(16 * (lv - 1), 1.3, 0.15, 0.1, 0.4, Vector3(0, 1.0, 0), 0.2, Color(0.25, 0.22, 0.2, 0.5), Color(0.2, 0.2, 0.2, 0.0), false, 2.6))
+	_light.omni_range = 5.5 + 2.0 * (lv - 1)
+	if lv >= 3:
+		_core.material_override = _glow(Color("ffffff"), 14.0)
+		_core.scale = Vector3.ONE * 1.35
+		_light.light_color = Color("ffd080")
+		add_child(_particles(24, 0.45, 0.1, 1.5, 3.0, Vector3(0, -2.0, 0), 0.04, Color(1.0, 0.95, 0.7, 1.0), Color(1.0, 0.8, 0.3, 0.0), true))
+
+
 func _particles(n: int, life: float, rad: float, vmin: float, vmax: float, grav: Vector3, size: float, c0: Color,
 		c1: Color, add: bool, grow := 1.0) -> CPUParticles3D:
 	var p := CPUParticles3D.new()

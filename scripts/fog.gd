@@ -39,20 +39,22 @@ enum Look { NORMAL, OUTLINED, HIDDEN }
 
 ## A fog record (Dictionary, so it can be sent as is): id, centre, caster, start tick, duration, fade, half size and
 ## the drift direction (worked out from the id: the same on every machine).
+## v0.12.7: "lv", its caster's Fog mastery (II / III: poisonous, drawn with a green tinge and bubbles).
 static func make(id: int, centre: Vector3, caster: int, t0: int, sp := {}) -> Dictionary:
 	var a := float(id) * 2.399963
 	return { "id": id, "c": Vector3(centre.x, centre.y, centre.z), "caster": caster, "t0": t0,
 		"dur": int(sp.get("duration", DURATION)), "fade": int(sp.get("fade", FADE)),
-		"half": float(sp.get("half", HALF)), "drift": Vector2(cos(a), sin(a)) * DRIFT }
+		"half": float(sp.get("half", HALF)), "drift": Vector2(cos(a), sin(a)) * DRIFT, "lv": int(sp.get("lv", 1)) }
 
 
 ## The record as an event's arguments, and back.
 static func to_args(f: Dictionary) -> Array:
-	return [f.id, f.c, f.caster, f.t0, f.dur, f.fade, f.half]
+	return [f.id, f.c, f.caster, f.t0, f.dur, f.fade, f.half, int(f.get("lv", 1))]
 
 
 static func from_args(a: Array) -> Dictionary:
-	return make(int(a[0]), a[1], int(a[2]), int(a[3]), { "duration": a[4], "fade": a[5], "half": a[6] })
+	return make(int(a[0]), a[1], int(a[2]), int(a[3]), { "duration": a[4], "fade": a[5], "half": a[6],
+		"lv": int(a[7]) if a.size() > 7 else 1 })
 
 
 static func ends(f: Dictionary) -> int:

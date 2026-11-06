@@ -32,7 +32,10 @@
 ##              flashes, and bolts rain down from it (each with its warning ring);
 ##   stone titan: it heaves up out of the ground in a great cloud of dust; its slams shake the ground;
 ##   level up:  a column of golden light round the player and the new spell's name;
-##   shatter:   a shield that runs out of mana bursts into glowing shards.
+##   shatter:   a shield that runs out of mana bursts into glowing shards;
+##   mastery:   (v0.12.7) every spell looks bigger and brighter at mastery II and III, with new accents (shock rings,
+##              a golden shield, ice spikes and blocks, fire bomblets, forks, arrival blasts, a charm swirl), and a
+##              mastery level-up gets the golden column and "FIREBALL MASTERY II!".
 ## Every caster glows while casting (and while holding the shield up): a light in the spell's colour at the staff or
 ## wand, growing as the spell builds, with sparks drawn in toward it.
 class_name MagicFx
@@ -110,75 +113,114 @@ func setup(n: Net, m: Node3D) -> void:
 
 
 # ================================================================ events from the server
+## v0.12.7 spell mastery: most events carry the caster's mastery level (1-3) as an extra last argument; older events
+## without it are level 1.
+static func _lv(a: Array, i: int) -> int:
+	return clampi(int(a[i]), 1, 3) if a.size() > i else 1
+
+
 func _on_fx(kind: String, a: Array) -> void:
 	match kind:
 		"lightning_warn":
-			_warn_ring(a[0], float(a[1]) * Config.DT)
+			_warn_ring(a[0], float(a[1]) * Config.DT, _lv(a, 3))
 		"lightning":
-			_bolt(a[0])
+			_bolt(a[0], _lv(a, 1))
 		"chain":
-			_chain(a[0], a[1], float(a[2]) / maxf(float(a[3]), 1.0))
+			_chain(a[0], a[1], float(a[2]) / maxf(float(a[3]), 1.0), _lv(a, 4))
+		"fork":   # v0.12.7 Lightning mastery III: the strike forks sideways to one more enemy
+			_chain(a[0] + Vector3(0, 0.3, 0), a[1] + Vector3(0, 1.1, 0), 1.0, 3)
+			_flash_light(a[1] + Vector3(0, 1.0, 0), Color("dceeff"), 5.0, 8.0, 0.2)
 		"explode":
-			_explosion(a[0], float(a[1]))
+			_explosion(a[0], float(a[1]), _lv(a, 2))
+		"bomblet":   # v0.12.7 Fireball mastery III: a little fire bomb lobbed out of the blast (it pops as "explode")
+			_bomblet(a[0], a[1], float(a[2]) * Config.DT)
 		"cast":
 			if avatars.has(a[0]):
 				var av: Node3D = avatars[a[0]]
-				Fx.burst(main, av.position + Vector3(0, 1.5, 0), Vector3.UP, Color("ffb347"), 10, 2.5, 0.05)
+				var lv := _lv(a, 2)
+				Fx.burst(main, av.position + Vector3(0, 1.5, 0), Vector3.UP, Color("ffb347") if lv < 3 else Color("fff0c0"), 10 * lv, 2.5, 0.05)
 		"shield_up":
 			if avatars.has(a[0]):
 				var av: Node3D = avatars[a[0]]
-				Fx.burst(main, av.position + Vector3(0, 1.0, 0), Vector3.UP, Color("8fd8ff"), 22, 3.0, 0.05)
+				Fx.burst(main, av.position + Vector3(0, 1.0, 0), Vector3.UP, Color("8fd8ff") if _lv(a, 1) < 3 else Color("ffe08a"), 22, 3.0, 0.05)
+		"reflect":   # v0.12.7 Shield mastery III: a shot sent back: a golden flare where it turned
+			Fx.burst(main, a[1], Vector3.UP, Color("ffe08a"), 26, 5.0, 0.04)
+			_flash_light(a[1], Color("ffd060"), 4.0, 5.0, 0.25)
+			Fx.word(main, (a[1] as Vector3) + Vector3(0, 0.6, 0), "REFLECTED!", Color("ffe08a"))
+		"tp_blast":   # v0.12.7 Teleport mastery II / III: the arrival burst
+			_tp_blast(a[0], float(a[1]), _lv(a, 2))
+		"freeze":   # v0.12.7 Frost Nova mastery III: frozen solid
+			_freeze(int(a[0]), a[1], float(a[2]) * Config.DT)
+		"poison":   # v0.12.7 Fog mastery II / III: a puff of green bubbles off whoever the fog poisons
+			_poison_puff(int(a[0]))
+		"charm":   # v0.12.7 Stun mastery III (the swirl over its head is drawn every frame from the roster)
+			if avatars.has(a[0]):
+				Fx.burst(main, (avatars[a[0]] as Node3D).position + Vector3(0, 2.2, 0), Vector3.UP, Color("f080e0"), 30, 3.0, 0.05)
+				Fx.word(main, (avatars[a[0]] as Node3D).position + Vector3(0, 2.8, 0), "CHARMED!", Color("f8a0ff"))
+		"uncharm":
+			if avatars.has(a[0]):
+				Fx.burst(main, (avatars[a[0]] as Node3D).position + Vector3(0, 2.2, 0), Vector3.UP, Color("b070ff"), 14, 2.0, 0.05)
+		"mastery_up":
+			_mastery_up(int(a[0]), int(a[1]), int(a[2]), int(a[3]))
 		"shield_hit":
 			_shield_hit(int(a[0]), a[1], float(a[2]) if a.size() > 2 else 8.0)
 		"block":
 			_block(int(a[0]), a[1], int(a[2]), int(a[3]))
 		"stun_beam":
-			_stun_beam(a[1], a[2], int(a[3]) != 0)
+			_stun_beam(a[1], a[2], int(a[3]) != 0, _lv(a, 4))
 		"teleport":
-			_blink(a[1], false)
-			_blink(a[2], true)
-			_streak(a[1] + Vector3(0, 1.0, 0), a[2] + Vector3(0, 1.0, 0), Color("c58cff"), 0.35)
+			var tlv := _lv(a, 3)
+			_blink(a[1], false, tlv)
+			_blink(a[2], true, tlv)
+			_streak(a[1] + Vector3(0, 1.0, 0), a[2] + Vector3(0, 1.0, 0), Color("c58cff") if tlv < 3 else Color("e8b8ff"), 0.35 + 0.15 * (tlv - 1))
 		"golem_rise":
-			_golem_dust(a[1], 0.9)
-			_summon_circle(a[1], 1.3, Color("ffb02e"), Golems.RISE * Config.DT)
-			_cracks(a[1], 1.6, 6)
+			var glv := _lv(a, 2)
+			var gk: float = [1.0, 1.3, 1.6][glv - 1]
+			_golem_dust(a[1], 0.9 * gk)
+			_summon_circle(a[1], 1.3 * gk, Color("ffb02e") if glv < 3 else Color("ffd060"), Golems.RISE * Config.DT)
+			_cracks(a[1], 1.6 * gk, 6 + 2 * glv)
 		"golem_slam":
 			var big: bool = a.size() > 2 and a[2]
-			_golem_dust(a[1], 2.8 if big else 0.9)
-			_shake_near_scaled(a[1], 0.4 if big else 0.14)
-			_cracks(a[1], 3.0 if big else 1.0, 7 if big else 4)
+			var gsz := float(a[3]) if a.size() > 3 else 1.0
+			var aoe: bool = a.size() > 4 and a[4]   # v0.12.7 mastery III: a ground-slam / stomp shockwave
+			_golem_dust(a[1], (2.8 if big else 0.9) * gsz)
+			_shake_near_scaled(a[1], (0.4 if big else 0.14) * (1.0 + 0.5 * (gsz - 1.0)) + (0.12 if aoe else 0.0))
+			_cracks(a[1], (3.0 if big else 1.0) * gsz, 7 if big else 4)
 			if big:
 				_flash_light(a[1] + Vector3(0, 0.5, 0), Color("ffb060"), 3.0, 6.0, 0.3)
+			if aoe:
+				_shock_ring(a[1], 6.0 if big else 2.2, Color("ffc070"), 0.45)
 		"vault_door":
 			_door_target = -1.7 if a[0] else 0.0
 		"frost_nova":
-			_frost_nova(a[1], float(a[2]))
+			_frost_nova(a[1], float(a[2]), _lv(a, 3))
 		"stun_burst":
-			_stun_burst(a[0], float(a[1]))
+			_stun_burst(a[0], float(a[1]), _lv(a, 2))
 		"meteor_warn":
-			_meteor_fall(a[0], float(a[1]) * Config.DT, float(a[2]))
+			_meteor_fall(a[0], float(a[1]) * Config.DT, float(a[2]), _lv(a, 3))
 		"meteor":
-			_meteor_hit(a[0], float(a[1]), float(a[2]) * Config.DT, float(a[3]))
+			_meteor_hit(a[0], float(a[1]), float(a[2]) * Config.DT, float(a[3]), _lv(a, 4))
 		"well":
-			_well(a[0], float(a[1]) * Config.DT, float(a[2]))
+			_well(a[0], float(a[1]) * Config.DT, float(a[2]), _lv(a, 3))
 		"well_burst":
-			_well_burst(a[0], float(a[1]))
+			_well_burst(a[0], float(a[1]), _lv(a, 2))
 		"storm":
-			_storm(a[0], float(a[1]) * Config.DT, float(a[2]))
+			_storm(a[0], float(a[1]) * Config.DT, float(a[2]), _lv(a, 3))
 		"titan_rise":
-			_golem_dust(a[1], 2.6)
-			_summon_circle(a[1], 3.2, Color("ff5a1a"), Golems.RISE * Config.DT)
-			_cracks(a[1], 4.0, 10)
+			var tk := 1.0 + 0.2 * (_lv(a, 2) - 1)
+			_golem_dust(a[1], 2.6 * tk)
+			_summon_circle(a[1], 3.2 * tk, Color("ff5a1a") if _lv(a, 2) < 3 else Color("ffa030"), Golems.RISE * Config.DT)
+			_cracks(a[1], 4.0 * tk, 10)
 			_flash_light(a[1] + Vector3(0, 1, 0), Color("ff5a1a"), 6.0, 10.0, 0.8)
 			_shake_near(a[1], 0.3)
 		"npc_tell":   # v0.12.0: a challenger wizard winding a spell up: a growing glow and motes at its hand
 			_npc_tell(int(a[0]), str(a[1]), float(a[2]) * Config.DT)
 		"spark":
-			_spark(a[1], a[2], bool(a[3]))
+			_spark(a[1], a[2], bool(a[3]), _lv(a, 4), a[5] if a.size() > 5 else [], a[6] if a.size() > 6 else [])
 		"drain":
-			_drain(int(a[0]), a[1], a[2], int(a[3]))
+			_drain(int(a[0]), a[1], a[2], int(a[3]), _lv(a, 4))
 		"heal_pulse":   # v0.12.0 the staff's Heal Aura: a ring, rising motes, "+N" over everyone healed, a chime
-			_heal_pulse(int(a[0]), a[1], float(a[2]), a[3])
+			_heal_pulse(int(a[0]), a[1], float(a[2]), a[3], _lv(a, 4))
 		"heal_stop":
 			if avatars.has(a[0]):
 				Fx.burst(main, (avatars[a[0]] as Node3D).position + Vector3(0, 2.0, 0), Vector3.UP, Color("b8ffb0"), 10, 1.5, 0.04)
@@ -198,6 +240,13 @@ func update(delta: float, states: Dictionary) -> void:
 		var on := st != null and st.shield > 0 and st.dead == 0 and avatars.has(id)
 		if on and not bubbles.has(id):
 			bubbles[id] = _make_bubble()
+			# v0.12.7 Shield mastery: II a brighter cyan, III a golden sheen (it turns shots back)
+			var slv := Weapons.mastery_named(st.mastery, Weapons.STAFF, "Shield")
+			if slv >= 2:
+				(bubbles[id].mat as ShaderMaterial).set_shader_parameter("tint", Color(0.5, 0.95, 1.0) if slv == 2 else Color(1.0, 0.82, 0.4))
+				if slv == 3:
+					(bubbles[id].light as OmniLight3D).light_color = Color("ffd070")
+					(bubbles[id].glow as MeshInstance3D).material_override = _glow_mat(Color("fff0b0"), 8.0, 0.75)
 		if bubbles.has(id):
 			var b: Dictionary = bubbles[id]
 			if not on:
@@ -252,6 +301,7 @@ func update(delta: float, states: Dictionary) -> void:
 					atw.tween_property(arc.material_override, "albedo_color:a", 0.0, 0.12)
 					atw.tween_callback(arc.queue_free)
 	_cast_glow(delta, states)
+	_charm_swirls(delta)   # v0.12.7
 	for id in bubbles.keys():
 		if not states.has(id):
 			for n in bubbles[id].get("extra", []):
@@ -318,13 +368,13 @@ func _scorch(at: Vector3, r: float) -> void:
 	_fade_out(d, d.material_override, 6.0, 4.0)
 
 
-func _warn_ring(at: Vector3, life: float) -> void:
+func _warn_ring(at: Vector3, life: float, lv := 1) -> void:
 	var ring := MeshInstance3D.new()
 	var tm := TorusMesh.new()
-	tm.inner_radius = 2.75
+	tm.inner_radius = 2.75 if lv < 3 else 2.6   # v0.12.7 mastery: a bolder ring, white-gold at III
 	tm.outer_radius = 3.0
 	ring.mesh = tm
-	var m := _glow_mat(Color("bfe4ff"), 2.5, 0.8)
+	var m := _glow_mat([Color("bfe4ff"), Color("d8ecff"), Color("fff2c8")][lv - 1], 2.5 + lv * 0.5, 0.8)
 	ring.material_override = m
 	ring.scale = Vector3(1, 0.05, 1)
 	main.add_child(ring)
@@ -442,15 +492,18 @@ func _bolt_paths(top: Vector3, at: Vector3) -> Array:
 	return paths
 
 
-func _bolt(at: Vector3) -> void:
+## v0.12.7 lv: the caster's Lightning mastery: II a thicker, brighter channel with an extra stroke and more ground arcs;
+## III a fat blue-white channel, a white-hot core, a second ground-arc burst and a ring of light on the ground.
+func _bolt(at: Vector3, lv := 1) -> void:
 	var top := at + Vector3(randf_range(-6, 6), randf_range(30, 38), randf_range(-6, 6))
-	var strokes := randi_range(2, 4)          # it strikes, goes dark, and strikes again down nearly the same channel
+	var strokes := randi_range(2, 4) + (lv - 1)   # it strikes, goes dark, and strikes again down nearly the same channel
 	var t := 0.0
 	var base_paths := _bolt_paths(top, at)
+	var wk: float = [1.0, 1.45, 2.0][lv - 1]
 	for k in strokes:
 		var paths := base_paths if k == 0 else _jitter_paths(base_paths, 0.12)
-		var glow := _ribbons(paths.map(func(pw): return [pw[0], float(pw[1]) * 4.0]), Color("6f9cff"), 2.5)
-		var core := _ribbons(paths, Color("f4f8ff"), 9.0)
+		var glow := _ribbons(paths.map(func(pw): return [pw[0], float(pw[1]) * 4.0 * wk]), Color("6f9cff") if lv < 3 else Color("8fc8ff"), 2.5 + lv * 0.5)
+		var core := _ribbons(paths.map(func(pw): return [pw[0], float(pw[1]) * (1.0 + (wk - 1.0) * 0.6)]), Color("f4f8ff") if lv < 3 else Color("ffffff"), 9.0 + lv * 2.0)
 		(glow.material_override as StandardMaterial3D).albedo_color.a = 0.0
 		(core.material_override as StandardMaterial3D).albedo_color.a = 0.0
 		var on := randf_range(0.05, 0.08)
@@ -467,7 +520,11 @@ func _bolt(at: Vector3) -> void:
 			_flash_light(at + Vector3(0, 22, 0), Color("b8ccff"), 2.0, 70.0, 0.15)   # the sky lights up
 			if k == 0:
 				_ground_arcs(at)
-				_shake_near_scaled(at, 0.32))
+				if lv >= 2:
+					_ground_arcs(at)
+				if lv >= 3:
+					_shock_ring(at, 3.4, Color("cfe8ff"), 0.35)
+				_shake_near_scaled(at, 0.32 + 0.06 * (lv - 1)))
 		t += on + randf_range(0.04, 0.09)
 	# the afterglow: the channel hangs in the air a moment, fading through violet
 	var after := _ribbons(base_paths.slice(0, 1).map(func(pw): return [pw[0], 0.35]), Color("9a7cff"), 1.5)
@@ -582,7 +639,31 @@ func _scorch_ragged(at: Vector3, r: float, streaks: int) -> void:
 		_fade_out(n, (n as MeshInstance3D).material_override, 5.0, 5.0)
 
 
-func _explosion(at: Vector3, r: float) -> void:
+## v0.12.7 lv: the caster's Fireball mastery (0: a bomblet's pop): II a second roll of flame and thicker smoke; III a
+## white-hot flash that swells bigger, a golden shock ring and a ring of fire left on the ground.
+func _explosion(at: Vector3, r: float, lv := 1) -> void:
+	if lv >= 2:
+		_smoke(at, 3 + lv, r * 0.35, 3.0, 0.55, 0.2)
+		_shock_ring(at, r * 1.2, Color("ffb050") if lv == 2 else Color("fff0a0"), 0.4)
+	if lv >= 3:
+		var hot := MeshInstance3D.new()   # the white-hot heart, bigger and longer
+		var hs := SphereMesh.new()
+		hs.radius = 1.0
+		hs.height = 2.0
+		hot.mesh = hs
+		var hm := _glow_mat(Color("ffffff"), 14.0, 1.0)
+		hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		hot.material_override = hm
+		main.add_child(hot)
+		hot.global_position = at
+		hot.scale = Vector3.ONE * r * 0.2
+		var htw := hot.create_tween().set_parallel(true)
+		htw.tween_property(hot, "scale", Vector3.ONE * r * 0.55, 0.16)
+		htw.tween_property(hm, "albedo_color:a", 0.0, 0.24)
+		htw.chain().tween_callback(hot.queue_free)
+		var ring := _disc(Vector3(at.x, WorldLayout.ground_height(at.x, at.z, at.y + 0.5), at.z), r * 0.75, Color("ff7a20"), 0.35)
+		_fade_out(ring, ring.material_override, 1.2, 0.6)
+		Fx.burst(main, at, Vector3.UP, Color("ffffff"), 18, 12.0, 0.03)
 	# a cluster of fireballs rolling up and out, each its own size, colour and timing
 	var palette := [Color("ff8a2a"), Color("ffb347"), Color("ff5a1a"), Color("ffe066"), Color("ff7a30")]
 	for i in randi_range(4, 7):
@@ -830,8 +911,8 @@ func _shield_hit(id: int, at: Vector3, strength := 8.0) -> void:
 	_flash_light(at, Color("8fd8ff"), 1.5 + 1.5 * k, 2.5 + 2.0 * k, 0.18)
 
 
-func _stun_beam(from: Vector3, to: Vector3, hit: bool) -> void:
-	var beam := _jag(from, to, maxi(3, int(from.distance_to(to) / 1.5)), 0.25, 0.06, Color("c070ff"))
+func _stun_beam(from: Vector3, to: Vector3, hit: bool, lv := 1) -> void:
+	var beam := _jag(from, to, maxi(3, int(from.distance_to(to) / 1.5)), 0.25, 0.06 + 0.025 * (lv - 1), Color("c070ff") if lv < 3 else Color("f070d8"))
 	var mat: StandardMaterial3D = beam.get_meta("mat")
 	var tw := beam.create_tween()
 	tw.tween_property(mat, "albedo_color:a", 0.0, 0.35)
@@ -935,7 +1016,29 @@ func _cast_glow(delta: float, states: Dictionary) -> void:
 					Fx.burst(main, av.position + Vector3(randf_range(-0.4, 0.4), randf_range(0.2, 1.6), randf_range(-0.4, 0.4)), Vector3.DOWN, Color("dff6ff"), 1, 0.6, 0.03)
 
 
-func _frost_nova(at: Vector3, r: float) -> void:
+## v0.12.7 lv: II more shards and a second, slower ring; III great ice spikes erupting round the caster too.
+func _frost_nova(at: Vector3, r: float, lv := 1) -> void:
+	if lv >= 2:
+		_shock_ring(at, r * 0.8, Color("dff8ff"), 0.6)
+	if lv >= 3:
+		for i in 10:   # ice spikes erupting close in: tall, jagged, glowing blue-white
+			var a := TAU * float(i) / 10.0 + randf_range(-0.2, 0.2)
+			var d := randf_range(1.2, 3.3)
+			var sp := MeshInstance3D.new()
+			var pm := PrismMesh.new()
+			pm.size = Vector3(randf_range(0.25, 0.4), randf_range(1.3, 2.2), randf_range(0.25, 0.38))
+			sp.mesh = pm
+			var sm := _glow_mat(Color("7fcfff"), 1.1, 0.75)
+			sp.material_override = sm
+			main.add_child(sp)
+			sp.global_position = at + Vector3(cos(a) * d, -1.4, sin(a) * d)
+			sp.rotation = Vector3(randf_range(-0.35, 0.35), randf() * TAU, randf_range(-0.35, 0.35))
+			var t := sp.create_tween()
+			t.tween_interval(0.05 + 0.03 * i)
+			t.tween_property(sp, "global_position:y", at.y + pm.size.y * 0.35, 0.09).set_ease(Tween.EASE_OUT)
+			t.tween_interval(1.2)
+			t.tween_property(sm, "albedo_color:a", 0.0, 0.7)
+			t.tween_callback(sp.queue_free)
 	var ring := MeshInstance3D.new()
 	var tm := TorusMesh.new()
 	tm.inner_radius = 0.85
@@ -950,7 +1053,7 @@ func _frost_nova(at: Vector3, r: float) -> void:
 	tw.tween_property(ring, "scale", Vector3(r, 0.4, r), 0.35).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
 	tw.tween_property(m, "albedo_color:a", 0.0, 0.5).set_delay(0.15)
 	tw.chain().tween_callback(ring.queue_free)
-	for i in 22:   # ice shards bursting up round the ring, each a moment after the wave reaches it
+	for i in 22 + 12 * (lv - 1):   # ice shards bursting up round the ring, each a moment after the wave reaches it
 		var a := randf() * TAU
 		var d := randf_range(1.2, r)
 		var shard := MeshInstance3D.new()
@@ -1004,11 +1107,16 @@ func _npc_tell(id: int, spell: String, life: float) -> void:
 var _heal_snd: AudioStream
 
 
-func _heal_pulse(id: int, at: Vector3, r: float, got: Array) -> void:
+## v0.12.7 lv: II a brighter double ring; III gold-green with a column of rising sparkles (its cleanse).
+func _heal_pulse(id: int, at: Vector3, r: float, got: Array, lv := 1) -> void:
 	var c := at
 	if avatars.has(id):
 		c = (avatars[id] as Node3D).position
-	var ring := _disc(c, r, Color("9dff9a"), 0.22)
+	if lv >= 2:
+		_shock_ring(c, r, Color("b8ffb0") if lv == 2 else Color("ffe88a"), 0.5)
+	if lv >= 3:
+		Fx.burst(main, c + Vector3(0, 0.3, 0), Vector3.UP, Color("fff2a0"), 14, 3.5, 0.04)
+	var ring := _disc(c, r, Color("9dff9a") if lv < 3 else Color("d8ff8a"), 0.22 + 0.06 * (lv - 1))
 	ring.scale = Vector3(0.2, 1, 0.2)
 	var tw := ring.create_tween().set_parallel(true)
 	tw.tween_property(ring, "scale", Vector3(1, 1, 1), 0.45)
@@ -1112,12 +1220,24 @@ func _drain_ally(hand: Vector3, at: Vector3, heal: int, target: int) -> void:
 
 
 ## v0.12.0 Spark Beam: a quick bright zap, gone in a tenth of a second or so.
-func _spark(from: Vector3, to: Vector3, hit: bool) -> void:
-	var beam := _jag(from, to, maxi(2, int(from.distance_to(to) / 2.5)), 0.08, 0.035, Color("dff4ff"))
+## v0.12.7 lv: II a thicker blue beam that bursts through each one it pierces (`through`: those points); III thicker
+## again with a white core and an arc leaping on to `arc` (a point, or none).
+func _spark(from: Vector3, to: Vector3, hit: bool, lv := 1, through: Array = [], arc: Array = []) -> void:
+	var beam := _jag(from, to, maxi(2, int(from.distance_to(to) / 2.5)), 0.08, 0.035 * (1.0 + 0.5 * (lv - 1)), Color("dff4ff") if lv == 1 else Color("9fd4ff"))
 	var mat: StandardMaterial3D = beam.get_meta("mat")
 	var tw := beam.create_tween()
-	tw.tween_property(mat, "albedo_color:a", 0.0, 0.14)
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.14 + 0.04 * (lv - 1))
 	tw.tween_callback(beam.queue_free)
+	if lv >= 3:
+		var core := _jag(from, to, 2, 0.02, 0.025, Color("ffffff"))
+		var cmat: StandardMaterial3D = core.get_meta("mat")
+		var ct := core.create_tween()
+		ct.tween_property(cmat, "albedo_color:a", 0.0, 0.12)
+		ct.tween_callback(core.queue_free)
+	for p in through:
+		Fx.burst(main, p, (to - from).normalized(), Color("bfe8ff"), 8, 3.0, 0.03)
+	for p in arc:
+		_chain(to, p, 0.6, lv)
 	Fx.burst(main, to, (from - to).normalized(), Color("bfe8ff"), 10 if hit else 4, 3.0, 0.03)
 	_flash_light(from, Color("bfe8ff"), 1.2, 3.0, 0.08)
 	_flash_light(to, Color("9fd8ff"), 1.8 if hit else 0.8, 3.0, 0.12)
@@ -1125,8 +1245,14 @@ func _spark(from: Vector3, to: Vector3, hit: bool) -> void:
 
 ## v0.12.0 Life Drain: a dark red stream from the victim, and motes of life flowing along it back into the caster's
 ## wand (following the caster if they move), then "+N" over the caster.
-func _drain(id: int, hand: Vector3, at: Vector3, heal: int) -> void:
-	var beam := _jag(at, hand, maxi(3, int(at.distance_to(hand) / 1.2)), 0.18, 0.05, Color("d0203a"))
+func _drain(id: int, hand: Vector3, at: Vector3, heal: int, lv := 1) -> void:
+	var beam := _jag(at, hand, maxi(3, int(at.distance_to(hand) / 1.2)), 0.18, 0.05 + 0.025 * (lv - 1), Color("d0203a") if lv < 3 else Color("ff2050"))
+	if lv >= 2:   # v0.12.7: a darker second strand twisting round it
+		var b2 := _jag(at, hand, maxi(4, int(at.distance_to(hand) / 0.9)), 0.3, 0.03, Color("7a0820"))
+		var m2: StandardMaterial3D = b2.get_meta("mat")
+		var t2 := b2.create_tween()
+		t2.tween_property(m2, "albedo_color:a", 0.0, 0.6)
+		t2.tween_callback(b2.queue_free)
 	var mat: StandardMaterial3D = beam.get_meta("mat")
 	var tw := beam.create_tween()
 	tw.tween_property(mat, "albedo_color:a", 0.0, 0.55)
@@ -1235,13 +1361,18 @@ func _shatter(id: int, at: Vector3) -> void:
 	_shake_near(at, 0.16)
 
 
-func _stun_burst(at: Vector3, r: float) -> void:
+## v0.12.7 lv: II a second ring; III pink-violet (its charm) with a burst of pink motes.
+func _stun_burst(at: Vector3, r: float, lv := 1) -> void:
+	if lv >= 2:
+		_shock_ring(at, r * 1.15, Color("e0b0ff") if lv == 2 else Color("ff90e8"), 0.4)
+	if lv >= 3:
+		Fx.burst(main, at + Vector3(0, 0.6, 0), Vector3.UP, Color("ff90e8"), 30, 3.5, 0.05)
 	var ring := MeshInstance3D.new()
 	var tm := TorusMesh.new()
 	tm.inner_radius = 0.9
 	tm.outer_radius = 1.0
 	ring.mesh = tm
-	var m := _glow_mat(Color("c070ff"), 4.0, 0.9)
+	var m := _glow_mat(Color("c070ff") if lv < 3 else Color("e070d0"), 4.0, 0.9)
 	ring.material_override = m
 	main.add_child(ring)
 	ring.global_position = Vector3(at.x, WorldLayout.ground_height(at.x, at.z, at.y + 0.3) + 0.08, at.z)
@@ -1264,7 +1395,8 @@ func _stun_burst(at: Vector3, r: float) -> void:
 	_flash_light(at + Vector3(0, 1, 0), Color("b066ff"), 5.0, r * 3.0, 0.4)
 
 
-func _meteor_fall(at: Vector3, fall: float, r: float) -> void:
+## v0.12.7 lv: the caster's Meteor mastery: II / III rocks are bigger and burn hotter (III trails white fire).
+func _meteor_fall(at: Vector3, fall: float, r: float, lv := 1) -> void:
 	var ring := MeshInstance3D.new()   # the target: a red ring that tightens as the rock comes down
 	var tm := TorusMesh.new()
 	tm.inner_radius = 0.93
@@ -1290,8 +1422,12 @@ func _meteor_fall(at: Vector3, fall: float, r: float) -> void:
 	rm.emission_energy_multiplier = 1.6
 	rock.material_override = rm
 	var trail: Node3D = fireball_node()
-	trail.scale = Vector3.ONE * 3.0
+	trail.scale = Vector3.ONE * (3.0 + 0.6 * (lv - 1))
 	rock.add_child(trail)
+	rock.scale = Vector3.ONE * (1.0 + 0.15 * (lv - 1))
+	if lv >= 3:
+		rm.emission = Color("ffb040")
+		rm.emission_energy_multiplier = 2.6
 	var l := OmniLight3D.new()
 	l.light_color = Color("ff7a2a")
 	l.light_energy = 4.0
@@ -1306,8 +1442,8 @@ func _meteor_fall(at: Vector3, fall: float, r: float) -> void:
 	ft.tween_callback(rock.queue_free)
 
 
-func _meteor_hit(at: Vector3, r: float, burn: float, burn_r: float) -> void:
-	_explosion(at + Vector3(0, 0.5, 0), r)
+func _meteor_hit(at: Vector3, r: float, burn: float, burn_r: float, lv := 1) -> void:
+	_explosion(at + Vector3(0, 0.5, 0), r, lv)
 	_flash_light(at + Vector3(0, 3, 0), Color("ff8a3a"), 10.0, r * 6.0, 0.8)
 	var wave := MeshInstance3D.new()   # a shockwave racing out along the ground
 	var tm := TorusMesh.new()
@@ -1391,7 +1527,8 @@ func _meteor_hit(at: Vector3, r: float, burn: float, burn_r: float) -> void:
 	_shake_near(at, 0.35)
 
 
-func _well(at: Vector3, life: float, r: float) -> void:
+## v0.12.7 lv: II / III a wider vortex with a fourth (and fifth) ring; III gold-flecked motes and a brighter heart.
+func _well(at: Vector3, life: float, r: float, lv := 1) -> void:
 	var root := Node3D.new()
 	main.add_child(root)
 	root.global_position = at
@@ -1410,13 +1547,13 @@ func _well(at: Vector3, life: float, r: float) -> void:
 	core.material_override = cm
 	root.add_child(core)
 	var rings := []
-	for i in 3:   # rings spinning at different tilts
+	for i in 2 + lv:   # rings spinning at different tilts
 		var ring := MeshInstance3D.new()
 		var tm := TorusMesh.new()
 		tm.inner_radius = 0.9 + i * 0.5
 		tm.outer_radius = 1.0 + i * 0.5
 		ring.mesh = tm
-		ring.material_override = _glow_mat(Color("a060ff"), 2.5, 0.55)
+		ring.material_override = _glow_mat(Color("a060ff") if i < 3 or lv < 3 else Color("ffc860"), 2.5, 0.55)
 		ring.rotation = Vector3(randf_range(-0.6, 0.6), 0, randf_range(-0.6, 0.6))
 		root.add_child(ring)
 		rings.append(ring)
@@ -1434,7 +1571,8 @@ func _well(at: Vector3, life: float, r: float) -> void:
 	mm.radius = 0.05
 	mm.height = 0.1
 	motes.mesh = mm
-	motes.material_override = _glow_mat(Color("c090ff"), 3.0)
+	motes.material_override = _glow_mat(Color("c090ff") if lv < 3 else Color("ffd890"), 3.0)
+	motes.amount = 90 + 40 * (lv - 1)
 	root.add_child(motes)
 	var l := OmniLight3D.new()
 	l.light_color = Color("8a3cff")
@@ -1459,7 +1597,9 @@ func _well(at: Vector3, life: float, r: float) -> void:
 		floor_ring.queue_free())
 
 
-func _well_burst(at: Vector3, r: float) -> void:
+func _well_burst(at: Vector3, r: float, lv := 1) -> void:
+	if lv >= 2:
+		_shock_ring(at + Vector3(0, -0.9, 0), r * 1.3, Color("c090ff") if lv == 2 else Color("ffd890"), 0.45)
 	var ball := MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = 1.0
@@ -1479,12 +1619,13 @@ func _well_burst(at: Vector3, r: float) -> void:
 	_shake_near(at, 0.25)
 
 
-func _storm(at: Vector3, life: float, area: float) -> void:
+## v0.12.7 lv: II / III a bigger, thicker cloud (III with gold-violet flashes inside).
+func _storm(at: Vector3, life: float, area: float, lv := 1) -> void:
 	var root := Node3D.new()
 	main.add_child(root)
 	root.global_position = at + Vector3(0, 12.0, 0)
 	var puffs := []
-	for i in 26:   # the cloud: dark puffs in a churning disc
+	for i in 26 + 10 * (lv - 1):   # the cloud: dark puffs in a churning disc
 		var p := MeshInstance3D.new()
 		var sm := SphereMesh.new()
 		var r := randf_range(1.8, 3.4)
@@ -1495,7 +1636,7 @@ func _storm(at: Vector3, life: float, area: float) -> void:
 		m.albedo_color = Color(0.16, 0.15, 0.22, 0.0)
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		m.emission_enabled = true
-		m.emission = Color("4a3a8a")
+		m.emission = Color("4a3a8a") if lv < 3 or i % 3 != 0 else Color("8a6a3a")
 		m.emission_energy_multiplier = 0.0
 		p.material_override = m
 		var a := randf() * TAU
@@ -1618,16 +1759,16 @@ func _make_rune() -> Dictionary:
 
 
 ## The teleport's two ends: leaving, a column of violet light collapses inward with motes sucked into it; arriving, a
-## column bursts out with a shock ring and sparks.
-func _blink(at: Vector3, arrive: bool) -> void:
+## column bursts out with a shock ring and sparks. v0.12.7 lv: II / III taller, brighter columns (III gold-edged).
+func _blink(at: Vector3, arrive: bool, lv := 1) -> void:
 	var col := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
 	cm.top_radius = 0.55
 	cm.bottom_radius = 0.65
-	cm.height = 2.6
+	cm.height = 2.6 + 0.8 * (lv - 1)
 	cm.radial_segments = 16
 	col.mesh = cm
-	var m := _glow_mat(Color("c58cff"), 4.0, 0.55)
+	var m := _glow_mat(Color("c58cff") if lv < 3 else Color("e6b0ff"), 4.0 + lv, 0.55)
 	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	col.material_override = m
@@ -1723,13 +1864,14 @@ func _cracks(at: Vector3, r: float, n: int) -> void:
 ## Chain lightning (v0.8.2): a jagged arc leaping from one target to the next, thinner and dimmer as the damage
 ## halves (k: this jump's share of the strike's damage), crackling twice; sparks, a small flash and a crackle on the
 ## one it lands on.
-func _chain(a: Vector3, b: Vector3, k: float) -> void:
+func _chain(a: Vector3, b: Vector3, k: float, lv := 1) -> void:
 	k = clampf(k, 0.1, 1.0)
 	var mid := (a + b) * 0.5 + Vector3(0, a.distance_to(b) * 0.15, 0)
 	var path := _fractal(a, mid, 3, 0.22)
 	path.append_array(_fractal(mid, b, 3, 0.22).slice(1))
-	var glow := _ribbons([[path, 0.3 * k + 0.06]], Color("6f9cff"), 2.0)
-	var core := _ribbons([[path, 0.08 * k + 0.025]], Color("eef4ff"), 4.0 + 6.0 * k)
+	var wk: float = [1.0, 1.3, 1.7][clampi(lv, 1, 3) - 1]   # v0.12.7: fatter, whiter arcs with mastery
+	var glow := _ribbons([[path, (0.3 * k + 0.06) * wk]], Color("6f9cff") if lv < 3 else Color("8fc8ff"), 2.0)
+	var core := _ribbons([[path, (0.08 * k + 0.025) * wk]], Color("eef4ff") if lv < 3 else Color("ffffff"), 4.0 + 6.0 * k + lv)
 	for mi: MeshInstance3D in [glow, core]:
 		var m: StandardMaterial3D = mi.material_override
 		m.albedo_color.a = (0.5 if mi == glow else 1.0) * (0.45 + 0.55 * k)
@@ -1749,4 +1891,195 @@ func _chain(a: Vector3, b: Vector3, k: float) -> void:
 	ctw.tween_property(cr.material_override, "albedo_color:a", 0.0, 0.2)
 	ctw.tween_callback(cr.queue_free)
 	_shake_near_scaled(b, 0.06 + 0.1 * k)
+
+
+# ================================================================ v0.12.7: spell mastery
+## A flat ring of light racing out over the ground to radius r and fading (shockwaves, the mastery accents).
+func _shock_ring(at: Vector3, r: float, c: Color, life: float) -> void:
+	var g := Vector3(at.x, WorldLayout.ground_height(at.x, at.z, at.y + 0.5) + 0.12, at.z)
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.9
+	tm.outer_radius = 1.0
+	tm.rings = 32
+	ring.mesh = tm
+	var m := _glow_mat(c, 3.0, 0.85)
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	ring.material_override = m
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.add_child(ring)
+	ring.global_position = g
+	ring.scale = Vector3(0.2, 0.35, 0.2)
+	var tw := ring.create_tween().set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3(r, 0.35, r), life).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tw.tween_property(m, "albedo_color:a", 0.0, life * 1.1)
+	tw.chain().tween_callback(ring.queue_free)
+
+
+## Fireball mastery III: a small fire bomb lobbed in an arc from the blast to where it pops (`life` seconds later).
+func _bomblet(from: Vector3, to: Vector3, life: float) -> void:
+	var b := FireballView.new()
+	b.scale = Vector3.ONE * 0.55
+	main.add_child(b)
+	b.global_position = from
+	var peak := maxf(from.y, to.y) + 1.6 + from.distance_to(to) * 0.25
+	var fly := func(x: float) -> void:
+		var p := from.lerp(to, x)
+		p.y = lerpf(from.y, to.y, x) + (peak - maxf(from.y, to.y)) * 4.0 * x * (1.0 - x)
+		b.global_position = p
+	var tw := b.create_tween()
+	tw.tween_method(fly, 0.0, 1.0, maxf(life, 0.05))
+	tw.tween_callback(b.queue_free)
+
+
+## Teleport mastery II / III: where you arrive, a blast of violet force: a ring racing out to its reach, a flash, a
+## burst of motes; III bigger, gold-edged, with a second ring, a shake and dust thrown up.
+func _tp_blast(at: Vector3, r: float, lv: int) -> void:
+	_shock_ring(at, r, Color("d8a0ff"), 0.3)
+	_flash_light(at + Vector3(0, 1.0, 0), Color("c070ff"), 4.0 + 2.0 * lv, r * 3.0, 0.3)
+	Fx.burst(main, at + Vector3(0, 0.6, 0), Vector3.UP, Color("e2c4ff"), 20 + 15 * lv, 4.0 + lv, 0.05)
+	var dome := MeshInstance3D.new()   # a brief see-through dome of force swelling out
+	var sm := SphereMesh.new()
+	sm.radius = 1.0
+	sm.height = 1.0
+	dome.mesh = sm
+	var dm := _glow_mat(Color("c58cff") if lv < 3 else Color("f0c8ff"), 2.0, 0.35)
+	dm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	dm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	dome.material_override = dm
+	dome.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.add_child(dome)
+	dome.global_position = at
+	dome.scale = Vector3.ONE * 0.3
+	var tw := dome.create_tween().set_parallel(true)
+	tw.tween_property(dome, "scale", Vector3(r, r * 0.7, r), 0.22).set_ease(Tween.EASE_OUT)
+	tw.tween_property(dm, "albedo_color:a", 0.0, 0.3)
+	tw.chain().tween_callback(dome.queue_free)
+	if lv >= 3:
+		get_tree().create_timer(0.08).timeout.connect(func(): _shock_ring(at, r * 1.25, Color("ffd890"), 0.4))
+		_golem_dust(at, r * 0.6)
+		_cracks(at, r * 0.8, 8)
+		_shake_near(at, 0.2)
+
+
+## Frost Nova mastery III: a block of clear blue ice round someone for `life` seconds, then it cracks apart.
+func _freeze(id: int, at: Vector3, life: float) -> void:
+	var p := at
+	var tall := 2.0
+	if avatars.has(id):
+		p = (avatars[id] as Node3D).position
+		tall *= (avatars[id] as Node3D).scale.y
+	var ice := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(1.0, tall, 1.0) if id > 0 else Vector3(0.9, 1.3, 0.9)
+	ice.mesh = bm
+	var m := _glow_mat(Color("bfeaff"), 0.8, 0.45)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	ice.material_override = m
+	ice.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.add_child(ice)
+	ice.global_position = p + Vector3(0, bm.size.y * 0.5, 0)
+	ice.rotation.y = randf() * TAU
+	ice.scale = Vector3(1, 0.1, 1)
+	var tw := ice.create_tween()
+	tw.tween_property(ice, "scale", Vector3.ONE, 0.12).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(maxf(life - 0.2, 0.1))
+	tw.tween_callback(func(): Fx.burst(main, ice.global_position, Vector3.UP, Color("e6faff"), 24, 4.0, 0.05))
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.15)
+	tw.tween_callback(ice.queue_free)
+
+
+## Fog mastery II / III: a few green bubbles rising off whoever the poison stung.
+func _poison_puff(id: int) -> void:
+	if not avatars.has(id):
+		return
+	var p := (avatars[id] as Node3D).position
+	Fx.burst(main, p + Vector3(randf_range(-0.2, 0.2), 1.2, randf_range(-0.2, 0.2)), Vector3.UP, Color("8aff5a"), 6, 1.2, 0.05)
+
+
+## A golden column of light round the player that rides along with them for a few seconds, a flash and a burst: the
+## level-up (and v0.12.7 the mastery-up) moment. `c`: the column's colour.
+func _column(id: int, c: Color) -> void:
+	var at: Vector3 = (avatars[id] as Node3D).position
+	var col := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.7
+	cm.bottom_radius = 0.9
+	cm.height = 9.0
+	col.mesh = cm
+	var m := _glow_mat(c, 3.0, 0.45)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	col.material_override = m
+	(avatars[id] as Node3D).add_child(col)
+	col.position = Vector3(0, 4.5, 0)
+	var glow := OmniLight3D.new()
+	glow.light_color = c
+	glow.light_energy = 3.0
+	glow.omni_range = 7.0
+	glow.position = Vector3(0, -2.5, 0)
+	col.add_child(glow)
+	var tw := col.create_tween()
+	tw.tween_interval(2.2)
+	tw.tween_property(m, "albedo_color:a", 0.0, 1.4)
+	tw.parallel().tween_property(glow, "light_energy", 0.0, 1.4)
+	tw.tween_callback(col.queue_free)
+	_flash_light(at + Vector3(0, 2, 0), c, 6.0, 10.0, 1.2)
+	Fx.burst(main, at + Vector3(0, 1.0, 0), Vector3.UP, c.lightened(0.4), 50, 6.0, 0.05)
+
+
+## A spell's mastery went up: the golden column (with the spell's colour swirling in it), "FIREBALL MASTERY II!" over
+## them and, on their own screen, a toast with what it does now.
+func _mastery_up(id: int, w: int, i: int, lv: int) -> void:
+	if not avatars.has(id):
+		return
+	var sp := Weapons.spell(w, i)
+	var name := str(sp.get("name", "?"))
+	_column(id, Color("ffd86a"))
+	var c: Color = SPELL_COLOR.get(name, Color.WHITE)
+	var at: Vector3 = (avatars[id] as Node3D).position
+	for k in 3:   # rings of the spell's colour rising up the column
+		get_tree().create_timer(0.15 * k).timeout.connect(func():
+			if is_instance_valid(avatars.get(id)):
+				_shock_ring((avatars[id] as Node3D).position + Vector3(0, 0.2 + 1.2 * k, 0), 1.6, c, 0.6))
+	var what := "%s MASTERY %s!" % [name.to_upper(), Weapons.MASTERY_ROMAN[clampi(lv, 1, 3) - 1]]
+	Fx.word(main, at + Vector3(0, 2.6, 0), what, Color("ffd86a"))
+	var line := str(sp.get("m%d" % lv, {}).get("text", ""))
+	if id == net.my_id and main.has_method("toast"):
+		main.toast(what + ("  " + line if line != "" else ""))
+
+
+## Stun mastery III: a pink-violet swirl over the head of every charmed unit (the roster says who), turning.
+var charms := {}   # id -> the swirl
+
+
+func _charm_swirls(delta: float) -> void:
+	var on := {}
+	for id in net.roster.keys():
+		if bool(net.roster[id].get("charmed", false)) and avatars.has(id):
+			on[id] = true
+	for id in charms.keys():
+		if not on.has(id):
+			(charms[id] as Node3D).queue_free()
+			charms.erase(id)
+	for id in on.keys():
+		if not charms.has(id):
+			var root := Node3D.new()
+			main.add_child(root)
+			for k in 3:
+				var ring := MeshInstance3D.new()
+				var tm := TorusMesh.new()
+				tm.inner_radius = 0.22 + 0.08 * k
+				tm.outer_radius = 0.26 + 0.08 * k
+				ring.mesh = tm
+				ring.material_override = _glow_mat(Color("f080e0") if k != 1 else Color("b070ff"), 3.0, 0.8)
+				ring.rotation = Vector3(0.5 * (k - 1), 0, 0.3 * (1 - k))
+				ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				root.add_child(ring)
+			charms[id] = root
+		var sw: Node3D = charms[id]
+		var av := avatars[id] as Node3D
+		sw.global_position = av.position + Vector3(0, 2.3 * av.scale.y, 0)
+		sw.rotation.y += delta * 4.0
+		if randf() < delta * 6.0:
+			Fx.burst(main, sw.global_position, Vector3.UP, Color("ffa0f0"), 1, 0.8, 0.04)
 

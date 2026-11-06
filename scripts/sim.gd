@@ -111,6 +111,7 @@ class PlayerState:
 	var zap_cd := 0         # ticks before the static starts draining
 	var down := 0           # ticks left knocked down (launched): no control, getting up at the end
 	var guard := 0          # v0.12.5: ticks the block has been held up (0 = not blocking), up to 255
+	var mastery := 0        # v0.12.7: every spell's mastery level, 2 bits a spell (Weapons.mastery_of): the teleport's reach and the shield's cost
 
 	func copy() -> PlayerState:
 		var s := PlayerState.new()
@@ -145,6 +146,7 @@ class PlayerState:
 		s.zap_cd = zap_cd
 		s.down = down
 		s.guard = guard
+		s.mastery = mastery
 		return s
 
 
@@ -336,7 +338,7 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 		var lvl := s.staff_lvl if s.weapon == Weapons.STAFF else s.wand_lvl
 		if s.atk == 0 and s.shield == 0 and inp.spell != s.spell and Weapons.unlocked(s.weapon, inp.spell, lvl):
 			s.spell = inp.spell
-		var sp := Weapons.spell(s.weapon, s.spell)
+		var sp := Weapons.spell_at(s.weapon, s.spell, s.mastery)   # v0.12.7: at this player's mastery (the shield's cost)
 		if sp.get("hold", false):   # the shield: up while the button is held; raising it costs its mana once
 			if attack and s.shield > 0:
 				s.shield = 2
@@ -416,7 +418,7 @@ static func channeling(s: PlayerState) -> bool:
 ## or up into the air, to fall from there), as far as that point but never more than the spell's reach (five dashes);
 ## a blink, so only where you arrive matters: if you wouldn't fit there, you arrive a little short of it.
 static func _cast_self(s: PlayerState, inp: PlayerInput) -> void:
-	var sp := Weapons.spell(s.weapon, s.spell)
+	var sp := Weapons.spell_at(s.weapon, s.spell, s.mastery)   # v0.12.7: mastery II / III teleport further
 	if s.weapon == Weapons.WAND and sp.name == "Teleport":
 		s.pos = teleport_target(s.pos, s.yaw, inp.aim_point, float(sp.range))
 		s.vel = Vector3.ZERO

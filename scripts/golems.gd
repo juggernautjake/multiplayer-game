@@ -110,6 +110,15 @@ class G:
 	var fog_mode := ""              # "thrash" or "stumble" while confused
 	var fog_roll := 0               # ticks until it picks again
 	var wander := 0.0               # its stumbling heading
+	# v0.12.7 its summoner's spell mastery (Weapons "Golem" / "Stone Titan" m2 / m3): drawn `size` times bigger with the
+	# reach to match, dmg_k harder hits; slam > 0: its slams crush every foe within that many metres of where they land
+	# (golem III); stomp > 0: every titan slam also sends a shockwave that far for stomp_dmg (titan III)
+	var lv := 1
+	var size := 1.0
+	var dmg_k := 1.0
+	var slam := 0.0
+	var stomp := 0.0
+	var stomp_dmg := 0
 
 
 ## v0.12.0 the wand's Fog (see Fog): Net sets these before each tick. A golem whose summoner is an enemy of a fog's
@@ -266,7 +275,8 @@ func harmed(victim: int, attacker: int, ticks: int) -> bool:
 	return harm.has(victim) and harm[victim].has(attacker) and _now - int(harm[victim][attacker]) <= ticks
 
 
-func spawn(owner: int, pos: Vector3, yaw: float, now: int, titan := false) -> G:
+## sp (v0.12.7): the spell at the summoner's mastery (Weapons.spell_at), for its size, health and punch.
+func spawn(owner: int, pos: Vector3, yaw: float, now: int, titan := false, sp := {}) -> G:
 	var mine := list.values().filter(func(g): return g.owner == owner and g.state != State.DIE and g.titan == titan)
 	if mine.size() >= (1 if titan else MAX_PER_OWNER):   # the oldest crumbles to make room
 		mine.sort_custom(func(a, b): return a.born < b.born)
@@ -281,7 +291,13 @@ func spawn(owner: int, pos: Vector3, yaw: float, now: int, titan := false) -> G:
 	g.check_pos = pos
 	g.side = 1.0 if g.id % 2 == 0 else -1.0
 	g.titan = titan
-	g.max_hp = TITAN_HP if titan else HP
+	g.lv = int(sp.get("lv", 1))
+	g.size = float(sp.get("size", 1.0))
+	g.dmg_k = float(sp.get("dmg_k", 1.0))
+	g.slam = float(sp.get("slam", 0.0))
+	g.stomp = float(sp.get("stomp", 0.0))
+	g.stomp_dmg = int(sp.get("stomp_dmg", 0))
+	g.max_hp = int(round((TITAN_HP if titan else HP) * float(sp.get("hp_k", 1.0))))
 	g.hp = g.max_hp
 	list[g.id] = g
 	return g
@@ -358,7 +374,7 @@ func tick(now: int, people: Array) -> Array:
 				if tp != null:
 					var d := Vector2(tp.x - g.pos.x, tp.z - g.pos.z)
 					if d.length() <= _reach(g) + 0.6:
-						hits.append([g, g.target, LEAP_DAMAGE, Vector3(d.x, 0, d.y)])
+						hits.append([g, g.target, _dmg(g, LEAP_DAMAGE), Vector3(d.x, 0, d.y)])
 				g.atk_cd = COOLDOWN + 10
 				g.leap_cd = LEAP_CD
 				_to_state(g, State.IDLE)
@@ -387,20 +403,32 @@ func tick(now: int, people: Array) -> Array:
 					var d := Vector2(tp.x - g.pos.x, tp.z - g.pos.z)
 					var face := Vector2(-sin(g.yaw), -cos(g.yaw))
 					if g.titan:   # the titan's slam crushes everyone near where it lands
-						var at := g.pos + Vector3(face.x, 0, face.y) * TITAN_REACH
+						var at := g.pos + Vector3(face.x, 0, face.y) * _reach(g)
+						var crush := TITAN_SLAM * g.size
+						var crushed := {}
 						for id in where.keys():
 							if id != g.owner and pvp.get(id, false) and pvp.get(g.owner, false):
 								var off: Vector3 = where[id] - at
-								if Vector2(off.x, off.z).length() <= TITAN_SLAM:
-									hits.append([g, id, TITAN_DAMAGE, Vector3(off.x, 0, off.z)])
+								if Vector2(off.x, off.z).length() <= crush:
+									hits.append([g, id, _dmg(g, TITAN_DAMAGE), Vector3(off.x, 0, off.z)])
+									crushed[id] = true
 						for o: G in list.values():
-							if o.owner != g.owner and o.state != State.DIE and Vector2(o.pos.x - at.x, o.pos.z - at.z).length() <= TITAN_SLAM:
-								hits.append([g, -1000 - o.id, TITAN_DAMAGE, o.pos - at])
+							if o.owner != g.owner and o.state != State.DIE and Vector2(o.pos.x - at.x, o.pos.z - at.z).length() <= crush:
+								hits.append([g, -1000 - o.id, _dmg(g, TITAN_DAMAGE), o.pos - at])
+								crushed[-1000 - o.id] = true
 						for i in WorldLayout.DUMMIES.size():
-							if Vector2(WorldLayout.DUMMIES[i].x - at.x, WorldLayout.DUMMIES[i].z - at.z).length() <= TITAN_SLAM:
-								hits.append([g, -(i + 1), TITAN_DAMAGE, WorldLayout.DUMMIES[i] - at])
+							if Vector2(WorldLayout.DUMMIES[i].x - at.x, WorldLayout.DUMMIES[i].z - at.z).length() <= crush:
+								hits.append([g, -(i + 1), _dmg(g, TITAN_DAMAGE), WorldLayout.DUMMIES[i] - at])
+						if g.stomp > 0.0:   # v0.12.7 titan mastery III: a stomp shockwave rolls out further
+							for e in _area(g, at, g.stomp, 0, where, pvp):
+								if not crushed.has(e[0]):
+									hits.append([g, e[0], g.stomp_dmg, e[1], "stomp"])
 					elif d.length() <= _reach(g) + 0.6 and (d.length() < 0.4 or absf(face.angle_to(d)) < deg_to_rad(75.0)):
-						hits.append([g, g.target, DAMAGE, Vector3(d.x, 0, d.y)])
+						hits.append([g, g.target, _dmg(g, DAMAGE), Vector3(d.x, 0, d.y)])
+						if g.slam > 0.0:   # v0.12.7 golem mastery III: the slam's shock crushes foes round where it lands
+							var at := g.pos + Vector3(face.x, 0, face.y) * _reach(g)
+							for e in _area(g, at, g.slam, g.target, where, pvp):
+								hits.append([g, e[0], maxi(int(round(_dmg(g, DAMAGE) * 0.6)), 1), e[1], "slam"])
 			if g.t >= ATTACK:
 				g.atk_cd = COOLDOWN
 				_to_state(g, State.IDLE)
@@ -480,7 +508,29 @@ func _speed(g: G) -> float:
 
 
 func _reach(g: G) -> float:
-	return TITAN_REACH if g.titan else REACH
+	return (TITAN_REACH if g.titan else REACH) * g.size   # v0.12.7: a bigger golem reaches further
+
+
+## v0.12.7: a hit of `base` from this golem (its mastery's punch).
+static func _dmg(g: G, base: int) -> int:
+	return int(round(float(base) * g.dmg_k))
+
+
+## v0.12.7: everyone a golem's area attack catches: foes of its summoner (people as `where` holds them, and their
+## golems) within r of `at`, not `skip` (the one its fist already hit). -> [[target id, offset from at], ...]
+func _area(g: G, at: Vector3, r: float, skip: int, where: Dictionary, pvp: Dictionary) -> Array:
+	var out := []
+	for id in where.keys():
+		if id == g.owner or id == skip or not foe(g.owner, id, pvp):
+			continue
+		var off: Vector3 = where[id] - at
+		if Vector2(off.x, off.z).length() <= r + (Boss.RADIUS if id == Boss.ID else 0.0):
+			out.append([id, Vector3(off.x, 0, off.z)])
+	for o: G in list.values():
+		if o.owner != g.owner and o.state != State.DIE and -1000 - o.id != skip and foe(g.owner, o.owner, pvp) \
+				and Vector2(o.pos.x - at.x, o.pos.z - at.z).length() <= r:
+			out.append([-1000 - o.id, o.pos - at])
+	return out
 
 
 func _target_pos(g: G, where: Dictionary):
@@ -698,9 +748,11 @@ func _move(g: G, step: Vector2) -> void:
 	g.pos.y = 0.0
 
 
-## Every golem, flat for the network: [id, owner, x, y, z, yaw, state, t, hp, stunned, titan].
+## Every golem, flat for the network: [id, owner, x, y, z, yaw, state, t, hp, stunned, titan, size, mastery] (v0.12.7:
+## size and its summoner's mastery level, for how big and how it looks).
 func pack() -> Array:
 	var out := []
 	for g: G in list.values():
-		out.append([g.id, g.owner, g.pos.x, g.pos.y, g.pos.z, g.yaw, g.state, g.t, g.hp, 1 if g.stun > 0 else 0, 1 if g.titan else 0])
+		out.append([g.id, g.owner, g.pos.x, g.pos.y, g.pos.z, g.yaw, g.state, g.t, g.hp, 1 if g.stun > 0 else 0, 1 if g.titan else 0,
+			g.size, g.lv])
 	return out
