@@ -729,3 +729,48 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   network and don't take player slots.
 - `world_layout.gd`: `DUEL_C`, `ALTAR_C`, `ARENA_R` (pillars and trees kept clear of them).
 - `main.gd`: builds ArenaView, BossView and PrizeScreen; toasts stack; bots `duel`, `boss [--defeat]`, `prize`.
+
+## v0.11.0: Thunderhorn reworked, Static, the Storm Leap
+
+- `boss.gd`: the header documents the whole fight: the designed flow (opener `plan`, rotation, phase changes via
+  `want_phase` -> `S.PHASE`, the Storm Leap), every attack and variant (`variant` 0/1/2 by phase), manoeuvres
+  (`S.STRAFE`, `BACKOFF`, `HOP`, `TURN`, `LUNGE`), targeting (`_retarget`: distance, `threat`, `damage_by`, `far_t`,
+  casting, finishing, helpless, line of sight `_los`, `attention` share and `focus_t`), and the numbers.
+  - **Static:** `zaps` ([player, damage, dir, blocked]) from homing orbs, static balls and the static roar; Net's
+    `_boss_zap` / `add_static`: a stack is `Sim.ZAP_STACK` (200) in `PlayerState.zap`; `Boss.static_need(enraged)` =
+    6 stacks (5 enraged) -> `zap = Sim.ZAP_STUN`, `stun = Sim.STATIC_STUN` (420 ticks, 7 s). After a hit `zap_cd` =
+    `Sim.ZAP_HOLD` (150), then `Sim.step` drains 1 a tick (a stack in 3.3 s); the meter clears when the stun ends or
+    on death. A shield (or a hit while static-stunned) adds nothing.
+  - **Storm Leap rules** (`_want_leap`): at most `LEAP_MAX` 5; at least `LEAP_GAP` 1500 ticks (25 s) from one start to
+    the next; guaranteed as health passes each of `LEAP_HP` 80/55/30% (`leap_sure`); if fewer than 2 have happened
+    and 75 s (`LEAP_FALLBACK`) pass, one anyway; up to 2 bonus leaps (`leap_bonus`) at an 18% chance per pick while
+    the players do well (`_doing_well`: average health >= 70% and `hurt_recent` per player < 15, fading over ~14 s)
+    and he is below 92%. A phase change goes first. Sequence states `SEQ`: `LEAP_WIND` 90 ticks (`_leap_spot`: far,
+    never within 6 m of a player), `LEAP` 84 ticks (a 14 m arc), the landing ring (kind 1: jump it), `LEAP_LAND` 40,
+    `HOWL` 260 (`homing_count(n)` = min(5 + 5n, 24) orbs, `_launch_orb` round robin over the living, `orb_sent`),
+    `SLAMS` 140 (three rings at 9, 10.5, 12 m/s), `PAW` 96 (locked on the nearest player not stunned or down), `RUSH`
+    24 m/s (`launches`; a dashing player is untouchable), `RECOVER` 70.
+  - Orbs: `ORB_V0` 6 -> `ORB_VMAX` 15 m/s at `ORB_ACC` 5, `ORB_TURN` 2.8 rad/s, a little lead from `pvel`, gone after
+    `ORB_LIFE` 330 ticks or in a pillar; a shield bounces them (spent).
+  - Health: `hp_for(n)` = 7000 x (1 + 0.7 (n - 1)); `add_fighter()` when someone joins mid-fight (Net
+    `_server_add_player`).
+  - Rings are `[radius, hit, centre, speed, damage, kind]`; `pack()` sends rings as [r, cx, cz, kind], balls as
+    [pos, static], orbs as a PackedVector3Array and `[leap x, leap z, variant, phase, target, rush target, rep]`.
+  - `people` rows from Net: [id, pos, alive, shielded, hp, dash ticks, casting, helpless].
+- `boss_model.gd` (`BossModel`, new): the creature: a Skeleton3D (`BONES`), one skinned body mesh lofted through
+  Catmull-Rom cross sections (`_loft`, `_chain_w` weights), rigid details on `BoneAttachment3D`s, the shaders
+  (`HIDE_SHADER`, `STONE_SHADER`, `SMOKE_SHADER`, `TRAIL_SHADER`), `apply(pose, legs, tail_t, delta)`, `set_look`,
+  and `Trail` (verlet glowing ribbons).
+- `boss_view.gd`: rewritten around BossModel: per-state poses (`_smooth_pose`), trail colours, the leap marker, the
+  rush path, orbs, gold jump rings, the storm swirl, banners, all `boss_*` / `static_*` events and their sounds
+  (`_sound(key, ...)`, cached `Synth` sounds).
+- `synth.gd`: `fx(kind)`: snort, hoof, scrape, crackle, charge, whoosh, zap, slam, chirp, stun, pant, eat; `roar(4)`,
+  the howl.
+- `sim.gd`: `PlayerState.zap`, `zap_cd`, `down` (knocked down: no control, no air control, a long slide; the last
+  `DOWN_GETUP` ticks are the get-up). `codec.gd`: stun now 16 bits (7 s), plus zap, zap_cd, down (79 bytes a player).
+- `net.gd`: `_boss_zap`, `add_static`, `boss_launch`; richer `people` rows; health growth when joining mid-fight.
+- `avatar.gd` / `figure_avatar.gd`: the Static bar over other players' heads (`Avatar.static_bars`, `show_static`),
+  a dizzy sway when stunned (a violet flicker on Pip when it's Static), knocked down (Pip: lieDown / lieIdle, then his
+  getUp frames following the clock; the figure tumbles in the air, lies flat, then pushes up). `main.gd`: the HUD
+  Static bar (segments, stun countdown), "Knocked down!", the `--leap` bot.
+- `npc_ai.gd`: ranged challengers: `SHOT_ERR`, `SHOT_START`, `SHOT_HOLD`, `_pause`; `_lead(..., lead)` (0 for them).

@@ -292,6 +292,17 @@ staff or the wand.
 `Godot --headless --path . --script tools/npc_test.gd` (v0.10.0, offline, prints harmless RPC errors): the Duel
 Stone's pool before and after the first level-up, one challenger at a time, challengers and players hurt each other
 whatever PvP says, a challenger kill levels the staff and a fallen challenger leaves, a swordsman closes in and fights,
-an archer leads its shots onto a moving target, Thunderhorn's 1.7x health with two players, each spell's effect on him
+an archer (v0.11.0: aims where you stand, with spread and a tell) hits some shots but never every one, standing or strafing, Thunderhorn's health (1.7x for two, 2.4x for three), each spell's effect on him
 (lightning 1/4, meteor and earth spikes x1.5, earth spikes stop a charge, fireball burns, frost slows, stuns shorten,
 gravity wells can't move him), victory, and defeat then restart alone and with two players (levels kept).
+
+## boss_test.gd
+
+`Godot --headless --path . --script tools/boss_test.gd` (v0.11.0, offline, prints harmless RPC errors): Static (an orb
+hit adds a stack and 6 damage, the meter holds 2.5 s then drains, a shield blocks it, six stacks stun 7 s with no
+moving, jumping, dashing or attacking, no stacks during it, the meter empties after; five when enraged; snapshots
+carry it); homing orbs (10/15/20/24 by players, split evenly, a still player is hit by most, a sprinting, turning,
+dashing one by few); the Storm Leap over six simulated fights (2-5 leaps, at least 25 s apart; no bonus leaps when
+players are hurt); the landing ring hits a grounded player and misses one who jumps it; the rush (a side-dash makes
+him miss; standing, you're hit for 30, thrown more than 10 m, knocked down 2.3 s, then up and moving); targeting
+(with two players the one hurting him gets more attention but not all; a stunned, low-health player is left alone).

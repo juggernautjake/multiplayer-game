@@ -54,6 +54,9 @@ var golem_view: GolemView  # the wand's stone golems
 var spell_sel := {}        # weapon -> the spell picked for it (R cycles)
 var aim_point := Vector3.ZERO   # what the crosshair is on (spells use it)
 var mana_fill: ColorRect
+var zap_back: ColorRect       # v0.11.0: Thunderhorn's Static build-up, over the health bar
+var zap_fill: ColorRect
+var zap_label: Label
 var hud_spells: Label
 var owned_seen := 1        # weapons we had last frame (a new one gets selected)
 var char_pick: OptionButton
@@ -892,6 +895,17 @@ func _bot_boss() -> Array:
 		sp.state.hp = Sim.MAX_HP
 	elif bt == 1501:
 		net._damage(net.my_id, 9999, Boss.ID, Vector3.FORWARD, 0.0)
+	# --leap (v0.11.0): Static on us, then a Storm Leap at once, pictures every 10 ticks, done after 25 s
+	if _args().has("leap"):
+		if bt in [250, 262, 274, 286]:
+			net._boss_zap(net.my_id, 0, Vector3.FORWARD, false)
+		if bt == 330:
+			boss.last_leap = -100000
+			boss._start_leap([[net.my_id, me, true, false, 100]])
+		if bt % 10 == 0 and bt > 240:
+			snap.call("leap_%04d_%s" % [bt, Boss.S.keys()[boss.state]])
+		if bt > 1800:
+			get_tree().quit()
 	# his health, scripted: full for 30 s, then half (enraged) for 20 s, then a quarter (the storm) for 20 s, then done
 	var floor_k := 1.0 if bt < 1800 else (0.45 if bt < 3000 else (0.2 if bt < 4200 else 0.0))
 	if floor_k > 0.0:
@@ -912,7 +926,7 @@ func _bot_boss() -> Array:
 	cam_pitch = -0.12
 	if bt > 300 and bt % 150 < 3:
 		b |= Sim.Btn.ATTACK
-	if bt % 15 == 0:
+	if bt % 15 == 0 and not _args().has("leap"):
 		snap.call("boss_%04d_%s" % [bt, Boss.S.keys()[boss.state]])
 	var aim := c + Vector3(0, 1.5, 0)
 	spell_sel[weapon_slot] = 0
@@ -1257,6 +1271,33 @@ func _build_ui() -> void:
 	hp_fill.size = Vector2(296, 12)
 	hp_fill.position = Vector2(2, 2)
 	hp_back.add_child(hp_fill)
+	zap_back = ColorRect.new()   # Static: segments over the health bar, shown while it builds or stuns
+	zap_back.color = Color(0, 0, 0, 0.55)
+	zap_back.size = Vector2(300, 12)
+	zap_back.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	zap_back.position = Vector2(-150, -76)
+	zap_back.visible = false
+	layer.add_child(zap_back)
+	zap_fill = ColorRect.new()
+	zap_fill.color = Color("b070ff")
+	zap_fill.size = Vector2(0, 8)
+	zap_fill.position = Vector2(2, 2)
+	zap_back.add_child(zap_fill)
+	for i in 6:   # the dividers between stacks (placed each frame: 5 or 6 stacks)
+		var dv := ColorRect.new()
+		dv.color = Color(0, 0, 0, 0.8)
+		dv.size = Vector2(2, 12)
+		dv.name = "div%d" % i
+		zap_back.add_child(dv)
+	zap_label = Label.new()
+	zap_label.position = Vector2(0, -5)
+	zap_label.size = Vector2(300, 20)
+	zap_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	zap_label.add_theme_font_size_override("font_size", 12)
+	zap_label.add_theme_color_override("font_color", Color("e6c8ff"))
+	zap_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	zap_label.add_theme_constant_override("outline_size", 5)
+	zap_back.add_child(zap_label)
 	var mana_back := ColorRect.new()   # mana, under the health bar
 	mana_back.color = Color(0, 0, 0, 0.55)
 	mana_back.size = Vector2(300, 10)
@@ -1708,6 +1749,7 @@ func _update_combat_hud() -> void:
 	var w := Weapons.get_data(st.weapon)
 	charge_fill.size.x = 60.0 * float(st.charge) / float(w.draw) if w.kind == "ranged" else 0.0
 	mana_fill.size.x = 296.0 * float(st.mana) / float(Sim.MANA_FULL)
+	_static_hud(st)
 	if w.kind == "magic":
 		var parts := []
 		var sel := int(spell_sel.get(st.weapon, 0))
@@ -1738,6 +1780,30 @@ func _update_combat_hud() -> void:
 		hud_spells.text = "STUNNED" if st.stun > 0 else ""
 	if st.dead > 0:
 		hud_weapons.text = "Knocked out: back up in %.1f s" % (st.dead * Config.DT)
+	elif st.down > 0:
+		hud_weapons.text = "Knocked down! Getting up..."
+
+
+## v0.11.0: the Static bar: a segment a stack (6, or 5 while Thunderhorn is enraged), draining slowly; when it's full,
+## a 7 s stun, the bar running down and flashing.
+func _static_hud(st: Sim.PlayerState) -> void:
+	zap_back.visible = st.zap > 0 and st.dead == 0
+	if not zap_back.visible:
+		return
+	var need := Boss.static_need(Boss.shown_enraged)
+	for i in 6:
+		var dv: ColorRect = zap_back.get_node("div%d" % i)
+		dv.visible = i > 0 and i < need
+		dv.position.x = 300.0 * i / need - 1.0
+	if st.zap >= Sim.ZAP_STUN:
+		zap_fill.size.x = 296.0 * float(st.stun) / Sim.STATIC_STUN
+		zap_fill.color = Color("b070ff").lerp(Color.WHITE, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02))
+		zap_label.text = "STATIC STUN  %.1f s" % (st.stun * Config.DT)
+	else:
+		var k := float(st.zap) / float(Sim.ZAP_STACK * need)
+		zap_fill.size.x = 296.0 * k
+		zap_fill.color = Color("8a5cff").lerp(Color("e6c8ff"), k)
+		zap_label.text = "STATIC  %d / %d" % [int(ceil(float(st.zap) / Sim.ZAP_STACK)), need]
 
 
 

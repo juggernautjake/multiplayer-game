@@ -52,6 +52,9 @@ var aim_pitch := 0.0           # set by Main for your own player: the archery st
 var model: Node3D              # everything in the body's frame (x right, y up, -z forward); hidden in first person
 var label: Label3D
 var hp_bar: Sprite3D
+var zap_bar: Sprite3D        # v0.11.0: Static build-up (Avatar.static_bars)
+var zap_back: Sprite3D
+var _tumble := 0.0
 var blob: MeshInstance3D
 var held: Node3D               # club / sword / slingshot model (the bow is drawn live)
 var held_w := -1
@@ -239,6 +242,9 @@ func _init(player_name: String, color: Color, show_name: bool, _outfit := 0) -> 
 	hp_bar.position.y = 2.05
 	hp_bar.visible = show_name
 	add_child(hp_bar)
+	var zb := Avatar.static_bars(self, img, 2.14)
+	zap_back = zb[0]
+	zap_bar = zb[1]
 	_garb = WizardGarb.new()
 	add_child(_garb)
 	for sd in ["r", "l"]:   # bell sleeves, shown with a robe
@@ -407,8 +413,30 @@ func animate(delta: float, _cam: Camera3D) -> void:
 
 	# ---- the skeleton: pelvis, waist, chest (the twist and lean spread over both), neck, head
 	var dead := st != null and st.dead > 0
-	model.rotation.x = lerpf(model.rotation.x, -PI / 2.0 if dead else 0.0, a)
-	model.position.y = lerpf(model.position.y, 0.25 if dead else 0.0, a)
+	# v0.11.0 knocked down: tumbling through the air, flat on the ground, then pushing up onto the feet; stunned: dizzy
+	var downed := st != null and st.down > 0 and not dead
+	var lie := -PI / 2.0 if dead else 0.0
+	var lie_y := 0.25 if dead else 0.0
+	if downed:
+		if not grounded:
+			_tumble -= delta * 9.0
+			lie = -PI / 2.0 + _tumble
+		else:
+			_tumble = 0.0
+			var up := 1.0 - clampf(float(st.down) / Sim.DOWN_GETUP, 0.0, 1.0)
+			lie = -PI / 2.0 * (1.0 - _smooth(up))
+			lie_y = 0.25 * (1.0 - up)
+			_crouch = maxf(_crouch, 0.35 * sin(up * PI))
+	else:
+		_tumble = 0.0
+	if downed and not grounded:
+		model.rotation.x = lie
+	else:
+		model.rotation.x = lerpf(model.rotation.x, lie, a)
+	model.position.y = lerpf(model.position.y, lie_y, a)
+	var dizzy := st != null and st.stun > 0 and not dead
+	model.rotation.z = sin(_t * 5.0) * 0.1 if dizzy else lerpf(model.rotation.z, 0.0, a)
+	dead = dead or downed
 	var breathe := sin(_t * 1.6) * 0.01                                    # ~15 breaths a minute
 	var moving := clampf(speed / 1.5, 0.0, 1.0) if grounded else 0.0
 	var idle_shift := sin(_t * 0.9) * sin(_t * 0.31) * 0.03 * (1.0 - moving)   # a slow weight shift now and then
@@ -506,7 +534,8 @@ func animate(delta: float, _cam: Camera3D) -> void:
 		var hpk := float(st.hp) / float(Sim.MAX_HP)
 		hp_bar.scale.x = maxf(0.9 * hpk, 0.001)
 		hp_bar.modulate = Color(0.9, 0.2, 0.2).lerp(Color(0.3, 0.9, 0.3), hpk)
-		hp_bar.visible = label.visible and not dead
+		hp_bar.visible = label.visible and st.dead == 0
+		Avatar.show_static(zap_back, zap_bar, st, label.visible)
 	var ground := WorldLayout.ground_height(position.x, position.z, position.y)
 	blob.global_position = Vector3(position.x, ground + 0.012, position.z)
 	var bs := clampf(1.0 - (position.y - ground) / 6.0, 0.35, 1.0)
@@ -558,7 +587,7 @@ func _pose(st: Sim.PlayerState, speed: float) -> Dictionary:
 	var al := arm_fk(-1.0, -amp * cos(_phase) + 0.05 + breath, bend, 0.1)
 	var p := { "hand_r": ar[1], "hand_l": al[1], "pole_r": ar[2], "pole_l": al[2],
 		"wdir": Vector3(0, -0.3, -1), "wroll": Vector3(1, 0, 0), "twist": 0.0, "lean": 0.0, "crouch": 0.0, "look": glance }
-	if st == null or st.dead > 0:
+	if st == null or st.dead > 0 or st.down > 0:
 		return p
 	var w := st.weapon
 	var free_l := w in [Weapons.FISTS, Weapons.SWORD, Weapons.STAFF, Weapons.WAND]

@@ -27,6 +27,16 @@ const MAX_HP := 100
 const RESPAWN_TICKS := 180    # 3 s on the ground after dying
 const SLOW_FACTOR := 0.5     # how fast you move while slowed (frost nova)
 const MANA_FULL := 500       # Weapons.MAX_MANA in fifths: one fifth comes back each tick (12 mana a second)
+# v0.11.0 Static (Thunderhorn's build-up stun): every static hit adds ZAP_STACK; ZAP_HOLD ticks after the last hit it
+# drains one point a tick (a stack every 3.3 s). The server stuns at Boss.static_need() stacks and marks the meter
+# ZAP_STUN while that stun lasts; it empties when the stun ends.
+const ZAP_STACK := 200
+const ZAP_HOLD := 150
+const ZAP_STUN := 4000
+const STATIC_STUN := 420     # 7 s
+# v0.11.0 knocked down (launched by Thunderhorn's rush): no control; the last DOWN_GETUP ticks are the get-up
+const DOWN_TICKS := 140
+const DOWN_GETUP := 45
 
 
 ## One tick of player intent. yaw: the camera's heading (radians, 0 = looking down -Z): WASD move relative to it.
@@ -86,6 +96,9 @@ class PlayerState:
 	var slow := 0           # ticks left slowed (frost): moving at SLOW_FACTOR
 	var staff_lvl := 1      # the staff's level (kills unlock spells: Weapons.LEVEL_KILLS)
 	var wand_lvl := 1
+	var zap := 0            # v0.11.0: static build-up (ZAP_STACK a hit), ZAP_STUN while static-stunned
+	var zap_cd := 0         # ticks before the static starts draining
+	var down := 0           # ticks left knocked down (launched): no control, getting up at the end
 
 	func copy() -> PlayerState:
 		var s := PlayerState.new()
@@ -116,6 +129,9 @@ class PlayerState:
 		s.slow = slow
 		s.staff_lvl = staff_lvl
 		s.wand_lvl = wand_lvl
+		s.zap = zap
+		s.zap_cd = zap_cd
+		s.down = down
 		return s
 
 
@@ -136,6 +152,21 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 		s.stun -= 1
 		inp = PlayerInput.new(inp.seq, 0, inp.yaw, inp.pitch, s.weapon, inp.view_tick, s.yaw, s.yaw, s.spell, s.pos)
 		s.charge = 0
+	if s.down > 0:   # knocked down: flying, sliding, lying, getting up; no control
+		s.down -= 1
+		inp = PlayerInput.new(inp.seq, 0, inp.yaw, inp.pitch, s.weapon, inp.view_tick, s.yaw, s.yaw, s.spell, s.pos)
+		s.charge = 0
+	if s.zap >= ZAP_STUN:
+		if s.stun == 0:
+			s.zap = 0
+	elif s.zap > 0:
+		if s.zap_cd > 0:
+			s.zap_cd -= 1
+		else:
+			s.zap -= 1
+	if s.dead > 0:
+		s.zap = 0
+		s.down = 0
 	var ev := _combat(s, inp)
 	if ev == Ev.CAST:
 		_cast_self(s, inp)
@@ -159,7 +190,7 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 		speed *= w.slow   # drawing a bow, mid-swing, casting or holding the shield up: slower
 	if s.slow > 0:
 		speed *= SLOW_FACTOR
-	if not alive or s.stun > 0:
+	if not alive or s.stun > 0 or s.down > 0:
 		wish = Vector2.ZERO
 	if wish.length_squared() > 0.0:
 		wish = wish.normalized() * speed
@@ -184,6 +215,8 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 	else:
 		# accelerate the horizontal velocity toward the wanted one, at most accel * DT this tick
 		var accel := (GROUND_ACCEL if s.grounded else AIR_ACCEL) * Config.DT
+		if s.down > 0:   # launched: no air control, a long slide on landing
+			accel = (24.0 if s.grounded else 0.0) * Config.DT
 		var h := Vector2(s.vel.x, s.vel.z)
 		var d := wish - h
 		if d.length() <= accel:
@@ -198,7 +231,7 @@ static func step(s: PlayerState, inp: PlayerInput) -> int:
 			s.vel.x = -sy * float(mv.lunge)
 			s.vel.z = -cy * float(mv.lunge)
 
-	if s.grounded and inp.buttons & Btn.JUMP and alive and s.stun == 0:
+	if s.grounded and inp.buttons & Btn.JUMP and alive and s.stun == 0 and s.down == 0:
 		s.vel.y = JUMP_SPEED
 		s.grounded = false
 	if not s.grounded and s.dash_ticks == 0:

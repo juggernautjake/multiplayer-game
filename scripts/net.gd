@@ -503,6 +503,9 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 	p.outfit = (p.slot - 1) % 4
 	p.state = Sim.spawn_state(p.slot)
 	players[id] = p
+	if boss != null and boss.state != Boss.S.DEATH and not boss_fighters.has(id):   # joining mid-fight: he grows
+		boss_fighters.append(id)
+		boss.add_fighter()
 	_server_send_roster()
 	if id != 1 and OS.get_cmdline_user_args().has("--give-guests"):   # testing: guests start with every weapon too
 		p.state.owned = 0b1111111
@@ -1939,7 +1942,9 @@ func _server_boss() -> void:
 	for id in boss_fighters:
 		if players.has(id):
 			var p: ServerPlayer = players[id]
-			people.append([id, p.state.pos, p.state.dead == 0, p.state.shield > 0])
+			var s := p.state
+			people.append([id, s.pos, s.dead == 0, s.shield > 0, s.hp, s.dash_ticks,
+				Weapons.is_magic(s.weapon) and (s.atk > 0 or s.shield > 0), s.stun > 0 or s.down > 0])
 	var gl := []
 	for g: Golems.G in golems.list.values():
 		if g.state != Golems.State.DIE:
@@ -1948,6 +1953,12 @@ func _server_boss() -> void:
 	for h in boss.hits:
 		_damage(int(h[0]), int(h[1]), Boss.ID, h[2], float(h[3]))
 	boss.hits.clear()
+	for z in boss.zaps:   # static: damage, and a stack unless a shield took it
+		_boss_zap(int(z[0]), int(z[1]), z[2], bool(z[3]))
+	boss.zaps.clear()
+	for l in boss.launches:   # the rush: thrown across the arena, knocked down
+		boss_launch(int(l[0]), l[1])
+	boss.launches.clear()
 	for sl in boss.slows:
 		if players.has(sl[0]) and players[sl[0]].state.shield == 0:
 			players[sl[0]].state.slow = maxi(players[sl[0]].state.slow, int(sl[1]))
@@ -1987,6 +1998,53 @@ func _server_boss() -> void:
 			if players.has(id):
 				players[id].state.dead = Sim.RESPAWN_TICKS + 99999
 		_result("defeat")
+
+
+## A static hit from Thunderhorn (v0.11.0): the damage, then a stack of Static; at Boss.static_need stacks (6, 5 while
+## he's enraged) a 7 s stun. A shield takes the hit (for mana) and no stack; a static-stunned player takes no more.
+func _boss_zap(id: int, dmg: int, dir: Vector3, blocked: bool) -> void:
+	if not players.has(id):
+		return
+	var q: ServerPlayer = players[id]
+	if q.state.dead > 0:
+		return
+	var shielded := q.state.shield > 0
+	if dmg > 0:
+		_damage(id, dmg, Boss.ID, dir, 1.5)
+	if blocked or shielded or q.state.dead > 0 or q.state.zap >= Sim.ZAP_STUN:
+		return
+	add_static(q, Boss.static_need(boss != null and boss.enraged))
+
+
+func add_static(q: ServerPlayer, need: int) -> void:
+	var s := q.state
+	s.zap = mini(s.zap + Sim.ZAP_STACK, Sim.ZAP_STACK * need)
+	s.zap_cd = Sim.ZAP_HOLD
+	if s.zap >= Sim.ZAP_STACK * need:
+		s.zap = Sim.ZAP_STUN
+		s.stun = Sim.STATIC_STUN
+		s.charge = 0
+		s.shield = 0
+		_fx("static_stun", [q.id, s.pos])
+	else:
+		_fx("static_hit", [q.id, s.pos + Vector3(0, 1.0, 0), s.zap / Sim.ZAP_STACK])
+
+
+## Thrown by the rush: flying ~15 m, then knocked down (Sim.DOWN_TICKS). A held shield that survives the hit stops it.
+func boss_launch(id: int, dir: Vector3) -> void:
+	if not players.has(id):
+		return
+	var s: Sim.PlayerState = players[id].state
+	if s.dead > 0 or s.shield > 0:
+		return
+	var d := Vector3(dir.x, 0, dir.z).normalized()
+	s.vel = d * 17.0 + Vector3(0, 10.0, 0)
+	s.grounded = false
+	s.dash_ticks = 0
+	s.charge = 0
+	s.down = Sim.DOWN_TICKS
+	Sim.quantize(s)
+	_fx("boss_launch", [id, s.pos, d])
 
 
 ## After a defeat: everyone back on their feet at the spawn with full health, the boss gone and the altar ready again.

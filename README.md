@@ -177,24 +177,51 @@ follow a stun with something heavy. They're medium difficulty by default.
 
 ### Thunderhorn, the storm bull
 
-A giant bull made of dark storm cloud with lightning crackling through it like a skeleton. Clouds gather, he comes down
-in a lightning strike, slams the ground and roars. His health bar (with his status: staggered, slowed, burning,
-enraged, storm) is at the top of the screen. With two players he has 1.7x the health and attacks more often.
+A giant bull of dark storm cloud (v0.11.0: about three and a half times your height, a sculpted, skinned creature with
+a churning storm hide, glowing veins and a lightning skeleton that pulses as he attacks, obsidian horns and hooves, a
+spiked tail, a mane of storm smoke, a scowl and bared teeth). Glowing trails stream from his eyes, and from his horns,
+hooves or tail while they attack, in the attack's colour. Clouds gather, he comes down in a lightning strike, slams
+the ground and roars. His health bar (with his status, and gold ticks where Storm Leaps are guaranteed) is at the top
+of the screen.
+
+**Health:** 7000 alone, x1.7 with two players (11 900), +0.7x for each player after that (`Boss.hp_for`); someone
+joining mid-fight adds health in proportion. At a level-3 wizard's realistic ~15 damage a second (dodging half the
+time) that is a fight of about 8 minutes alone.
+
+He moves like a hunting animal between attacks: circling you, backing off, pouncing hops to a new spot, snapping round
+with stamping hooves, short feint lunges, snorting and shaking his head.
 
 His attacks, and how to see them coming:
 
 | Attack | The warning | What to do |
 |---|---|---|
-| **Charge** | He lowers his head and scrapes a hoof | Step sideways at the last moment; he skids to a stop after |
-| **Stomp** | He rears up on his hind legs | Get out of the rings of lightning that roll out from where he lands, or jump them |
-| **Horn beam** | His horns light up white, arcs jump between them | A beam sweeps from his horns across the ground in front of him: get behind him or far to the side, or shield |
-| **Called lightning** | He bellows at the sky | Glowing circles appear on the ground under you: keep moving |
-| **Roar** | He throws his head back | Close to him it slows you; a shield blocks it |
-| **Ball lightning** | His head dips and the air flashes | Slow glowing balls drift after you and pop: outrun them or shield |
-| **Static field** | Always on: sparks crackle over the ground round his hooves | Anyone right next to him takes a small shock twice a second: hit and step out |
+| **Charge** | He lowers his head, scrapes a hoof; a path glows on the ground | Step sideways at the last moment; enraged he may charge twice, in the storm three times |
+| **Stomp** | He rears up on his hind legs | Jump the rings that roll out over the ground (enraged: four slams, the last a double ring) |
+| **Horn beam** | His horns light up, arcs jump between them | The beam sweeps the ground in front of him (enraged: back and forth): get behind him, or shield |
+| **Called lightning** | He bellows at the sky | Circles appear under you: keep moving (in the storm the bolts walk at you in a line) |
+| **Roar** | He snorts and throws his head back | Close to him it slows you (enraged: and adds a stack of Static); a shield blocks it |
+| **Ball lightning** | His head dips and the air flashes | Balls drift after you (enraged: five violet static balls, each a stack of Static) |
+| **Gore** | Head low, swung to one side | Don't stand in front of his face |
+| **Tail lash** | His body coils, the spiked tail lifts | Don't stand at his flank or behind him |
+| **Static field** | Always on: sparks round his hooves | A small shock twice a second right next to him |
 
-Below half health he is **enraged** (red eyes and lightning, faster, attacks more often); below a quarter he **calls
-the storm** over the arena (lightning falls more often).
+**Static:** his violet attacks charge you up. A Static bar fills above your health bar (and over the heads of other
+players): one segment a hit. Six hits (five while he's enraged) and you're **stunned for 7 seconds** (sparks, stars,
+dizzy). The bar holds 2.5 s after a hit, then drains a segment every 3.3 s. A held shield blocks the orbs (no stack).
+
+**The Storm Leap** (2 to 5 times a fight; always as he falls past 80%, 55% and 30% health, and up to twice more if
+you're doing too well):
+1. He crouches, lightning gathers, a gold marker glows where he will land, far across the arena.
+2. He leaps across the arena. Landing sends out a **low gold ring: JUMP it**.
+3. A long howl: 10 homing static orbs (15 with two players, +5 a player) fly out of his back and chase you. They turn
+   slowly and speed up: sprint, change direction sharply and dash past them, put a pillar between you, or shield.
+4. Three ground slams: **jump three rings** in a row.
+5. He paws the ground, locked on the nearest player ("HE'S COMING FOR YOU"), and **rushes**: **dash sideways** as he
+   comes. If he hits you, you're thrown across the arena and knocked down for a couple of seconds, then get up.
+
+**Phases:** below half health he stops and transforms ("THUNDERHORN IS ENRAGED": red-white light cracks open across
+his hide, faster, shorter wind-ups, variants); below a quarter "THE STORM BREAKS" (the storm swirls round him and
+lightning keeps falling).
 
 His weaknesses (and resistances):
 
@@ -204,7 +231,7 @@ His weaknesses (and resistances):
 - **Frost Nova** slows him a lot.
 - **Stuns** only stagger him, and shorter each time.
 - **Lightning** does only a quarter of its damage: he's made of it. A gravity well can't move him.
-- He can't be hurt while he comes down.
+- He can't be hurt while he comes down. The Storm Leap shrugs off staggers, except that Earth Spikes stop the rush.
 
 ### Winning and losing
 
@@ -440,6 +467,7 @@ These need no window and exit with code 0 when everything passes.
 | `<godot> --headless --path . -s tools/fruit_test.gd` | Fruit physics in `Ecology`: fallen fruit comes to rest, walking into it kicks it, a melee blow sends it flying, it never ends up inside a pillar, trunk or dummy, and its path has no jumps. |
 | `<godot> --headless --path . -s tools/eco_test.gd` | Runs the yard for 20 simulated minutes and checks that fruit falls, worms move in, birds come and trees can be hit. Prints `ECO OK` or `ECO FAIL`. |
 | `<godot> --headless --path . -s tools/invite_test.gd` | Invite codes: encoding then decoding gives back the address and port. |
+| `<godot> --headless --path . -s tools/boss_test.gd` | v0.11.0: Static (a stack a hit, holds, drains, 7 s stun at 6, 5 enraged, shield blocks, synced), homing orbs (count by players, even split, dodgeable), 2-5 Storm Leaps a fight 25 s apart, jumping the landing ring, the rush (side-dash dodges; otherwise thrown, knocked down, up again), fair targeting. |
 | `<godot> --headless --path . -s tools/npc_test.gd` | v0.10.0: who the Duel Stone summons before and after the first level-up, one challenger at a time, challengers hurt and are hurt whatever PvP says, kills on them level the staff, a swordsman closes in and an archer leads its shots, Thunderhorn's health with two players, what each spell does to him, victory, and defeat then restart (alone and with two players, levels kept). |
 
 ### Visual checks (need a window)
@@ -477,6 +505,7 @@ The bot modes (all in `scripts/main.gd`, functions `_bot_input`, `_bot_fight` an
 | `--leave-at <frame>` | Presses "Leave game" at that frame (the game then starts again with the same options: with `--host` it hosts again). |
 | `--bot magic` | Casts every staff and wand spell at the middle dummy (`--plan2`, `--plan3` for the level 3 and 4 spells, `--every` to save a picture every 6 ticks with `--shots`). |
 | `--bot duel` | (`--host --give-all --shots <folder>`) Walks to the Duel Stone and presses E, then meets a challenger of every kind (sword, club, bow, slingshot, then after a level-up staff and wand) for 7 s each, with pictures through each fight. |
+| `--bot boss --leap` | (v0.11.0, `--host --give-all --shots <folder>`) Static stacks on you, then a Storm Leap at once; a picture every 10 ticks for 25 s. |
 | `--bot boss [--defeat]` | (`--host --give-all --shots <folder>`) Levels up to 3 (the stone turns violet, the altar rises), jumps on the altar, watches Thunderhorn come down and fight from 10-16 m (kept alive), takes him to half and a quarter of his health, then beats him and pictures the victory and the prize. With `--defeat` it dies instead: the defeat screen, a key, the restart. |
 | `--bot prize [--defeat] [--no-prize-pic]` | Just the end screens (victory and the prize, or defeat); `--no-prize-pic` shows the drawn stand-in. |
 | `--bot close` | Close-quarters test. After picking everything up, for each weapon it walks right into the middle dummy and then into the nearest tall pillar (7 s each), keeps the crosshair on the target, and attacks (clicks, then holds; bows draw and release). Every 6 ticks it logs how far the body is turned from the target and from the camera; at the end it prints the worst angle per weapon and quits. Add `--shots <folder>` to save screenshots at three moments of each phase. |
@@ -627,3 +656,18 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
 - **The prize** for beating him (confetti, then a mariachi fiesta), and a defeat screen with a restart that keeps
   your levels. See [The Duel Stone, the Storm Altar and Thunderhorn](#the-duel-stone-the-storm-altar-and-thunderhorn).
 - Challengers don't take up player slots.
+
+## What's new in 0.11.0
+
+- **Thunderhorn reborn:** a sculpted, skinned creature (3.5x your height) with storm-hide shaders, obsidian horns and
+  hooves, a spiked tail, glowing eye and attack trails; animal movement (circling, backing off, hops, snap turns,
+  lunges, snorts, head shakes); every attack with a wind-up, sound and impact (dust, sparks, scorch, camera shake);
+  new attacks (gore, tail lash) and variants by phase (double/triple charge, stomp combo, two-way beam, static balls
+  and roar, walking lightning); designed phases with announcements; new procedural sounds (snorts, hooves, scrapes,
+  crackle, charge-up, whooshes, slams, zaps, the howl).
+- **Smarter targeting:** distance, threat (who hurt him lately and most), finishing the weak (but never someone stunned
+  or knocked down), punishing those who hang back or cast, line of sight, and a fair share of attention between players.
+- **Static** (a build-up stun) and **the Storm Leap** (see Thunderhorn above).
+- **More health:** 7000 alone, x1.7 for two, +0.7x per extra player; joining mid-fight scales it.
+- **Challenger archers and slingers are fair now:** they aim where you stand with a real spread (wider far away and
+  when you run or dash), hold the full draw a moment (watch for it), shoot less often and pause to reposition.

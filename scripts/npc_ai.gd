@@ -20,6 +20,12 @@ extends RefCounted
 
 const REACT := [[22, 12], [14, 8], [8, 4]]   # [base ticks, random extra] before reacting, per difficulty
 const AIM_ERR := [0.07, 0.035, 0.015]        # radians of aim error
+# v0.11.0 archers and slingers were far too deadly: they aim where you STAND (no leading), with a real spread (more
+# far away, more when you're running or dashing), draw less often, hold the full draw a moment first (a tell you can
+# see), and stop shooting now and then to reposition. Better tiers aim tighter and shoot a little more often.
+const SHOT_ERR := [0.1, 0.075, 0.055]        # radians, at 10 m, standing target
+const SHOT_START := [0.02, 0.028, 0.036]     # chance a tick to start a draw when ready
+const SHOT_HOLD := [32, 24, 16]              # ticks held at full draw before letting go
 const DODGE := [0.35, 0.6, 0.85]             # chance to dodge a threat it noticed
 
 var id := 0
@@ -36,6 +42,10 @@ var _threat_seen := -1      # tick it noticed the current threat
 var _feint := 0             # ticks of a feint left
 var _combo := 0             # presses left in a combo
 var _hold := 0              # ticks it keeps a button held (drawing, the shield)
+var _full_t := 0            # ticks held at full draw
+var _pause := 0             # ticks repositioning without shooting
+var _shot_err := 0.0        # this shot's aim error (picked when the draw starts)
+var _shot_err_p := 0.0
 var _plan_spell := -1
 var _cast_t := 0
 var _retreat := 0
@@ -149,17 +159,30 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 				move += dir
 			else:
 				move += side * _strafe
-			var aim := _lead(s, tgt, Weapons.shot(s.weapon, int(Weapons.get_data(s.weapon).draw))[0], float(Weapons.get_data(s.weapon).gravity))
-			face = aim[0]
-			pitch = aim[1]
+			var aim := _lead(s, tgt, Weapons.shot(s.weapon, int(Weapons.get_data(s.weapon).draw))[0], float(Weapons.get_data(s.weapon).gravity), 0.0)
+			face = aim[0] + _shot_err
+			pitch = aim[1] + _shot_err_p
 			aim_point = aim[2]
-			if dist < 34.0:
+			if _pause > 0:
+				_pause -= 1
+				move += side * _strafe
+			elif dist < 34.0:
 				var full := s.charge >= int(Weapons.get_data(s.weapon).draw)
 				if s.charge > 0 and not full:
 					buttons |= Sim.Btn.ATTACK   # keep drawing
-				elif s.charge == 0 and s.atk_cd == 0 and rng.randf() < 0.08:
-					buttons |= Sim.Btn.ATTACK   # start a draw
-				# (full: let go: the shot leaves)
+				elif full and _full_t < SHOT_HOLD[difficulty]:
+					_full_t += 1
+					buttons |= Sim.Btn.ATTACK   # holding the full draw: the tell
+				elif s.charge == 0 and s.atk_cd == 0 and rng.randf() < SHOT_START[difficulty]:
+					buttons |= Sim.Btn.ATTACK   # start a draw, with this shot's error
+					_full_t = 0
+					var tv := Vector2(tgt.state.vel.x, tgt.state.vel.z).length()
+					var spread: float = SHOT_ERR[difficulty] * (0.6 + dist / 25.0) * (1.0 + clampf(tv / 6.0, 0.0, 1.5)) * (1.8 if tgt.state.dash_ticks > 0 else 1.0)
+					_shot_err = rng.randfn(0.0, spread)
+					_shot_err_p = rng.randfn(0.0, spread * 0.5)
+				elif full:   # let go: the shot leaves; then maybe a pause to reposition
+					if rng.randf() < 0.4:
+						_pause = rng.randi_range(40, 90)
 		"staff", "wand":
 			var want := ideal_range()
 			if _retreat > 0 or dist < want - 3.0:
@@ -213,7 +236,7 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 		elif r < -0.35:
 			buttons |= Sim.Btn.LEFT
 	buttons |= Sim.Btn.FACE_CAM
-	var err: float = AIM_ERR[difficulty] * rng.randfn(0.0, 1.0)
+	var err: float = AIM_ERR[difficulty] * rng.randfn(0.0, 1.0) if archetype != "ranged" else 0.0
 	return Sim.PlayerInput.new(seq, buttons, face, pitch, s.weapon, net.server_tick, face + err, face, spell, aim_point)
 
 
@@ -257,12 +280,12 @@ func _threat(net: Net, me: Net.ServerPlayer, tgt: Net.ServerPlayer, dist: float)
 
 ## Lead a shot: aim where the target will be when it arrives (its speed and gravity), on the low arc.
 ## -> [yaw, pitch, the point]
-func _lead(s: Sim.PlayerState, tgt: Net.ServerPlayer, speed: float, g: float) -> Array:
+func _lead(s: Sim.PlayerState, tgt: Net.ServerPlayer, speed: float, g: float, lead := 1.0) -> Array:
 	var muzzle := s.pos + Vector3(0, 1.45, 0)
 	var at: Vector3 = tgt.state.pos + Vector3(0, 1.1, 0)
 	for i in 3:   # refine: time of flight -> where they'll be -> time of flight
 		var tof := muzzle.distance_to(at) / maxf(speed, 1.0)
-		at = tgt.state.pos + Vector3(0, 1.1, 0) + Vector3(tgt.state.vel.x, 0, tgt.state.vel.z) * tof
+		at = tgt.state.pos + Vector3(0, 1.1, 0) + Vector3(tgt.state.vel.x, 0, tgt.state.vel.z) * tof * lead
 	var d := at - muzzle
 	var dx := Vector2(d.x, d.z).length()
 	var yaw := atan2(-d.x, -d.z)

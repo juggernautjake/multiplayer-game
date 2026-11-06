@@ -32,6 +32,8 @@ var sprite: Sprite3D
 var blob: MeshInstance3D  # coloured ring at the feet
 var label: Label3D
 var hp_bar: Sprite3D
+var zap_bar: Sprite3D        # v0.11.0: Thunderhorn's Static build-up, over the health bar
+var zap_back: Sprite3D
 
 var _anim := "idle"
 var _frame := 0
@@ -160,6 +162,9 @@ func _init(player_name: String, color: Color, show_name: bool, outfit := 0) -> v
 	hp_bar.position.y = 2.12
 	hp_bar.visible = show_name
 	add_child(hp_bar)
+	var zb := Avatar.static_bars(self, img, 2.2)
+	zap_back = zb[0]
+	zap_bar = zb[1]
 	_color = color
 	_accent = Sprite3D.new()   # the costume's accent colour pieces, tinted with his colour (v0.9.0)
 	_accent.pixel_size = PIXEL
@@ -186,6 +191,43 @@ func _init(player_name: String, color: Color, show_name: bool, outfit := 0) -> v
 	_carry.render_priority = 1
 	model.add_child(_carry)
 	_show()
+
+
+## v0.11.0: the Static bar over a player's head (a dark back and a violet fill), shared with the 3D figure.
+static func static_bars(owner: Node3D, img: Image, y: float) -> Array:
+	var out := []
+	for i in 2:
+		var b := Sprite3D.new()
+		b.texture = ImageTexture.create_from_image(img)
+		b.pixel_size = 1.0
+		b.scale = Vector3(0.9, 0.07, 1)
+		b.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		b.no_depth_test = true
+		b.position.y = y
+		b.render_priority = i
+		b.modulate = Color(0, 0, 0, 0.6) if i == 0 else Color("b070ff")
+		b.visible = false
+		owner.add_child(b)
+		out.append(b)
+	return out
+
+
+## Fill it from the player's state: stacks out of Boss.static_need; while static-stunned, the stun running out, flashing.
+static func show_static(back: Sprite3D, fill: Sprite3D, st: Sim.PlayerState, shown: bool) -> void:
+	var on := shown and st.dead == 0 and st.zap > 0
+	back.visible = on
+	fill.visible = on
+	if not on:
+		return
+	var k := 0.0
+	if st.zap >= Sim.ZAP_STUN:
+		k = float(st.stun) / Sim.STATIC_STUN
+		fill.modulate = Color("b070ff").lerp(Color.WHITE, 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.02))
+	else:
+		k = float(st.zap) / float(Sim.ZAP_STACK * Boss.static_need(Boss.shown_enraged))
+		fill.modulate = Color("8a5cff").lerp(Color("e6c8ff"), k)
+	fill.scale.x = maxf(0.9 * clampf(k, 0.0, 1.0), 0.001)
+	fill.position.x = 0.0
 
 
 ## PvP on: crossed swords by the name, in red.
@@ -239,7 +281,9 @@ func animate(delta: float, cam: Camera3D) -> void:
 	_speed_scale = clampf(speed / Sim.WALK_SPEED, 0.6, 1.6) if _anim == "walk" else (clampf(speed / Sim.SPRINT_SPEED, 0.7, 1.4) if _anim == "run" else 1.0)
 
 	var a := _clip(_dir_for(cam))
-	if _anim.ends_with("Draw") and state != null:
+	if _anim == "getUp" and state != null:   # getting up follows the knock-down's clock
+		_frame = clampi(int((1.0 - float(state.down) / Sim.DOWN_GETUP) * a.frames), 0, a.frames - 1)
+	elif _anim.ends_with("Draw") and state != null:
 		# the draw follows how far the string is pulled, not the clock
 		var d := Weapons.get_data(state.weapon)
 		_frame = mini(int(float(state.charge) / float(d.draw) * a.frames), a.frames - 1)
@@ -268,6 +312,12 @@ func animate(delta: float, cam: Camera3D) -> void:
 		hp_bar.scale.x = maxf(0.9 * k, 0.001)
 		hp_bar.modulate = Color(0.9, 0.2, 0.2).lerp(Color(0.3, 0.9, 0.3), k)
 		hp_bar.visible = label.visible and state.dead == 0
+		Avatar.show_static(zap_back, zap_bar, state, label.visible)
+		# stunned: dizzy, swaying, crackling violet when it's Static; knocked down: lying, then getting up
+		var dizzy := state.stun > 0 and state.dead == 0
+		sprite.position.x = sin(Time.get_ticks_msec() * 0.008) * 0.06 if dizzy else 0.0
+		if dizzy and state.zap >= Sim.ZAP_STUN and int(Time.get_ticks_msec() / 90) % 4 == 0:
+			sprite.modulate = Color(0.85, 0.7, 1.4)
 
 	var ground := WorldLayout.ground_height(position.x, position.z, position.y)
 	blob.global_position = Vector3(position.x, ground + 0.012, position.z)
@@ -291,6 +341,10 @@ func _pick(speed: float) -> String:
 	var st := state
 	if st != null and st.dead > 0:
 		return "lieDown" if st.dead > Sim.RESPAWN_TICKS - 30 else "lieIdle"
+	if st != null and st.down > 0:   # v0.11.0: thrown by Thunderhorn's rush
+		if st.down <= Sim.DOWN_GETUP:
+			return "getUp"
+		return "lieDown" if st.down > Sim.DOWN_TICKS - 24 or not grounded else "lieIdle"
 	if st != null:
 		var melee := Weapons.is_melee(st.weapon)
 		if melee and st.atk > 0:

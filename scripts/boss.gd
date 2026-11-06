@@ -1,38 +1,100 @@
-## Thunderhorn (v0.10.0), the final boss: a giant storm bull, run by the server (like the golems); every few ticks its
-## state goes to everyone (Net.boss_state) and BossView draws it.
+## Thunderhorn, the final boss: a giant storm bull (about 3.5x a player's height), run by the server (like the golems);
+## every other tick his state goes to everyone (Net.boss_state) and BossView draws it. v0.10.0, reworked in v0.11.0.
 ##
-## It comes down out of a storm in a lightning strike, slams the ground and roars. Then it picks attacks by how far
-## its target is and how they play (never the same pattern twice in a row; weights, not a script), each with a clear
-## wind-up you can read:
-##   charge         head down, a hoof scraping the ground, then a gallop in a straight line, trampling all in its path
-##   stomp          it rears up and slams down: three shockwave rings race out along the ground (jump them)
-##   horn beam      the horns crackle, then a beam of lightning sweeps across in front of it
-##   call lightning warning circles under everyone, then bolts strike them
-##   roar           everyone near it is slowed for 2 s
-##   ball lightning glowing balls that drift after players and burst on them
-##   static field   always on: anyone right next to it takes a shock every half second
-## It goes after whoever is nearest or whoever has hurt it most, splits its attention between two players, and punishes
-## anyone hanging back at range (charges and called lightning). Below half health it ENRAGES (faster, shorter wind-ups,
-## chaining attacks, red-white lightning); below a quarter it calls a storm (strikes keep falling round the arena).
+## THE FIGHT, in order (a designed flow, not just random swings):
+##   opener      he comes down out of a storm in a lightning strike, slams and roars; then circles you and charges.
+##   rotation    he picks attacks by distance and how you play (weights, never the same twice running), moving between
+##               them: circling (STRAFE), backing off (BACKOFF), pouncing hops to a new spot (HOP), snapping round to
+##               face you (TURN) and short feint lunges (LUNGE).
+##   Storm Leap  2-5 times a fight (rules below): leap, ring, homing static orbs, three slams, pawing, the rush.
+##   enrage      below half health he stops, rears and transforms (PHASE 1): red-white lightning, faster, shorter
+##               wind-ups, chaining attacks, the double charge, the beam sweeping both ways, static ball lightning,
+##               the static roar, 5 stacks of Static stun instead of 6.
+##   storm       below a quarter (PHASE 2): the storm breaks over the arena (strikes keep falling), called lightning
+##               walks at you in lines, charges come three at a time.
 ##
-## Its weaknesses and resistances (hurt()):
-##   Lightning, chain lightning: a quarter damage (it's made of lightning)   Fireball: full, and it burns for 3 s
-##   Frost Nova: full, and slowed a lot for 4 s      Stun: only staggers it, shorter each time (diminishing returns)
-##   Earth Spikes: half again as much, and they interrupt a charge      Gravity Well: damage only (can't pull it)
-##   Meteor: half again as much      Arcane Storm, weapons, arrows, stones, golems and the titan: full
-##   The shield blocks its beam and ball lightning (for mana, as usual); Teleport is a good way out of a charge.
-## Two players: 1.7 times the health, and it attacks more often.
+## Attacks (each has a wind-up you can read, a sound and an impact):
+##   charge        head down, a hoof scraping: a gallop in a straight line (enraged: twice; storm: three times)
+##   stomp         he rears up and slams: three rings race out along the ground (jump them); enraged: four slams,
+##                 the last one sending a double ring
+##   horn beam     the horns crackle, then a beam sweeps the ground in front (enraged: back and forth)
+##   call          warning circles under everyone, then bolts (enraged: extra ones; storm: lines walking at you)
+##   roar          slows everyone near for 2 s (enraged: and adds a stack of Static)
+##   ball lightning glowing balls drift after players (enraged: 5 static balls, each adds a stack)
+##   gore          a hooking sweep of the horns in front, for anyone too close
+##   tail lash     he pivots and the spiked tail sweeps round behind him, for anyone at his flank or back
+##   static field  always on: anyone right next to him takes a shock every half second
+##
+## STATIC (v0.11.0): his homing orbs (and static ball lightning, and the static roar) add a stack of Static to a
+## player (Sim.ZAP_STACK). 6 stacks (5 while he is enraged) = stunned for 7 s (Sim.STATIC_STUN). The meter holds 2.5 s
+## after the last hit, then drains a stack every 3.3 s. A held shield blocks the orbs (they bounce off) and adds nothing.
+##
+## STORM LEAP (v0.11.0), the signature sequence:
+##   LEAP_WIND 1.5 s  he crouches, lightning gathers, a charge-up roar; a glowing marker shows where he will land, far
+##                    across the arena (never within 6 m of a player)
+##   LEAP      1.4 s  a huge arc across the arena; landing on someone hurts (22)
+##   landing          a low shockwave ring: JUMP it (it only hits players on the ground: 18)
+##   HOWL      4.3 s  a long roar; 10 homing orbs (one player), 15 (two), +5 per extra player (24 at most), split
+##                    evenly between the living players; limited turn (2.1 rad/s), speeding up 5 -> 14 m/s, gone after
+##                    5 s; strafe or dash past them, hide behind a pillar or shield them (they bounce off). Each hit: 6
+##                    damage and a stack of Static.
+##   SLAMS     2.3 s  three ground slams, three rings in a row (9, 10.5, 12 m/s): jump each
+##   PAW       1.6 s  he paws the ground and snorts, locked on the nearest player; a path glows on the ground
+##   RUSH             a 24 m/s charge down that path: dash sideways in time (a dash is untouchable) or be hit for 30
+##                    (35 enraged) and launched ~15 m, knocked down for 2.3 s (Sim.DOWN_TICKS), getting up at the end
+##   RECOVER   1.2 s  he skids and pants; then back to the rotation
+## When: a leap is guaranteed as his health falls past 80%, 55% and 30%; up to two more come when the players are doing
+## well (average health 70% or more and little damage taken lately: an 18% chance each time he picks an attack, below
+## 92% health); if 75 s pass with fewer than two leaps, he leaps anyway. At most 5 a fight, at least 25 s from the
+## start of one to the start of the next. Phase changes come first; a pending leap waits for the next pick.
+##
+## TARGETING (_retarget): every pick scores each living player: closer is a little better; recent damage dealt to him
+## (threat, fading over ~8 s) and total damage; anyone hanging back past 15 m for 4 s (then he favours charges, called
+## lightning, balls); anyone casting; a finishing bonus for low health (under 35%) but never for someone stunned or
+## knocked down (he lets them get up); no line of sight is a big minus. With two or more players a running share of
+## his attention is kept: whoever has had more than their share is marked down, and after ~6 s on one target the
+## pull to switch grows, so nobody is hunted forever. A golem right in his face counts too.
+##
+## Weaknesses (hurt()): Lightning x1/4 (he's made of it), Earth Spikes and Meteor x1.5 (spikes stop a charge or the rush
+## dead), Fireball burns 3 s, Frost Nova slows a lot for 4 s, stuns only stagger (shorter each time), gravity wells
+## can't move him. The Storm Leap is armoured against staggers except the rush (spikes stop it). Health: hp_for()
+## (x1.7 for two), shorter wind-ups with two or more.
 class_name Boss
 extends RefCounted
 
 const ID := -5000                # its id as a damage target
 const NAME := "Thunderhorn"
-const BASE_HP := 1200
-const RADIUS := 1.7              # its body, for hits
-const HEIGHT := 3.4
-const WALK := 4.5
-const GALLOP := 16.0
-enum S { ENTER, IDLE, WALK, CHARGE_WIND, CHARGE, STOMP_WIND, STOMP, BEAM_WIND, BEAM, CALL, ROAR, BALLS, STAGGER, DEATH }
+## Health (v0.11.0): BASE_HP x (1 + 0.7 per extra player): 7000 alone, 11 900 for two (the old x1.7), 16 800 for three.
+## The math: a level-3 wizard's sustained damage on him, dodging half the time, is about 15 a second (mana comes back
+## at 12 a second: meteors 60 for 45 mana, fireballs ~20 for 22 plus 8 a second of burning, earth spikes 24 a spike
+## from the wand's recharge, sword cuts 8 at most every 0.6 s up close; lightning only 7). 7000 / 15 = ~7.8 minutes.
+const BASE_HP := 7000
+const HP_PER_EXTRA := 0.7
+const RADIUS := 2.8              # his body, for hits (v0.11.0: about 3.5x a player)
+const HEIGHT := 6.4
+const HEAD_Y := 4.7
+const WALK := 6.0
+const GALLOP := 19.0
+const RUSH_V := 24.0
+const LEAP_H := 14.0
+const LEAP_AIR := 84
+const LEAP_HP := [0.8, 0.55, 0.3]
+const LEAP_MAX := 5
+const LEAP_GAP := 1500           # ticks between the starts of two sequences
+const LEAP_FALLBACK := 4500      # 75 s without one (and fewer than two so far): leap anyway
+const ORB_V0 := 6.0
+const ORB_VMAX := 15.0
+const ORB_ACC := 5.0
+const ORB_TURN := 2.8            # rad/s
+const ORB_LIFE := 330
+const ORB_DMG := 6
+enum S { ENTER, IDLE, WALK, CHARGE_WIND, CHARGE, STOMP_WIND, STOMP, BEAM_WIND, BEAM, CALL, ROAR, BALLS, STAGGER, DEATH,
+	STRAFE, BACKOFF, HOP, TURN, GORE_WIND, GORE, TAIL_WIND, TAIL, PHASE, LEAP_WIND, LEAP, LEAP_LAND, HOWL, SLAMS, PAW,
+	RUSH, RECOVER, LUNGE }
+const SEQ := [S.LEAP_WIND, S.LEAP, S.LEAP_LAND, S.HOWL, S.SLAMS, S.PAW, S.RUSH, S.RECOVER]
+const MOVES := [S.STRAFE, S.BACKOFF, S.HOP, S.TURN, S.LUNGE]
+
+static var shown_enraged := false   # clients: set by BossView, read by the Static meters
 
 var pos := Vector3.ZERO
 var yaw := 0.0
@@ -40,6 +102,7 @@ var hp := BASE_HP
 var max_hp := BASE_HP
 var state := S.ENTER
 var t := 0
+var total_t := 0
 var players_n := 1
 var target := 0
 var slow := 0
@@ -47,39 +110,100 @@ var burn := 0
 var burn_from := 0
 var enraged := false
 var storm := false
+var phase := 0
+var want_phase := 0
 var damage_by := {}
-var last_attack := ""
-var cooldown := {}
+var threat := {}                 # player -> recent damage to him (fades)
+var attention := {}              # player -> ticks he has spent on them
+var focus_t := 0
+var far_t := {}                  # player -> ticks spent hanging back
+var last_hp := {}
+var last_p := {}                 # player -> last position (to estimate velocity for the orbs' lead)
+var pvel := {}                   # player -> smoothed velocity
+var orb_sent := {}               # player -> orbs launched at them this fight
+var hurt_recent := 0.0           # damage the players took lately (fades)
+var recent: Array = []           # the last attacks
+var plan: Array = []             # what comes next, before choosing (the opener, double charges)
+var moved := false
+var rep := 0                     # charges left in a multi-charge, slams left...
+var variant := 0                 # the attack's variant (0 plain, 1 enraged form, 2 storm form)
 var charge_dir := Vector2.ZERO
 var charge_hit := {}
 var beam_a := 0.0
 var beam_from := 0.0
 var beam_to := 0.0
-var rings: Array = []            # stomp shockwaves: [radius, hit ids]
-var balls: Array = []            # [pos, vel, life]
-var stuns: Array = []            # ticks it was stunned (diminishing returns)
-var far_t := 0                   # ticks its target has hung back at range
+var move_side := 1.0
+var move_len := 60
+var hop_from := Vector3.ZERO
+var hop_to := Vector3.ZERO
+var leap_from := Vector3.ZERO
+var leap_to := Vector3.ZERO
+var leaps := 0
+var leap_sure := 0               # guaranteed leaps used (health marks and the fallback)
+var leap_bonus := 0
+var last_leap := -100000
+var rush_target := 0
+var orb_plan := 0                # orbs still to launch this howl
+var orb_total := 0
+var orb_rot := 0
+var big_hit_t := -100000
+var rings: Array = []            # [radius, hit ids, centre, speed, damage, kind]
+var balls: Array = []            # [pos, vel, life, static]
+var orbs: Array = []             # [pos, vel, target, life, age, spent]
+var stuns: Array = []
 var rng := RandomNumberGenerator.new()
-var done := false                # its death has played out
+var done := false
 # what the server applies this tick (Net reads and clears them)
 var hits: Array = []             # [target, amount, dir, knock]
 var fx: Array = []               # [kind, args]
 var slows: Array = []            # [player id, ticks]
 var strikes: Array = []          # [point, delay ticks]: called lightning
+var zaps: Array = []             # [player id, damage, dir, blocked]: static hits
+var launches: Array = []         # [player id, dir]: the rush
 
 
 func _init(at: Vector3, n_players: int, seed_v := 0) -> void:
 	pos = at
 	players_n = n_players
-	max_hp = int(BASE_HP * (1.7 if n_players >= 2 else 1.0))
+	max_hp = hp_for(n_players)
 	hp = max_hp
 	rng.seed = seed_v if seed_v != 0 else randi()
 	fx.append(["boss_enter", [pos]])
+	plan = ["strafe", "charge"]   # the opener
+
+
+static func hp_for(n_players: int) -> int:
+	return int(BASE_HP * (1.0 + HP_PER_EXTRA * (maxi(n_players, 1) - 1)))
+
+
+## Someone joined the fight mid-way: more health, in proportion (he doesn't heal back to full).
+func add_fighter() -> void:
+	players_n += 1
+	var k := float(hp) / float(max_hp)
+	max_hp = hp_for(players_n)
+	hp = maxi(int(round(max_hp * k)), 1)
+
+
+static func static_need(is_enraged: bool) -> int:
+	return 5 if is_enraged else 6
+
+
+## Homing orbs in one howl: 10 alone, 15 with two, 5 more for each extra player, 24 at most.
+static func homing_count(n_players: int) -> int:
+	return mini(5 + 5 * maxi(n_players, 1), 24)
+
+
+static func arena_c() -> Vector3:
+	return Vector3(WorldLayout.ALTAR_C.x, 0, WorldLayout.ALTAR_C.y + 10.0)
 
 
 func _go(s: int) -> void:
 	state = s
 	t = 0
+
+
+func in_sequence() -> bool:
+	return state in SEQ
 
 
 func speed_k() -> float:
@@ -90,8 +214,8 @@ func windup_k() -> float:
 	return (0.68 if enraged else 1.0) * (0.85 if players_n >= 2 else 1.0)
 
 
-## Damage it (after its resistances); from: the attacker (player id, -1000 - golem id, 0); spell: the spell's name, or
-## "" for weapons, golems and anything else. -> what it really took.
+## Damage him (after his resistances); from: the attacker (player id, -1000 - golem id, 0); spell: the spell's name, or
+## "" for weapons, golems and anything else. -> what he really took.
 func hurt(amount: int, from: int, spell: String) -> int:
 	if state == S.ENTER or state == S.DEATH:
 		return 0
@@ -101,7 +225,8 @@ func hurt(amount: int, from: int, spell: String) -> int:
 			k = 0.25
 		"Earth Spikes":
 			k = 1.5
-			if state == S.CHARGE or state == S.CHARGE_WIND:
+			if state in [S.CHARGE, S.CHARGE_WIND, S.RUSH, S.PAW]:
+				rep = 0
 				_go(S.STAGGER)   # the spikes stop a charge dead
 				fx.append(["boss_stagger", [pos]])
 		"Meteor":
@@ -113,28 +238,38 @@ func hurt(amount: int, from: int, spell: String) -> int:
 	hp = maxi(hp - dmg, 0)
 	if from != 0:
 		damage_by[from] = int(damage_by.get(from, 0)) + dmg
+		threat[from] = float(threat.get(from, 0.0)) + dmg
 	if not enraged and hp < max_hp / 2:
 		enraged = true
+		want_phase = maxi(want_phase, 1)
 		fx.append(["boss_enrage", [pos]])
 	if not storm and hp < max_hp / 4:
 		storm = true
+		want_phase = 2
 		fx.append(["boss_storm", [pos]])
 	if hp == 0:
 		_go(S.DEATH)
+		orbs.clear()
 		fx.append(["boss_death", [pos]])
-	elif dmg >= 25 and state in [S.IDLE, S.WALK]:
+	elif dmg >= 60 and not in_sequence() and state not in [S.PHASE, S.STAGGER] and total_t - big_hit_t > 600:
+		big_hit_t = total_t   # a really big hit staggers him (once in 10 s)
+		_go(S.STAGGER)
+		t = 15
+		fx.append(["boss_stagger", [pos]])
+	elif dmg >= 25 and state in [S.IDLE, S.WALK, S.STRAFE]:
 		fx.append(["boss_flinch", [pos]])
 	return dmg
 
 
-## A stun only staggers it, shorter every time within 10 s (half, a quarter...).
+## A stun only staggers him, shorter every time within 10 s (half, a quarter...); the Storm Leap shrugs it off.
 func stunned(now: int) -> void:
 	stuns = stuns.filter(func(x): return now - int(x) < 600)
 	stuns.append(now)
-	if state in [S.ENTER, S.DEATH]:
+	if state in [S.ENTER, S.DEATH, S.PHASE] or (in_sequence() and state != S.RUSH):
 		return
 	var ticks := int(45.0 * pow(0.5, stuns.size() - 1))
 	if ticks >= 6:
+		rep = 0
 		_go(S.STAGGER)
 		t = 45 - ticks
 		fx.append(["boss_stagger", [pos]])
@@ -144,9 +279,28 @@ func frosted() -> void:
 	slow = 240
 
 
-## One server tick. people: [[id, position, alive, shielded]]; golems: [[golem id, position]].
+# ================================================================ people: [id, pos, alive, shielded, hp, dash ticks,
+# casting, helpless (stunned or knocked down)]; Net sends all of them, tests may send only the first four
+static func _p_hp(p: Array) -> int:
+	return int(p[4]) if p.size() > 4 else Sim.MAX_HP
+
+
+static func _p_dash(p: Array) -> bool:
+	return p.size() > 5 and int(p[5]) > 0
+
+
+static func _p_cast(p: Array) -> bool:
+	return p.size() > 6 and bool(p[6])
+
+
+static func _p_helpless(p: Array) -> bool:
+	return p.size() > 7 and bool(p[7])
+
+
+## One server tick. people: as above; golems: [[golem id, position]].
 func tick(now: int, people: Array, golems: Array) -> void:
 	t += 1
+	total_t += 1
 	if slow > 0:
 		slow -= 1
 	if burn > 0:
@@ -157,11 +311,12 @@ func tick(now: int, people: Array, golems: Array) -> void:
 		done = t > 180
 		return
 	var living := people.filter(func(p): return p[2])
-	# the static field: a shock to anyone right next to it, twice a second
-	if now % 30 == 0 and state != S.ENTER:
+	_track(living)
+	# the static field: a shock to anyone right next to him, twice a second
+	if now % 30 == 0 and state not in [S.ENTER, S.LEAP]:
 		for p in living:
 			var d := _flat(p[1] - pos)
-			if d.length() < RADIUS + 1.6:
+			if d.length() < RADIUS + 1.4 and (p[1] as Vector3).y < pos.y + 3.0:
 				hits.append([p[0], 6 if enraged else 4, Vector3(d.x, 0, d.y), 2.0])
 	# the storm, below a quarter: strikes keep falling round the arena
 	if storm and now % 50 == 0 and not living.is_empty():
@@ -169,7 +324,9 @@ func tick(now: int, people: Array, golems: Array) -> void:
 		strikes.append([(p[1] as Vector3) + Vector3(rng.randf_range(-4, 4), 0, rng.randf_range(-4, 4)), 50])
 	_tick_balls(living)
 	_tick_rings(living, golems)
+	_tick_orbs(living)
 	var tp = _target_pos(living, golems)
+	var wk := windup_k()
 	match state:
 		S.ENTER:
 			if t >= 150:
@@ -177,37 +334,81 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				_go(S.IDLE)
 		S.IDLE:
 			if tp != null:
-				_turn_to(tp, 0.06)
-			if t >= int(rng.randi_range(18, 45) * windup_k()):
-				_choose(living, golems, tp)
+				_turn_to(tp, 0.07)
+			if t >= int(rng.randi_range(14, 36) * wk):
+				_choose(living, golems)
 		S.WALK:
 			if tp == null:
 				_go(S.IDLE)
 			else:
-				_turn_to(tp, 0.08)
+				_turn_to(tp, 0.09)
 				var d := _flat(tp - pos)
-				var want: float = cooldown.get("_want", 5.0)
-				if d.length() > want:
-					var step := d.normalized() * WALK * speed_k() * Config.DT
-					pos += Vector3(step.x, 0, step.y)
-				if d.length() <= want or t > 150:
-					_attack(str(cooldown.get("_next", "stomp")), tp)
-		S.CHARGE_WIND:   # head down, a hoof scraping: then it goes
-			if tp != null and t < 30:
+				if d.length() > RADIUS + 3.0:
+					_step(d.normalized() * WALK * 1.2 * speed_k())
+				if d.length() <= RADIUS + 3.5 or t > 150:
+					_attack(str(plan.pop_front()) if not plan.is_empty() else "stomp", tp)
+		# ---- manoeuvres
+		S.STRAFE:   # circling the target, side-on, keeping 8-14 m
+			if tp == null or t >= move_len:
+				_after_move()
+			else:
 				_turn_to(tp, 0.12)
-			if t >= int(50 * windup_k()):
+				var d := _flat(tp - pos)
+				var tang := Vector2(-d.y, d.x).normalized() * move_side
+				var radial := d.normalized() * clampf((d.length() - 11.0) * 0.25, -0.6, 0.6)
+				_step((tang + radial).normalized() * WALK * speed_k())
+		S.BACKOFF:  # backing away, still facing them
+			if tp == null or t >= move_len:
+				_after_move()
+			else:
+				_turn_to(tp, 0.12)
+				_step(-_flat(tp - pos).normalized() * WALK * 0.9 * speed_k())
+		S.HOP:      # a crouch, a pounce to a new spot, a heavy landing
+			if t == 1:
+				fx.append(["boss_hop", [pos, hop_to]])
+			var u := clampf(float(t - 10) / 30.0, 0.0, 1.0)
+			if t > 10:
+				pos = hop_from.lerp(hop_to, u)
+				pos.y = 4.0 * 3.0 * u * (1.0 - u)
+			if tp != null:
+				_turn_to(tp, 0.08)
+			if t >= 40:
+				pos = hop_to
+				fx.append(["boss_hop_land", [pos]])
+				_after_move()
+		S.TURN:     # snapping round to face, hooves stamping
+			if t == 1:
+				fx.append(["boss_turn", [pos, yaw]])
+			if tp != null:
+				_turn_to(tp, 0.28)
+			if t >= 22:
+				_after_move()
+		S.LUNGE:    # a short feint lunge, closing in
+			if t == 1:
+				fx.append(["boss_lunge", [pos, yaw]])
+			if tp != null:
+				var d := _flat(tp - pos)
+				_turn_to(tp, 0.15)
+				if t > 6 and d.length() > RADIUS + 3.0:
+					_step(Vector2(-sin(yaw), -cos(yaw)) * 13.0 * speed_k())
+			if t >= 26:
+				_after_move()
+		# ---- attacks
+		S.CHARGE_WIND:   # head down, a hoof scraping: then he goes
+			if tp != null and t < int(34 * wk):
+				_turn_to(tp, 0.14)
+			if t % 18 == 9:
+				fx.append(["boss_scrape", [pos, yaw]])
+			if t >= int(50 * wk):
 				charge_dir = Vector2(-sin(yaw), -cos(yaw))
 				charge_hit = {}
 				fx.append(["boss_charge", [pos, yaw]])
 				_go(S.CHARGE)
 		S.CHARGE:
-			var step := charge_dir * GALLOP * speed_k() * Config.DT
-			pos += Vector3(step.x, 0, step.y)
-			pos.x = clampf(pos.x, -Config.WORLD_HALF + 5, Config.WORLD_HALF - 5)
-			pos.z = clampf(pos.z, -Config.WORLD_HALF + 5, Config.WORLD_HALF - 5)
+			_step(charge_dir * GALLOP * speed_k())
 			for p in living:
 				var d := _flat(p[1] - pos)
-				if d.length() < RADIUS + 0.9 and not charge_hit.has(p[0]):
+				if d.length() < RADIUS + 0.9 and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
 					charge_hit[p[0]] = true
 					hits.append([p[0], 30 if enraged else 25, Vector3(charge_dir.x + d.normalized().x, 0, charge_dir.y + d.normalized().y), 13.0])
 			for g in golems:
@@ -215,110 +416,346 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				if d.length() < RADIUS + 0.7 and not charge_hit.has(-1000 - int(g[0])):
 					charge_hit[-1000 - int(g[0])] = true
 					hits.append([-1000 - int(g[0]), 25, Vector3(charge_dir.x, 0, charge_dir.y), 0.0])
-			if t >= 80:
-				fx.append(["boss_skid", [pos]])
-				_after()
-		S.STOMP_WIND:   # it rears up
-			if t >= int(40 * windup_k()):
-				fx.append(["boss_stomp", [pos]])
-				rings.append([RADIUS, {}])
+			var past := true
+			if tp != null:
+				var d := _flat(tp - pos)
+				past = d.dot(charge_dir) < -7.0
+			if t >= 80 or (t > 30 and past) or _flat(pos - arena_c()).length() > WorldLayout.ARENA_R + 6.0:
+				fx.append(["boss_skid", [pos, yaw]])
+				if rep > 0:
+					rep -= 1
+					_go(S.CHARGE_WIND)
+					t = int(16 * wk)   # a shorter wind-up for the next one
+				else:
+					_after()
+		S.STOMP_WIND:   # he rears up
+			if t >= int(40 * wk):
+				_slam(9.0, 13)
 				_go(S.STOMP)
 		S.STOMP:
-			if t == 24 or t == 48:
-				rings.append([RADIUS, {}])
-				fx.append(["boss_stomp", [pos]])
-			if t >= 60:
+			var every := 24
+			if t % every == 0 and t / every < (4 if variant > 0 else 3):
+				_slam(9.0 + t / every, 13)
+				if variant > 0 and t / every == 3:
+					rings.append([RADIUS - 1.6, {}, Vector3(pos.x, 0, pos.z), 9.5, 15, 0])   # the double ring
+			if t >= (4 if variant > 0 else 3) * every + 12:
 				_after()
 		S.BEAM_WIND:    # the horns crackle and glow
 			if tp != null:
 				_turn_to(tp, 0.1)
-			if t >= int(45 * windup_k()):
-				var sweep := deg_to_rad(110.0 if not enraged else 150.0)
+			if t >= int(45 * wk):
+				var sweep := deg_to_rad(110.0 if variant == 0 else 150.0)
 				var side := 1.0 if rng.randf() < 0.5 else -1.0
 				beam_from = yaw - side * sweep * 0.5
 				beam_to = yaw + side * sweep * 0.5
 				beam_a = beam_from
-				fx.append(["boss_beam", [pos, beam_from, beam_to, 90]])
+				fx.append(["boss_beam", [pos, beam_from, beam_to, 90 if variant == 0 else 160]])
 				_go(S.BEAM)
 		S.BEAM:
-			beam_a = lerp_angle(beam_from, beam_to, clampf(float(t) / 90.0, 0.0, 1.0))
+			var length := 90 if variant == 0 else 160
+			if t <= 90:
+				beam_a = lerp_angle(beam_from, beam_to, clampf(float(t) / 90.0, 0.0, 1.0))
+			else:   # and back again
+				beam_a = lerp_angle(beam_to, beam_from, clampf(float(t - 90) / 70.0, 0.0, 1.0))
 			if t % 6 == 0:
-				var o := pos + Vector3(0, 2.4, 0)
-				var dir := Vector3(-sin(beam_a), 0, -cos(beam_a))
+				var dir := Vector2(-sin(beam_a), -cos(beam_a))
 				for p in living:
-					var rel: Vector3 = (p[1] as Vector3) + Vector3(0, 1.0, 0) - o
+					var rel := _flat(p[1] - pos)
 					var along := rel.dot(dir)
-					if along > 0.5 and along < 18.0 and (rel - dir * along).length() < 1.1:
-						hits.append([p[0], 7 if enraged else 5, dir, 3.0])
-			if t >= 90:
+					if along > RADIUS and along < 24.0 and absf(rel.cross(dir)) < 1.3 and (p[1] as Vector3).y < 2.6:
+						hits.append([p[0], 7 if enraged else 5, Vector3(dir.x, 0, dir.y), 3.0])
+			if t >= length:
 				_after()
-		S.CALL:         # it rears and bellows at the sky: warning circles under everyone, then bolts
+		S.CALL:         # he rears and bellows at the sky: warning circles under everyone, then bolts
 			if t == 20:
 				for p in living:
-					strikes.append([(p[1] as Vector3) + Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)), 60])
-					if enraged:
-						strikes.append([(p[1] as Vector3) + Vector3(rng.randf_range(-4, 4), 0, rng.randf_range(-4, 4)), 75])
+					var at: Vector3 = p[1]
+					if variant == 2:   # storm: a line of strikes walking at them
+						var from := _flat(at - pos).normalized()
+						for i in 6:
+							var q := at - Vector3(from.x, 0, from.y) * (10.0 - i * 2.0)
+							strikes.append([Vector3(q.x, 0, q.z), 40 + i * 8])
+						strikes.append([at + Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)), 95])
+					else:
+						strikes.append([at + Vector3(rng.randf_range(-1, 1), 0, rng.randf_range(-1, 1)), 60])
+						if variant == 1:
+							strikes.append([at + Vector3(rng.randf_range(-4, 4), 0, rng.randf_range(-4, 4)), 75])
 			if t >= 60:
 				_after()
 		S.ROAR:
 			if t == 15:
 				fx.append(["boss_roar", [pos, 1 if enraged else 2]])
 				for p in living:
-					if (p[1] as Vector3).distance_to(pos) < 15.0:
+					var dd := (p[1] as Vector3).distance_to(pos)
+					if dd < 16.0:
 						slows.append([p[0], 120])
+					if variant > 0 and dd < 13.0:
+						zaps.append([p[0], 0, (p[1] as Vector3) - pos, bool(p[3])])   # the static roar
 			if t >= 60:
 				_after()
 		S.BALLS:
 			if t == 20:
-				for i in (5 if enraged else 3):
-					var a := yaw + (float(i) - 1.0) * 0.6
-					balls.append([pos + Vector3(-sin(a) * 2.0, 2.2, -cos(a) * 2.0), Vector3(-sin(a), 0.2, -cos(a)) * 4.0, 360])
-				fx.append(["boss_balls", [pos]])
+				var n := 5 if variant > 0 else 3
+				for i in n:
+					var a := yaw + (float(i) - (n - 1) * 0.5) * 0.5
+					balls.append([pos + Vector3(-sin(a) * 3.0, HEAD_Y - 0.5, -cos(a) * 3.0), Vector3(-sin(a), 0.2, -cos(a)) * 4.0, 360, variant > 0])
+				fx.append(["boss_balls", [pos, variant]])
 			if t >= 45:
 				_after()
-		S.STAGGER:
+		S.GORE_WIND:   # the head drops and swings back to one side
+			if tp != null:
+				_turn_to(tp, 0.16)
+			if t >= int(26 * wk):
+				fx.append(["boss_gore", [pos, yaw]])
+				_go(S.GORE)
+		S.GORE:
+			if t == 6:
+				var fwd := Vector2(-sin(yaw), -cos(yaw))
+				for p in living:
+					var d := _flat(p[1] - pos)
+					if d.length() < RADIUS + 3.4 and d.normalized().dot(fwd) > 0.35 and (p[1] as Vector3).y < 4.0:
+						hits.append([p[0], 20 if enraged else 16, Vector3(d.x + fwd.x, 0.3, d.y + fwd.y), 11.0])
+			if t >= 24:
+				_after()
+		S.TAIL_WIND:   # the body coils, the tail lifts
+			if t >= int(24 * wk):
+				fx.append(["boss_tail", [pos, yaw, move_side]])
+				_go(S.TAIL)
+		S.TAIL:
+			if t < 14:
+				yaw += 0.07 * move_side   # he pivots into it
+			if t == 9:
+				var fwd := Vector2(-sin(yaw), -cos(yaw))
+				for p in living:
+					var d := _flat(p[1] - pos)
+					if d.length() < RADIUS + 4.8 and d.normalized().dot(fwd) < 0.3 and (p[1] as Vector3).y < 3.0:
+						hits.append([p[0], 18 if enraged else 14, Vector3(d.x, 0.2, d.y), 12.0])
+			if t >= 32:
+				_after()
+		S.STAGGER:     # stumbling
 			if t >= 45:
 				_go(S.IDLE)
+		S.PHASE:       # he rears and transforms: the phase change
+			if t == 40:
+				fx.append(["boss_phase", [pos, phase]])
+				rings.append([RADIUS, {}, Vector3(pos.x, 0, pos.z), 11.0, 10, 1])
+				if phase == 2:
+					for p in living:
+						strikes.append([(p[1] as Vector3) + Vector3(rng.randf_range(-3, 3), 0, rng.randf_range(-3, 3)), 50])
+			if t >= 130:
+				_go(S.IDLE)
+				t = 999
+		# ---- the Storm Leap
+		S.LEAP_WIND:
+			if tp != null and t < 40:
+				_turn_to(tp, 0.05)
+			if t >= 90:
+				leap_from = Vector3(pos.x, 0, pos.z)
+				var dl := _flat(leap_to - pos)
+				if dl.length() > 0.1:
+					yaw = atan2(-dl.x, -dl.y)
+				fx.append(["boss_leap", [pos, leap_to, LEAP_AIR]])
+				_go(S.LEAP)
+		S.LEAP:
+			var u := clampf(float(t) / LEAP_AIR, 0.0, 1.0)
+			pos = leap_from.lerp(leap_to, u)
+			pos.y = 4.0 * LEAP_H * u * (1.0 - u)
+			if t >= LEAP_AIR:
+				pos = leap_to
+				fx.append(["boss_leap_land", [pos]])
+				for p in living:   # right under him
+					var d := _flat(p[1] - pos)
+					if d.length() < RADIUS + 1.2:
+						hits.append([p[0], 22, Vector3(d.x, 0, d.y), 12.0])
+				rings.append([RADIUS, {}, Vector3(pos.x, 0, pos.z), 10.0, 18, 1])
+				_go(S.LEAP_LAND)
+		S.LEAP_LAND:
+			if t >= 40:
+				orb_total = homing_count(maxi(living.size(), 1))
+				orb_plan = orb_total
+				orb_rot = rng.randi() % 8
+				fx.append(["boss_howl", [pos, orb_total]])
+				_go(S.HOWL)
+		S.HOWL:
+			if tp != null:
+				_turn_to(tp, 0.03)
+			if orb_plan > 0 and t >= 30 and not living.is_empty():
+				var at := 30 + int(170.0 * float(orb_total - orb_plan) / float(maxi(orb_total - 1, 1)))
+				while orb_plan > 0 and t >= at:
+					_launch_orb(living, orb_total - orb_plan)
+					orb_plan -= 1
+					at = 30 + int(170.0 * float(orb_total - orb_plan) / float(maxi(orb_total - 1, 1)))
+			if t >= 260:
+				_go(S.SLAMS)
+		S.SLAMS:
+			if t == 30 or t == 70 or t == 110:
+				var k := (t - 30) / 40
+				_slam(9.0 + 1.5 * k, 15)
+			if t >= 140:
+				var best = null
+				var bd := INF
+				for p in living:
+					var dd := (p[1] as Vector3).distance_to(pos)
+					if dd < bd and not _p_helpless(p):
+						bd = dd
+						best = p
+				if best == null and not living.is_empty():
+					best = living[0]
+				if best == null:
+					_end_leap()
+				else:
+					rush_target = int(best[0])
+					target = rush_target
+					fx.append(["boss_paw", [pos, yaw, rush_target]])
+					_go(S.PAW)
+		S.PAW:
+			var rp = null
+			for p in living:
+				if int(p[0]) == rush_target:
+					rp = p[1]
+			if rp != null and t < 78:
+				_turn_to(rp, 0.12)
+			if t % 20 == 5:
+				fx.append(["boss_scrape", [pos, yaw]])
+			if t >= 96:
+				charge_dir = Vector2(-sin(yaw), -cos(yaw))
+				charge_hit = {}
+				fx.append(["boss_rush", [pos, yaw]])
+				_go(S.RUSH)
+		S.RUSH:
+			_step(charge_dir * RUSH_V * (0.6 if slow > 0 else 1.0))
+			for p in living:
+				var d := _flat(p[1] - pos)
+				if d.length() < RADIUS + 0.8 and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
+					charge_hit[p[0]] = true
+					if _p_dash(p):   # dashed: untouchable
+						fx.append(["boss_dodged", [p[1]]])
+						continue
+					var side := d.normalized() * 0.5
+					var dir := Vector3(charge_dir.x + side.x, 0, charge_dir.y + side.y).normalized()
+					hits.append([p[0], 35 if enraged else 30, dir, 0.0])
+					launches.append([p[0], dir])
+			var past := true
+			for p in living:
+				if int(p[0]) == rush_target:
+					past = _flat(p[1] - pos).dot(charge_dir) < -8.0
+			if t >= 70 or (t > 20 and past) or _flat(pos - arena_c()).length() > WorldLayout.ARENA_R + 7.0:
+				fx.append(["boss_skid", [pos, yaw]])
+				_go(S.RECOVER)
+		S.RECOVER:
+			if t == 20:
+				fx.append(["boss_pant", [pos]])
+			if t >= 70:
+				_end_leap()
 
 
-## After an attack: enraged, it often goes straight into the next one; otherwise a moment's pause.
+func _end_leap() -> void:
+	_go(S.IDLE)
+	moved = true
+
+
+## A slam: a ring racing out over the ground from his front hooves, and its fx.
+func _slam(speed: float, dmg: int) -> void:
+	var c := Vector3(pos.x, 0, pos.z)
+	rings.append([RADIUS, {}, c, speed, dmg + (3 if enraged else 0), 0])
+	fx.append(["boss_stomp", [c, rings.size()]])
+
+
+func _step(v: Vector2) -> void:
+	pos += Vector3(v.x, 0, v.y) * Config.DT
+	pos.x = clampf(pos.x, -Config.WORLD_HALF + 6, Config.WORLD_HALF - 6)
+	pos.z = clampf(pos.z, -Config.WORLD_HALF + 6, Config.WORLD_HALF - 6)
+
+
+## After an attack: enraged, he often goes straight into the next one; otherwise a moment's pause.
 func _after() -> void:
+	_go(S.IDLE)
+	moved = false
 	if enraged and rng.randf() < 0.45:
-		_go(S.IDLE)
 		t = 999   # choose at once
-	else:
-		_go(S.IDLE)
 
 
-## Pick the next attack: by the target's distance and habits, never the same one twice running if it can help it.
-func _choose(living: Array, golems: Array, tp) -> void:
+func _after_move() -> void:
+	_go(S.IDLE)
+	moved = true
+	t = 999
+
+
+# ================================================================ choosing
+func _choose(living: Array, golems: Array) -> void:
+	if want_phase > phase:   # the phase change comes first
+		phase = want_phase
+		plan.clear()
+		_go(S.PHASE)
+		fx.append(["boss_phase_wind", [pos, phase]])
+		return
+	if _want_leap(living):
+		_start_leap(living)
+		return
+	if not plan.is_empty():
+		_retarget(living, golems)
+		var tp0 = _target_pos(living, golems)
+		if tp0 != null:
+			_do(str(plan.pop_front()), tp0)
+		return
 	_retarget(living, golems)
-	tp = _target_pos(living, golems)
+	var tp = _target_pos(living, golems)
 	if tp == null:
 		return
-	var d := _flat(tp - pos).length()
-	if d > 14.0:
-		far_t += 30
-	else:
-		far_t = maxi(far_t - 30, 0)
-	var punish := 2.0 if far_t > 240 else 1.0   # hanging back at range for 4 s: charges and lightning
+	var rel := _flat(tp - pos)
+	var d := rel.length()
+	var ang := absf(wrapf(atan2(-rel.x, -rel.y) - yaw, -PI, PI))
+	var los := _los(pos + Vector3(0, HEAD_Y, 0), (tp as Vector3) + Vector3(0, 1.2, 0))
+	# a manoeuvre first, now and then (never two in a row)
+	if not moved:
+		if ang > 1.9 and d > RADIUS + 3.0:
+			_do("turn", tp)
+			return
+		if not los:
+			_do("hop" if rng.randf() < 0.6 else "call", tp)
+			return
+		var r := rng.randf()
+		if d < RADIUS + 2.2 and r < 0.3:
+			_do("backoff", tp)
+			return
+		if r < 0.18:
+			_do("strafe", tp)
+			return
+		if r < 0.26 and d > 9.0 and d < 18.0:
+			_do("hop", tp)
+			return
+		if r < 0.34 and d > 8.0 and d < 14.0:
+			_do("lunge", tp)
+			return
+	moved = false
+	var far := 0
+	if target > 0:
+		far = int(far_t.get(target, 0))
+	var punish := 2.0 if far > 240 else 1.0   # hanging back at range for 4 s: charges and lightning
+	var casting := false
+	for p in living:
+		if p[0] == target and _p_cast(p):
+			casting = true
 	var near_golem := false
 	for g in golems:
 		if (g[1] as Vector3).distance_to(pos) < RADIUS + 2.5:
 			near_golem = true
+	var close := RADIUS + 4.0
 	var w := {
-		"charge": (3.0 if d > 8.0 else (1.2 if d > 4.0 else 0.2)) * punish,
-		"call": (2.5 if d > 10.0 else 0.8) * punish,
-		"balls": 2.0 if d > 8.0 else 0.6,
-		"beam": 2.5 if d > 4.0 and d < 16.0 else 0.4,
-		"stomp": (3.5 if d < 6.0 else 0.5) + (3.0 if near_golem else 0.0),
-		"roar": 0.9 if d < 12.0 else 0.2,
+		"charge": (3.0 if d > 14.0 else (1.4 if d > close else 0.2)) * punish,
+		"call": ((2.5 if d > 14.0 else 0.8) + (1.0 if casting else 0.0)) * punish,
+		"balls": (2.0 if d > 14.0 else (1.2 if d > close else 0.4)) + (1.0 if casting else 0.0),
+		"beam": 2.5 if d > close and d < 20.0 else 0.4,
+		"stomp": (3.0 if d < close + 2.0 else 0.4) + (3.0 if near_golem else 0.0),
+		"roar": 0.9 if d < 14.0 else 0.2,
+		"gore": 3.0 if d < close and ang < 0.8 else 0.0,
+		"tail": (4.0 if ang > 0.9 else 1.0) if d < close + 1.0 else 0.0,
 	}
 	for k in w.keys():
-		if k == last_attack:
-			w[k] *= 0.15
-		if int(cooldown.get(k, 0)) > 0:
-			w[k] *= 0.3
+		if recent.size() > 0 and k == recent[-1]:
+			w[k] *= 0.12
+		elif k in recent:
+			w[k] *= 0.45
 	var total := 0.0
 	for k in w:
 		total += float(w[k])
@@ -329,58 +766,223 @@ func _choose(living: Array, golems: Array, tp) -> void:
 		if x <= 0.0:
 			pick = k
 			break
-	# the stomp and the roar want it close: walk in first
-	if pick in ["stomp", "roar"] and d > 6.0:
-		cooldown["_want"] = 4.5
-		cooldown["_next"] = pick
+	# the stomp and the roar want him close: he walks in first
+	if pick in ["stomp", "roar"] and d > close + 3.0:
+		plan = [pick]
 		_go(S.WALK)
 		return
 	_attack(pick, tp)
 
 
+func _do(name: String, tp) -> void:
+	var rel := _flat(tp - pos)
+	match name:
+		"strafe":
+			move_side = 1.0 if rng.randf() < 0.5 else -1.0
+			move_len = rng.randi_range(55, 100)
+			_go(S.STRAFE)
+			fx.append(["boss_snort", [pos]])
+		"backoff":
+			move_len = rng.randi_range(40, 60)
+			_go(S.BACKOFF)
+			fx.append(["boss_snort", [pos]])
+		"turn":
+			_go(S.TURN)
+		"lunge":
+			_go(S.LUNGE)
+		"hop":
+			hop_from = Vector3(pos.x, 0, pos.z)
+			hop_to = _hop_spot(tp)
+			_go(S.HOP)
+		_:
+			_attack(name, tp)
+
+
+## A pounce: off to one side of the target (and toward it if far), staying in the arena, preferring a clear view.
+func _hop_spot(tp: Vector3) -> Vector3:
+	var best := Vector3(pos.x, 0, pos.z)
+	var best_s := -INF
+	var c := arena_c()
+	for i in 10:
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(5.0, 9.0)
+		var q := Vector3(pos.x + cos(a) * r, 0, pos.z + sin(a) * r)
+		var off := _flat(q - c).length()
+		if off > WorldLayout.ARENA_R - 2.0:
+			continue
+		var dt := _flat(tp - q).length()
+		var s := -absf(dt - 11.0) - off * 0.05
+		if _los(q + Vector3(0, HEAD_Y, 0), tp + Vector3(0, 1.2, 0)):
+			s += 6.0
+		if s > best_s:
+			best_s = s
+			best = q
+	return best
+
+
 func _attack(pick: String, tp) -> void:
-	last_attack = pick
-	for k in cooldown.keys():
-		if not k.begins_with("_"):
-			cooldown[k] = maxi(int(cooldown[k]) - 1, 0)
-	cooldown[pick] = 2
+	recent.append(pick)
+	if recent.size() > 3:
+		recent.pop_front()
+	variant = 2 if storm else (1 if enraged else 0)
 	match pick:
 		"charge":
+			rep = 0 if variant == 0 else (1 if variant == 1 and rng.randf() < 0.5 else (2 if variant == 2 else 0))
 			_go(S.CHARGE_WIND)
-			fx.append(["boss_charge_wind", [pos, yaw]])
+			fx.append(["boss_charge_wind", [pos, yaw, rep]])
 		"stomp":
 			_go(S.STOMP_WIND)
-			fx.append(["boss_rear", [pos]])
+			fx.append(["boss_rear", [pos, variant]])
 		"beam":
 			_go(S.BEAM_WIND)
-			fx.append(["boss_beam_wind", [pos]])
+			fx.append(["boss_beam_wind", [pos, variant]])
 		"call":
 			_go(S.CALL)
-			fx.append(["boss_call", [pos]])
+			fx.append(["boss_call", [pos, variant]])
 		"roar":
 			_go(S.ROAR)
+			fx.append(["boss_roar_wind", [pos]])
 		"balls":
 			_go(S.BALLS)
+		"gore":
+			_go(S.GORE_WIND)
+			fx.append(["boss_gore_wind", [pos, yaw]])
+		"tail":
+			move_side = 1.0 if rng.randf() < 0.5 else -1.0
+			_go(S.TAIL_WIND)
+			fx.append(["boss_tail_wind", [pos, yaw]])
 
 
-## Who it goes after: the nearest, or whoever has hurt it most (a golem standing in its way counts); with two players
-## it switches between them.
+# ================================================================ the Storm Leap's rules
+func _want_leap(living: Array) -> bool:
+	if leaps >= LEAP_MAX or living.is_empty():
+		return false
+	if total_t - last_leap < LEAP_GAP:
+		return false
+	var frac := float(hp) / float(max_hp)
+	var due := 0
+	for m in LEAP_HP:
+		if frac <= float(m):
+			due += 1
+	if leap_sure < due:
+		leap_sure += 1
+		return true
+	if leaps < 2 and leap_sure < LEAP_HP.size() and total_t - maxi(last_leap, 150) > LEAP_FALLBACK:
+		leap_sure += 1
+		return true
+	if leap_bonus < 2 and frac < 0.92 and _doing_well(living) and rng.randf() < 0.18:
+		leap_bonus += 1
+		return true
+	return false
+
+
+## The players are doing well: average health 70% or more and little damage taken lately.
+func _doing_well(living: Array) -> bool:
+	var sum := 0.0
+	for p in living:
+		sum += float(_p_hp(p)) / float(Sim.MAX_HP)
+	return sum / living.size() >= 0.7 and hurt_recent / living.size() < 15.0
+
+
+func _start_leap(living: Array) -> void:
+	leaps += 1
+	last_leap = total_t
+	plan.clear()
+	rep = 0
+	leap_to = _leap_spot(living)
+	_go(S.LEAP_WIND)
+	fx.append(["boss_leap_wind", [pos, leap_to, 90 + LEAP_AIR]])
+
+
+## Where he lands: far across the arena (16 m or more if it can), never within 6 m of a player, about 10 m from them.
+func _leap_spot(living: Array) -> Vector3:
+	var c := arena_c()
+	var best := c
+	var best_s := -INF
+	for i in 24:
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(2.0, WorldLayout.ARENA_R - 3.0)
+		var q := c + Vector3(cos(a) * r, 0, sin(a) * r)
+		var s := minf(_flat(q - pos).length(), 28.0)
+		if _flat(q - pos).length() < 14.0:
+			s -= 20.0
+		for p in living:
+			var dp := _flat((p[1] as Vector3) - q).length()
+			if dp < 6.0:
+				s -= 30.0
+			s -= absf(dp - 10.0) * 0.4
+		if s > best_s:
+			best_s = s
+			best = q
+	return best
+
+
+# ================================================================ targeting
+func _track(living: Array) -> void:
+	hurt_recent *= 0.9992
+	for k in threat.keys():
+		threat[k] = float(threat[k]) * 0.9985
+	for p in living:
+		var id: int = p[0]
+		var h := _p_hp(p)
+		if last_hp.has(id) and h < int(last_hp[id]):
+			hurt_recent += int(last_hp[id]) - h
+		last_hp[id] = h
+		var at: Vector3 = p[1]
+		if last_p.has(id):
+			var v: Vector3 = (at - (last_p[id] as Vector3)) / Config.DT
+			if v.length() > 30.0:   # a teleport, not a run
+				v = Vector3.ZERO
+			pvel[id] = (pvel.get(id, Vector3.ZERO) as Vector3).lerp(v, 0.15)
+		last_p[id] = at
+		if _flat((p[1] as Vector3) - pos).length() > 15.0:
+			far_t[id] = int(far_t.get(id, 0)) + 1
+		else:
+			far_t[id] = maxi(int(far_t.get(id, 0)) - 2, 0)
+	if target > 0:
+		attention[target] = int(attention.get(target, 0)) + 1
+		focus_t += 1
+
+
+## Who he goes after (see the header): scores every living player; a golem right in his face counts too.
 func _retarget(living: Array, golems: Array) -> void:
 	var best := 0
 	var best_s := -INF
+	var tot := 0.0
 	for p in living:
-		var d := (p[1] as Vector3).distance_to(pos)
-		var s := -d + float(damage_by.get(p[0], 0)) * 0.05 + rng.randf_range(0.0, 6.0)
-		if p[0] == target and players_n >= 2:
-			s -= 4.0   # spread its attention
+		tot += float(attention.get(p[0], 0))
+	var share := tot / maxf(living.size(), 1)
+	for p in living:
+		var id: int = p[0]
+		var at: Vector3 = p[1]
+		var d := _flat(at - pos).length()
+		var s := -d * 0.25
+		s += float(threat.get(id, 0.0)) * 0.05 + float(damage_by.get(id, 0)) * 0.004
+		if int(far_t.get(id, 0)) > 240:
+			s += 2.0
+		if _p_cast(p):
+			s += 1.5
+		if _p_helpless(p):
+			s -= 4.0   # he lets them get up
+		elif _p_hp(p) < 35:
+			s += 2.0
+		if not _los(pos + Vector3(0, HEAD_Y, 0), at + Vector3(0, 1.2, 0)):
+			s -= 4.0
+		if living.size() >= 2:
+			s -= (float(attention.get(id, 0)) - share) / 60.0 * 0.35
+			if id == target:
+				s += 1.0 if focus_t < 360 else -float(focus_t - 360) / 120.0
+		s += rng.randf_range(0.0, 2.0)
 		if s > best_s:
 			best_s = s
-			best = p[0]
+			best = id
 	for g in golems:
 		var d := (g[1] as Vector3).distance_to(pos)
-		if d < 4.0 and -d + 2.0 > best_s:
+		if d < RADIUS + 1.5 and -d + 2.0 > best_s:
 			best_s = -d + 2.0
 			best = -1000 - int(g[0])
+	if best != target:
+		focus_t = 0
 	target = best
 
 
@@ -397,27 +999,38 @@ func _target_pos(living: Array, golems: Array):
 	return null
 
 
+func _los(a: Vector3, b: Vector3) -> bool:
+	var d := b - a
+	var l := d.length()
+	if l < 0.5:
+		return true
+	return WorldLayout.ray_hit(a, d / l, l) >= l - 0.3
+
+
 func _turn_to(tp: Vector3, rate: float) -> void:
 	var d := _flat(tp - pos)
 	if d.length() > 0.1:
 		yaw = lerp_angle(yaw, atan2(-d.x, -d.y), rate * speed_k())
 
 
+# ================================================================ rings, balls, orbs
+## Rings race out over the ground; they only hit those on the ground (jump them). [r, hit, centre, speed, dmg, kind]
 func _tick_rings(living: Array, golems: Array) -> void:
 	for r in rings:
-		r[0] = float(r[0]) + 9.0 * Config.DT
+		r[0] = float(r[0]) + float(r[3]) * Config.DT
+		var c: Vector3 = r[2]
 		for p in living:
 			var dp: Vector3 = p[1]
-			var d := _flat(dp - pos).length()
-			if absf(d - float(r[0])) < 0.7 and dp.y < pos.y + 0.5 and not (r[1] as Dictionary).has(p[0]):   # jump it
+			var d := _flat(dp - c).length()
+			if absf(d - float(r[0])) < 0.7 and dp.y < c.y + 0.5 and not (r[1] as Dictionary).has(p[0]):
 				r[1][p[0]] = true
-				hits.append([p[0], 16 if enraged else 13, Vector3(dp.x - pos.x, 0, dp.z - pos.z), 7.0])
+				hits.append([p[0], int(r[4]), Vector3(dp.x - c.x, 0, dp.z - c.z), 7.0])
 		for g in golems:
-			var d := _flat((g[1] as Vector3) - pos).length()
+			var d := _flat((g[1] as Vector3) - c).length()
 			if absf(d - float(r[0])) < 0.7 and not (r[1] as Dictionary).has(-1000 - int(g[0])):
 				r[1][-1000 - int(g[0])] = true
 				hits.append([-1000 - int(g[0]), 13, Vector3.ZERO, 0.0])
-	rings = rings.filter(func(r): return float(r[0]) < 14.0)
+	rings = rings.filter(func(r): return float(r[0]) < 24.0)
 
 
 func _tick_balls(living: Array) -> void:
@@ -434,21 +1047,111 @@ func _tick_balls(living: Array) -> void:
 			var want := (((near[1] as Vector3) + Vector3(0, 1.1, 0)) - (b[0] as Vector3)).normalized() * 6.5
 			b[1] = (b[1] as Vector3).lerp(want, 0.03)
 			if nd < 1.0:
-				hits.append([near[0], 12, b[1], 3.0])
-				fx.append(["boss_ball_pop", [b[0]]])
+				if b[3]:
+					zaps.append([near[0], 10, b[1], bool(near[3])])
+				else:
+					hits.append([near[0], 12, b[1], 3.0])
+				fx.append(["boss_ball_pop", [b[0], b[3]]])
 				b[2] = 0
 		b[0] = (b[0] as Vector3) + (b[1] as Vector3) * Config.DT
 	balls = balls.filter(func(b): return int(b[2]) > 0)
+
+
+## The i-th orb of the howl: split evenly (round robin from a random start), flung up out of his back.
+func _launch_orb(living: Array, i: int) -> void:
+	var p: Array = living[(i + orb_rot) % living.size()]
+	var a := rng.randf() * TAU
+	var from := pos + Vector3(rng.randf_range(-1.5, 1.5), HEIGHT - 0.8, rng.randf_range(-1.5, 1.5))
+	var v := Vector3(cos(a) * 3.0, 7.0, sin(a) * 3.0)
+	orbs.append([from, v, int(p[0]), ORB_LIFE, 0, false])
+	orb_sent[int(p[0])] = int(orb_sent.get(int(p[0]), 0)) + 1
+
+
+func _tick_orbs(living: Array) -> void:
+	for o in orbs:
+		o[3] = int(o[3]) - 1
+		o[4] = int(o[4]) + 1
+		var op: Vector3 = o[0]
+		var ov: Vector3 = o[1]
+		if o[5]:   # spent (bounced): drifting, fading
+			ov *= 0.97
+		else:
+			var tgt = null
+			for p in living:
+				if int(p[0]) == int(o[2]):
+					tgt = p
+			if tgt == null and not living.is_empty():   # their target fell: the nearest instead
+				var nd := INF
+				for p in living:
+					var dd := (p[1] as Vector3).distance_to(op)
+					if dd < nd:
+						nd = dd
+						tgt = p
+				o[2] = int(tgt[0])
+			var sp := minf(ORB_V0 + ORB_ACC * float(o[4]) * Config.DT, ORB_VMAX)
+			if int(o[4]) <= 24 or tgt == null:   # launching: up and out, slowing
+				ov = ov * 0.96 + Vector3(0, -0.15, 0)
+			else:
+				# aim a little ahead of them (half the time it would take to get there): hard to outrun in a straight
+				# line, but a sharp turn or a dash at the last moment still beats the turn limit
+				var aim: Vector3 = (tgt[1] as Vector3) + Vector3(0, 1.0, 0)
+				var tgo := clampf(aim.distance_to(op) / maxf(sp, 1.0), 0.0, 1.2)
+				aim += (pvel.get(int(tgt[0]), Vector3.ZERO) as Vector3) * Vector3(1, 0, 1) * tgo * 0.6
+				var want := (aim - op).normalized()
+				var cur := ov.normalized() if ov.length() > 0.01 else want
+				var ang := cur.angle_to(want)
+				var mx := ORB_TURN * Config.DT
+				var dir := want if ang <= mx else cur.slerp(want, mx / ang).normalized()
+				ov = dir * sp
+		op += ov * Config.DT
+		op.y = maxf(op.y, 0.35)
+		if _in_pillar(op):
+			o[3] = 0
+		if not o[5] and int(o[3]) > 0:
+			for p in living:
+				var at: Vector3 = p[1]
+				if p[3]:   # a held shield: it bounces off
+					var c := at + Vector3(0, Weapons.SHIELD_CENTER_Y, 0)
+					if op.distance_to(c) < Weapons.SHIELD_RADIUS:
+						var n := (op - c).normalized()
+						ov = (ov - n * 2.0 * ov.dot(n)) * 0.7
+						op = c + n * (Weapons.SHIELD_RADIUS + 0.08)
+						o[5] = true
+						o[3] = mini(int(o[3]), 50)
+						zaps.append([p[0], ORB_DMG, -n, true])
+						break
+				elif op.distance_to(at + Vector3(0, 1.0, 0)) < 0.75:
+					zaps.append([p[0], ORB_DMG, ov, false])
+					fx.append(["boss_orb_pop", [op]])
+					o[3] = 0
+					break
+		o[0] = op
+		o[1] = ov
+	orbs = orbs.filter(func(o): return int(o[3]) > 0)
+
+
+func _in_pillar(q: Vector3) -> bool:
+	for b: WorldLayout.Box in WorldLayout.boxes():
+		if absf(q.x - b.cx) < b.hx and absf(q.z - b.cz) < b.hz and q.y < b.h:
+			return true
+	return false
 
 
 func _flat(v: Vector3) -> Vector2:
 	return Vector2(v.x, v.z)
 
 
-## Its state, flat, for the network: [state, t, x, y, z, yaw, hp, max hp, status bits, beam angle, rings, balls].
-## Status bits: 1 staggered, 2 slowed, 4 burning, 8 enraged, 16 shielded (untouchable while it arrives), 32 storm.
+## His state, flat, for the network: [state, t, x, y, z, yaw, hp, max hp, status bits, beam angle, rings, balls, orbs,
+## extra]. Rings: [r, cx, cz, kind]; balls: [pos, static]; orbs: positions as one PackedVector3Array; extra: [leap x,
+## leap z, variant, phase, target, rush target, rep]. Status bits: 1 staggered, 2 slowed, 4 burning, 8 enraged,
+## 16 untouchable (arriving), 32 storm.
 func pack() -> Array:
 	var flags := (1 if state == S.STAGGER else 0) | (2 if slow > 0 else 0) | (4 if burn > 0 else 0) | (8 if enraged else 0) \
 		| (16 if state == S.ENTER else 0) | (32 if storm else 0)
-	return [state, t, pos.x, pos.y, pos.z, yaw, hp, max_hp, flags, beam_a, rings.map(func(r): return float(r[0])),
-		balls.map(func(b): return b[0])]
+	var ov := PackedVector3Array()
+	for o in orbs:
+		ov.append(o[0])
+	return [state, t, pos.x, pos.y, pos.z, yaw, hp, max_hp, flags, beam_a,
+		rings.map(func(r): return [float(r[0]), (r[2] as Vector3).x, (r[2] as Vector3).z, int(r[5])]),
+		balls.map(func(b): return [b[0], b[3]]), ov,
+		[leap_to.x, leap_to.z, variant, phase, target, rush_target, rep]]

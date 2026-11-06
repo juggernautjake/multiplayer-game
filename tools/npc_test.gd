@@ -69,30 +69,39 @@ func _initialize() -> void:
 	check(closest < 4.0, "the swordsman closes in (%.1f m away)" % closest)
 	check(net.hits_on(1) > 0 if net.has_method("hits_on") else a.state.hp < hp0 or sw.ai.seq > 0, "and fights")
 	net.players.erase(sw.id)
-	# an archer at range leads its shots and lands some on someone walking across its view
-	a.state = Sim.spawn_state(1)
-	a.state.pos = Vector3(60, 0, 60)
-	var ar := net.spawn_npc(a, Weapons.BOW, 2)
-	ar.state.pos = Vector3(60, 0, 74)
-	var hits := 0
-	var last_hp := a.state.hp
-	for t in 1500:
-		a.state.pos.x = 60 + 6.0 * sin(t * 0.01)   # walking back and forth across its view
-		a.state.vel = Vector3(6.0 * 0.6 * cos(t * 0.01), 0, 0)
-		net._server_tick()
-		if a.state.hp < last_hp:
-			hits += 1
-		a.state.hp = Sim.MAX_HP
-		last_hp = a.state.hp
-		a.state.dead = 0
-	check(hits >= 2, "an archer leads its shots and hits someone on the move (%d hits in 25 s)" % hits)
-	net.players.erase(ar.id)
+	# an archer at range (v0.11.0: aims where you stand, with a spread, a tell and pauses) hits sometimes, never always
+	for walk in [false, true]:
+		a.state = Sim.spawn_state(1)
+		a.state.pos = Vector3(60, 0, 60)
+		var ar := net.spawn_npc(a, Weapons.BOW, 2)
+		ar.state.pos = Vector3(60, 0, 74)
+		var hits := 0
+		var shots := 0
+		var last_n := ar.state.swing_n
+		var last_hp := a.state.hp
+		for t in 1800:
+			if walk:   # walking back and forth across its view
+				a.state.pos.x = 60 + 6.0 * sin(t * 0.01)
+				a.state.vel = Vector3(6.0 * 0.6 * cos(t * 0.01), 0, 0)
+			net._server_tick()
+			if ar.state.swing_n != last_n:
+				shots += 1
+				last_n = ar.state.swing_n
+			if a.state.hp < last_hp:
+				hits += 1
+			a.state.hp = Sim.MAX_HP
+			last_hp = a.state.hp
+			a.state.dead = 0
+		check(shots >= 4 and shots <= 30 and hits < shots and (walk or hits >= 1),
+			"an archer %s: %d shots in 30 s, %d hit (not every one)" % ["at someone strafing" if walk else "at someone standing", shots, hits])
+		net.players.erase(ar.id)
+	var ar := {"id": -999}
 	net._server_send_roster()
 
 	# ---- Thunderhorn: health for one and for two players
 	var b1 := Boss.new(Vector3.ZERO, 1)
 	var b2 := Boss.new(Vector3.ZERO, 2)
-	check(b2.max_hp == int(Boss.BASE_HP * 1.7) and b1.max_hp == Boss.BASE_HP, "two players: 1.7x his health (%d vs %d)" % [b2.max_hp, b1.max_hp])
+	check(b2.max_hp == int(Boss.BASE_HP * 1.7) and b1.max_hp == Boss.BASE_HP and Boss.hp_for(3) == int(Boss.BASE_HP * 2.4), "two players: 1.7x his health, three 2.4x (%d vs %d)" % [b2.max_hp, b1.max_hp])
 	# what each spell does to him
 	var t1 := Boss.new(Vector3.ZERO, 1)
 	t1.state = Boss.S.IDLE
