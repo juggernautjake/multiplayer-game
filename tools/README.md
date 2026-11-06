@@ -327,3 +327,13 @@ positions; it must avoid each >= 90% while an idle player is hit by most (>= 50%
 then dashes it (24 m/s for 0.15 s), snaps it 1.5 m sideways (a net correction) and dashes again, at 60 and 30 fps. Every
 cloth point must stay within its rest length of the point above it, and the hem must trail the body by under 0.7 m
 (without the v0.12 carry it trailed over a metre and whipped back).
+
+## boss_beam_shots.gd
+
+`<godot> --path . --resolution 1280x720 --fixed-fps 60 -s tools/boss_beam_shots.gd -- <dir> stills` (v0.12.0, windowed):
+Thunderhorn's horn beam start to finish through a real BossView fed made-up states (the feeder beams and the growing
+orb, the beam sweeping there and back, the collapse), at dusk with posts and a player-sized dummy; 13 stills from five
+angles (`beam_<n>_<what>.png`) and a printout of how far the orb sits from the nose spike's tip. `clip` instead dollies
+the camera for a movie: add `--write-movie beam.avi --fixed-fps 30` before `-s` (then e.g. `ffmpeg -i beam.avi -c:v
+libx264 -crf 22 -pix_fmt yuv420p beam.mp4`). `boss_pose_shots.gd ... dazed` (with `--fixed-fps 60`): the daze strip.
+

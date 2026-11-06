@@ -558,7 +558,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			if t % 6 == 0:
 				var dir := Vector2(-sin(beam_a), -cos(beam_a))
 				for p in living:
-					if beam_hits(pos, beam_a, p[1]):   # v0.12.0: the drawn beam, from the orb to the ground
+					if beam_hits(pos, beam_a, p[1], yaw):   # v0.12.0: the drawn beam, from the orb to the ground
 						hits.append([p[0], 7 if enraged else 5, Vector3(dir.x, 0, dir.y), 3.0])
 			if t >= length:
 				_after()
@@ -967,26 +967,29 @@ var bystanders: Array = []
 
 
 ## v0.12.0 the horn beam's geometry, shared with BossView so the drawn beam IS the hitbox: it comes out of the orb
-## just ahead of the nose spike's tip (BEAM_ORB metres ahead along the beam's heading, BEAM_ORB_Y up) and slants down
+## just ahead of the nose spike's tip (BEAM_ORB metres out, BEAM_ORB_Y up, along where his head points: his body's
+## heading turned BEAM_HEAD_K of the way to the beam's, as the neck turns the head) and slants down
 ## to the ground BEAM_REACH ahead of his centre; BEAM_R is the radius of its glow. A player (a capsule from 0.4 to
 ## 1.4 m up, radius Sim.RADIUS) is hit when it touches that segment. Close in under the orb it passes over your head;
 ## near its far end you can jump it; past BEAM_REACH it never reaches.
-const BEAM_ORB := 6.6
-const BEAM_ORB_Y := 3.1
+const BEAM_ORB := 7.0
+const BEAM_ORB_Y := 3.9
 const BEAM_REACH := 24.0
 const BEAM_R := 0.75
+const BEAM_HEAD_K := 0.6
 const ROAR_AT := 45               # v0.12.0 the roar lands 0.75 s in (it was 0.25 s)
 const ROAR_R := 12.0             # its slow reaches 12 m (was 16), the static roar 10 m (was 13)
 
 
-static func beam_ends(at: Vector3, a: float) -> Array:
+static func beam_ends(at: Vector3, a: float, body_yaw: float) -> Array:
+	var h := body_yaw + wrapf(a - body_yaw, -PI, PI) * BEAM_HEAD_K
 	var d := Vector3(-sin(a), 0, -cos(a))
 	var g := Vector3(at.x, 0, at.z)
-	return [g + d * BEAM_ORB + Vector3(0, at.y + BEAM_ORB_Y, 0), g + d * BEAM_REACH + Vector3(0, minf(at.y, 0.0), 0)]
+	return [g + Vector3(-sin(h), 0, -cos(h)) * BEAM_ORB + Vector3(0, at.y + BEAM_ORB_Y, 0), g + d * BEAM_REACH + Vector3(0, minf(at.y, 0.0), 0)]
 
 
-static func beam_hits(at: Vector3, a: float, p: Vector3) -> bool:
-	var e := beam_ends(at, a)
+static func beam_hits(at: Vector3, a: float, p: Vector3, body_yaw: float) -> bool:
+	var e := beam_ends(at, a, body_yaw)
 	var g := Geometry3D.get_closest_points_between_segments(e[0], e[1], p + Vector3(0, 0.4, 0), p + Vector3(0, 1.4, 0))
 	return (g[0] as Vector3).distance_to(g[1]) < BEAM_R + Sim.RADIUS
 

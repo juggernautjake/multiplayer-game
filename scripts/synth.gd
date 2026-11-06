@@ -66,10 +66,14 @@ static func roar(kind := 0) -> AudioStreamWAV:
 ## and a click), "scrape" (a hoof raking gravel), "crackle" (sparse electric snaps), "charge" (a rising electric
 ## whine under crackle: the Storm Leap's charge-up), "whoosh" (air rushing past), "zap" (a static hit: a falling
 ## buzz), "slam" (a deep ground boom), "chirp" (an orb launching: a rising zip), "stun" (a static stun's long buzz),
-## "pant" (three heavy breaths), "eat" (crunching an apple), "buzz" (a Static orb).
+## "pant" (three heavy breaths), "eat" (crunching an apple), "buzz" (a Static orb); v0.12.0 the horn beam: "beam_hum"
+## (the orb charging: a rising whine with a swelling hum and quickening snaps), "beam" / "beam_long" (the beam firing,
+## 1.6 s / 2.75 s: a crackling sustained roar with a slow warble, rising in the attack and dying away), "pop" (the orb
+## collapsing).
 static func fx(kind: String) -> AudioStreamWAV:
 	var dur: float = {"snort": 0.45, "hoof": 0.35, "scrape": 0.5, "crackle": 1.0, "charge": 1.6, "whoosh": 0.7,
-		"zap": 0.25, "slam": 1.4, "chirp": 0.18, "stun": 0.9, "pant": 1.4, "eat": 0.35, "buzz": 0.6}.get(kind, 0.5)
+		"zap": 0.25, "slam": 1.4, "chirp": 0.18, "stun": 0.9, "pant": 1.4, "eat": 0.35, "buzz": 0.6,
+		"beam_hum": 1.05, "beam": 1.6, "beam_long": 2.75, "pop": 0.35}.get(kind, 0.5)
 	var n := int(RATE * dur)
 	var d := PackedFloat32Array()
 	d.resize(n)
@@ -124,6 +128,22 @@ static func fx(kind: String) -> AudioStreamWAV:
 				ph += (95.0 + 12.0 * sin(t * TAU * 7.0)) / RATE
 				var saw := 2.0 * fposmod(ph, 1.0) - 1.0
 				v = saw * 0.32 * sin(u * PI) * (0.6 + 0.4 * sin(t * TAU * 31.0)) + (noise if rng.randf() < 0.04 else 0.0) * 0.6
+			"beam_hum":   # the orb charging: a whine rising an octave and more, a hum under it, snaps quickening
+				ph += (180.0 + 520.0 * u * u) / RATE
+				lp += (sin(ph * TAU * 0.5) - lp) * 0.05
+				var whine := sin(ph * TAU) * 0.22 + (2.0 * fposmod(ph * 2.0, 1.0) - 1.0) * 0.06
+				v = (whine + lp * 0.5) * minf(u * 2.5, 1.0) * (0.6 + 0.4 * u) * (0.85 + 0.15 * sin(t * TAU * (9.0 + 20.0 * u))) 					+ (noise if rng.randf() < 0.008 + 0.05 * u else 0.0) * 0.7
+			"beam", "beam_long":   # a crackling sustained roar with a warble
+				var env := minf(t / 0.05, 1.0) * minf((dur - t) / 0.35, 1.0)
+				ph += (72.0 + 9.0 * sin(t * TAU * 3.1)) / RATE
+				var growl := (2.0 * fposmod(ph, 1.0) - 1.0) * 0.3 + sin(ph * TAU * 2.0) * 0.15
+				lp += (noise - lp) * 0.35
+				var hiss := (noise - lp) * 0.25 * (0.7 + 0.3 * sin(t * TAU * 5.3))
+				var snap := (noise if rng.randf() < 0.035 else 0.0) * 0.9
+				v = (growl * (0.8 + 0.2 * sin(t * TAU * 11.0)) + hiss + lp2 * 2.5 + snap) * env
+			"pop":
+				ph += (900.0 * exp(-t * 18.0) + 60.0) / RATE
+				v = sin(ph * TAU) * exp(-t * 14.0) * 0.8 + noise * exp(-t * 40.0) * 0.7
 			"eat":
 				var bite := fposmod(t, 0.12)
 				v = (noise - lp) * exp(-bite * 40.0) * 0.9

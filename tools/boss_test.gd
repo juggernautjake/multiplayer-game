@@ -771,7 +771,7 @@ func _bot(s: Sim.PlayerState, o: Dictionary, strikes_seen: Array, now: int, mem:
 		Boss.S.BEAM:
 			want += away * 2.0
 			for k in [1, 3, 5]:
-				if Boss.beam_hits(o.pos, _beam_at(o, tn + k), s.pos) and s.dash_cd == 0:
+				if Boss.beam_hits(o.pos, _beam_at(o, tn + k), s.pos, o.yaw) and s.dash_cd == 0:
 					dash = true
 		Boss.S.LEAP_WIND, Boss.S.LEAP:
 			var lt := _f(o.leap_to)

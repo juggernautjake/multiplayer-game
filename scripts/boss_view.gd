@@ -40,6 +40,7 @@ var root: Node3D
 var model: BossModel
 var core_light: OmniLight3D
 var beam: MeshInstance3D
+var horn_beam: HornBeam          # v0.12.0 the horn beam's whole look (scripts/horn_beam.gd)
 var marker: Node3D
 var marker_mat: StandardMaterial3D
 var path: MeshInstance3D
@@ -116,6 +117,9 @@ func _build() -> void:
 	beam.visible = false
 	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	main.add_child(beam)
+	horn_beam = HornBeam.new()
+	main.add_child(horn_beam)
+	horn_beam.setup(self, main, fx)
 	# the Storm Leap's landing marker: a glowing ring and a disc that fills as the moment comes
 	marker = Node3D.new()
 	main.add_child(marker)
@@ -196,6 +200,9 @@ func _despawn() -> void:
 	if _stars != null:
 		_stars.queue_free()
 		_stars = null
+	if horn_beam != null:
+		horn_beam.queue_free()
+		horn_beam = null
 	for n in [beam, marker, path]:
 		if n:
 			(n as Node).queue_free()
@@ -343,7 +350,7 @@ func _process(delta: float) -> void:
 		Boss.S.BEAM:
 			p.head_dip = 0.2
 			p.jaw = 0.6
-			p.head_yaw = wrapf(beam_a - yaw, -PI, PI) * 0.8
+			p.head_yaw = wrapf(beam_a - root.rotation.y, -PI, PI)   # v0.12.0: the head (and the spike) follow the beam
 			on["horn_l"] = 1.0
 			on["horn_r"] = 1.0
 			col = CYAN if not enraged else Color("ff9a8a")
@@ -617,6 +624,8 @@ func _smooth_pose(p: Dictionary, delta: float) -> void:
 		var want := float(p.get(k, 0.0 if k != "jaw" else 0.05))
 		var cur := float(_pose.get(k, want))
 		var rate := 30.0 if k in ["roll", "thrash", "bob"] else (16.0 if k in ["brow", "lid", "jaw"] else 11.0)
+		if k == "head_yaw" and state == Boss.S.BEAM:
+			rate = 45.0   # v0.12.0: the head (and the nose spike) keep up with the sweep: the beam comes out of it
 		_pose[k] = lerpf(cur, want, clampf(delta * rate, 0.0, 1.0))
 
 
@@ -1008,20 +1017,11 @@ func _snort() -> void:
 	model.breath(1.0)
 
 
-func _update_beam(col: Color) -> void:
-	beam.visible = state == Boss.S.BEAM
-	if not beam.visible:
-		return
-	var o: Vector3 = (model.points["brow"] as Node3D).global_position
-	o += Vector3(-sin(yaw), 0, -cos(yaw)) * 1.0
-	var e := Vector3(root.position.x, pos.y + 0.1, root.position.z) + Vector3(-sin(beam_a), 0, -cos(beam_a)) * 24.0
-	beam.global_transform = WizardGarb._xf(o, e)
-	(beam.material_override as StandardMaterial3D).albedo_color = Color(col.r, col.g, col.b, 0.55 + randf() * 0.4)
-	if randf() < get_process_delta_time() * 25.0:   # a scorched line where it sweeps the ground
-		var gp := Vector3(root.position.x, pos.y, root.position.z) + Vector3(-sin(beam_a), 0, -cos(beam_a)) * randf_range(6.0, 24.0)
-		Fx.burst(main, gp, Vector3.UP, col, 5, 4.0, 0.05)
-		if randf() < 0.3:
-			fx._scorch_ragged(gp, 0.8, 3)
+func _update_beam(_col: Color) -> void:
+	beam.visible = false   # v0.12.0: HornBeam draws it now (the orb, the feeders, the beam, the impact)
+	if horn_beam != null:
+		horn_beam.tick(get_process_delta_time(), state, state_t, Vector3(root.position.x, pos.y, root.position.z), root.rotation.y,
+			beam_a, model, flags & 8 != 0)
 
 
 var _leap_shadow: MeshInstance3D
@@ -1534,12 +1534,14 @@ func _on_fx(kind: String, a: Array) -> void:
 			fx._scorch_ragged(at + Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)), 3.0, 8)
 			_sound("slam", at, 2.0)
 			_sound("thunder", at, -4.0)
-		"boss_beam_wind":
-			_sound("crackle", a[0], 2.0)
-			_sound("charge", a[0], -4.0)
-		"boss_beam":
-			_sound("thunder", a[0], -1.0)
-			_sound("crackle", a[0], 0.0, 0.6)
+		"boss_beam_wind":   # v0.12.0 the orb charging between the horns
+			_sound("beam_hum", a[0], 3.0)
+			_sound("crackle", a[0], -4.0)
+		"boss_beam":   # it fires: a crack, then the crackling roar for as long as it sweeps
+			_sound("thunder", a[0], -3.0)
+			_sound("beam_long" if int(a[3]) > 100 else "beam", a[0], 4.0)
+			if horn_beam != null:
+				fx._flash_light(horn_beam.orb.global_position, Color("cfe4ff"), 10.0, 18.0, 0.25)
 		"boss_call":
 			fx._flash_light(a[0] + Vector3(0, 10, 0), Color("bfd8ff"), 6.0, 40.0, 0.6)
 			_sound("roar2", a[0], 2.0)

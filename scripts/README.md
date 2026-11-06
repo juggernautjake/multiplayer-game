@@ -942,3 +942,24 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   | roar | 0.75 s | back off past 12 m (or shield) | 100% | 100% |
   | leap landing + ring | 1.5 s marker | leave the marker, jump the ring | 100% | 100% |
   | homing orbs (per orb) | 0.5 s launch | keep moving across them, dash late | 95% | 100% |
+- Horn beam (`scripts/horn_beam.gd`, `HornBeam`, owned by BossView; Jacob's addenda): in BEAM_WIND two thin feeder
+  beams shoot (0.2 s) from the curved side horns' tips (`anchors.horn_l/r`) and meet just ahead of the nose spike's
+  tip, where an orb forms: a white core in a cyan glow (`BEAM_SHADER`, additive, falling off from the centre line,
+  packets flowing along it) with three rings spinning on different axes, crackling, growing (`1 - e^(-2.6 t)`) and
+  pulsing faster as it charges: its growth is the telegraph (wind-up 1.0 s calm, 0.57 s at the shortest). In BEAM the
+  main beam fires out of the orb, which stays as the emitter with a billboard muzzle flare: a hot white core (r 0.2), a
+  cyan glow (r `Boss.BEAM_R` 0.75: the hitbox's radius) and a faint halo (2.2x), width and brightness pulsing, the core
+  jittering, packets flowing out, tendrils spiralling off (helical ribbons), three lights (orb, middle, impact), the
+  feeders still pumping; at the ground end sparks, smoke and a glowing scorch trail (additive marks cooling from
+  white-cyan to orange to nothing over ~2 s, plus ragged scorch). After it everything collapses with a pop. Red-shifted
+  when he's enraged. Sounds (`Synth.fx`): "beam_hum" (the rising charge whine), "beam" / "beam_long" (1.6 / 2.75 s
+  crackling roar with a warble), "pop".
+- Beam geometry = hitbox (`Boss.beam_ends(at, heading, body_yaw)`, `beam_hits`): the orb sits `BEAM_ORB` 7 m out and
+  `BEAM_ORB_Y` 3.9 m up along where his head points (`BEAM_HEAD_K` 0.6 of the way from his body's heading to the
+  beam's: the neck turns the head; measured 0.8 m ahead of the spike's tip), the beam slants down to the ground at
+  `BEAM_REACH` 24 m along the beam's heading; a player (capsule 0.4-1.4 m up, r 0.4) touching that segment within
+  `BEAM_R` is hit (every 6 ticks). So under the orb close in it passes over your head, near its far end you can jump
+  it, and past 24 m it never reaches. BossView turns the head with the beam (head yaw = the full beam offset, eased at
+  45/s while firing) and HornBeam follows the server's heading eased at 45/s.
+- `tools/boss_beam_shots.gd`: the whole sequence at dusk through a real BossView (stills, or a clip for the movie maker).
+
