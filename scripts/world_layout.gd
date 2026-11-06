@@ -46,6 +46,9 @@ const TREES := [
 	["oak", Vector3(9.0, 0.0, -24.0)], ["oak", Vector3(22.0, 0.0, -10.0)], ["oak", Vector3(26.0, 0.0, 4.0)],
 	["oak", Vector3(4.0, 0.0, 24.0)], ["oak", Vector3(-6.0, 0.0, 22.0)], ["oak", Vector3(30.0, 0.0, 20.0)],
 	["oak", Vector3(-26.0, 0.0, 14.0)],
+	# v0.12.0: real apple trees round Thunderhorn's arena (centre (0, 52), radius 20), just inside its edge
+	["apple", Vector3(12.7, 0.0, 64.7)], ["apple", Vector3(-12.7, 0.0, 64.7)], ["apple", Vector3(-13.5, 0.0, 40.5)],
+	["apple", Vector3(13.5, 0.0, 40.5)], ["apple", Vector3(0.0, 0.0, 70.5)],
 ]
 const TRUNK := { "apple": [0.22, 2.2], "pear": [0.22, 2.2], "oak": [0.38, 3.2] }   # half width, height
 

@@ -44,7 +44,12 @@ func _on_event(kind: String, a: Array) -> void:
 			if fruits.has(a[0]):
 				var f: Dictionary = fruits[a[0]]
 				if a[1]:
-					Fx.word(get_parent(), (f.node as Node3D).global_position, "munch!", Color("ffe08a"))
+					var at: Vector3 = (f.node as Node3D).global_position
+					Fx.word(get_parent(), at, "munch!", Color("ffe08a"))
+					if a.size() > 2:   # v0.12.0 it healed: +N, a green sparkle rising, a crunch
+						Fx.word(get_parent(), at + Vector3(0, 1.4, 0), "+%d" % int(a[2]), Color("7dff8a"))
+						Fx.burst(get_parent(), at + Vector3(0, 0.4, 0), Vector3.UP, Color("7dff8a"), 12, 2.2, 0.05)
+						_crunch(at)
 				(f.node as Node3D).queue_free()
 				fruits.erase(a[0])
 		"tree_hit":
@@ -53,6 +58,33 @@ func _on_event(kind: String, a: Array) -> void:
 			tr.wv += (1.0 if d.x >= 0.0 else -1.0) * minf(2.6, float(a[2]) / 4.0) * 0.5
 			var leaves := 3 + 2 * mini(int(a[2]) / 3, 6)
 			Fx.burst(get_parent(), tr.pos + Vector3(0, 3.2 if tr.kind == "oak" else 2.6, 0), Vector3.UP, Color("4f8a3a"), leaves, 2.5, 0.08)
+		"tree_fell":   # v0.12.0 Thunderhorn splintered it: it topples away from him in a burst of splinters
+			var tr: Dictionary = trees[a[0]]
+			if tr.get("felled", false):
+				return
+			tr.felled = true
+			var d: Vector3 = a[1]
+			if d.length() < 0.01:
+				tr.fall_axis = Vector3.RIGHT
+				(tr.root as Node3D).rotation = Vector3(PI / 2.0 * 0.95, 0, 0)
+				tr.fall_t = 1.0
+			else:
+				tr.fall_axis = Vector3.UP.cross(Vector3(d.x, 0, d.z).normalized()).normalized()
+				tr.fall_t = 0.0
+				Fx.burst(get_parent(), tr.pos + Vector3(0, 1.0, 0), Vector3(d.x, 0.5, d.z).normalized(), Color("8a6440"), 30, 7.0, 0.09)
+				Fx.burst(get_parent(), tr.pos + Vector3(0, 3.0, 0), Vector3.UP, Color("4f8a3a"), 24, 4.0, 0.1)
+				MotionFx.land(get_parent(), tr.pos, 1.5)
+				_crack_sound(tr.pos)
+		"tree_up":
+			var tr: Dictionary = trees[a[0]]
+			tr.felled = false
+			(tr.root as Node3D).rotation = Vector3.ZERO
+			(tr.root as Node3D).position = tr.pos
+		"fruit_splat":   # v0.12.0 trampled: a red-brown mush splat that fades away after a few seconds
+			if fruits.has(a[0]):
+				((fruits[a[0]] as Dictionary).node as Node3D).queue_free()
+				fruits.erase(a[0])
+			_splat(a[1])
 		"worm":
 			var w := _worm(a[0], a[1])
 			_add_step(w.steps, [a[2], a[3], a[4]])
@@ -81,6 +113,13 @@ func _process(delta: float) -> void:
 	if net == null:
 		return
 	var t := now_tick(Engine.get_physics_interpolation_fraction())
+	for tr in trees:   # v0.12.0: a felled tree keeps falling over (accelerating), then lies there
+		if tr.get("felled", false) and float(tr.fall_t) < 1.0:
+			tr.fall_t = minf(float(tr.fall_t) + delta * 0.9, 1.0)
+			var k := float(tr.fall_t) * float(tr.fall_t)
+			(tr.root as Node3D).basis = Basis(tr.fall_axis, PI / 2.0 * 0.95 * k)
+			if tr.fall_t >= 1.0:
+				MotionFx.land(get_parent(), tr.pos + Vector3.UP.cross(tr.fall_axis) * -2.5, 2.0)
 	for tr in trees:   # a damped wobble when hit (village spring: k 80, c 6)
 		var acc: float = -80.0 * tr.wobble - 6.0 * tr.wv
 		tr.wv += acc * delta
@@ -138,7 +177,7 @@ func _make_tree(kind: String, pos: Vector3) -> void:
 		s.position = Vector3(c[0], c[1], c[2]) * big
 		s.material_override = _mat(leaf.lightened(randf_range(-0.08, 0.1)))
 		crown.add_child(s)
-	trees.append({ "root": root, "crown": crown, "wobble": 0.0, "wv": 0.0, "kind": kind, "pos": pos })
+	trees.append({ "root": root, "crown": crown, "wobble": 0.0, "wv": 0.0, "kind": kind, "pos": pos, "felled": false, "fall_t": 1.0, "fall_axis": Vector3.RIGHT })
 
 
 # ================================================================ fruit
@@ -148,9 +187,10 @@ func _fruit(id: int, tree: int) -> Dictionary:
 		var n := MeshInstance3D.new()
 		var sm := SphereMesh.new()
 		sm.radius = 0.09
-		sm.height = 0.18 if kind == "apple" else 0.24
+		var apple := kind != "pear"   # v0.12.0: oaks bear apples too
+		sm.height = 0.18 if apple else 0.24
 		n.mesh = sm
-		n.material_override = _mat(Color("d8343a") if kind == "apple" else Color("cfc35a"), 0.5)
+		n.material_override = _mat(Color("d8343a") if apple else Color("cfc35a"), 0.5)
 		var stem := MeshInstance3D.new()
 		var st := CylinderMesh.new()
 		st.top_radius = 0.008
@@ -169,7 +209,7 @@ func _draw_fruit(f: Dictionary, t: float) -> void:
 	var n: MeshInstance3D = f.node
 	if f.state == "hang":
 		var tr: Dictionary = trees[f.tree]
-		var p := Ecology.slot_pos(tr.pos, f.slot)
+		var p := Ecology.slot_pos(tr.pos, f.slot, tr.kind)
 		p.x += sin(Time.get_ticks_msec() * 0.002 + f.slot) * 0.015 + tr.wobble * 0.12   # sways with wind and shakes
 		n.global_position = p
 		var g: float = f.grow
@@ -497,6 +537,51 @@ func _bubble(at: Vector3, text: String) -> void:
 	tw.tween_property(l, "global_position", at + Vector3(0, 0.25, 0), 1.6)
 	tw.parallel().tween_property(l, "modulate:a", 0.0, 0.6).set_delay(1.1)
 	tw.tween_callback(l.queue_free)
+
+
+var _sounds := {}
+
+
+func _crunch(at: Vector3) -> void:
+	_play("eat", at, 0.0)
+
+
+func _crack_sound(at: Vector3) -> void:
+	_play("slam", at, -2.0)
+	_play("scrape", at, 2.0)
+
+
+func _play(key: String, at: Vector3, db: float) -> void:
+	if not _sounds.has(key):
+		_sounds[key] = Synth.fx(key)
+	var d := 0.0
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam != null:
+		d = cam.global_position.distance_to(at)
+	Synth.play(get_parent(), _sounds[key], db - clampf(d * 0.25, 0.0, 30.0))
+
+
+func _splat(at: Vector3) -> void:
+	var mi := MeshInstance3D.new()
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.28
+	cm.bottom_radius = 0.32
+	cm.height = 0.02
+	cm.radial_segments = 10
+	mi.mesh = cm
+	var m := _mat(Color("8a2a1e"), 0.4)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mi.material_override = m
+	get_parent().add_child(mi)
+	mi.global_position = Vector3(at.x, 0.015, at.z)
+	mi.scale = Vector3(randf_range(0.8, 1.3), 1, randf_range(0.7, 1.1))
+	mi.rotation.y = randf() * TAU
+	Fx.burst(get_parent(), Vector3(at.x, 0.2, at.z), Vector3.UP, Color("c23a2a"), 10, 3.0, 0.05)
+	Fx.burst(get_parent(), Vector3(at.x, 0.2, at.z), Vector3.UP, Color("e8d9a0"), 6, 2.5, 0.04)
+	var tw := mi.create_tween()
+	tw.tween_interval(3.5)
+	tw.tween_property(m, "albedo_color:a", 0.0, 1.5)
+	tw.tween_callback(mi.queue_free)
 
 
 func _mat(c: Color, rough := 0.85) -> StandardMaterial3D:

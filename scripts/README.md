@@ -815,3 +815,11 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   caltrop, a hot-pink core with six white needle spikes in a violet shell, crackling white and trailing violet
   sparks, with a buzz (`Synth.fx("buzz")`) when one appears; his plain damage balls stay smooth blue-white spheres. The
   first one shows the banner "Violet orbs build STATIC / 6 hits = stun!".
+- Apples heal (v0.12.0, `ecology.gd`): every tree bears fruit (oaks grow apples, hung lower and further out under
+  their crown: `slot_pos(tree, slot, kind)`), up to the four slots, regrowing one per tree a minute. Any hit by any
+  weapon or spell knocks one ripe apple loose (two for 8+ damage). `eat_under(pos)`: a hurt player walking over a
+  fallen fruit (no worm in it) eats it: +`HEAL` (18) health; the `fruit_gone` event then carries [id, true, heal, pos]
+  and EcoView shows "+18", a green sparkle and the crunch (`Synth.fx("eat")`). E still eats one too (now +18). Five
+  real apple trees ring Thunderhorn's arena (`WorldLayout.TREES`, the last five). `fell_tree`, `restore_trees`,
+  `ground_fruit_near`, `splat` (events `tree_fell`, `tree_up`, `fruit_splat`) are for Thunderhorn (below). Test:
+  fruit_test `_apples`.

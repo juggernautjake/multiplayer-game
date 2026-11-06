@@ -552,6 +552,12 @@ func _server_tick() -> void:
 			if p.state.dead == 0:
 				people.append([p.id, p.state.pos, Vector2(p.state.vel.x, p.state.vel.z).length(), Vector2(p.state.vel.x, p.state.vel.z)])
 		ecology.tick(server_tick, people)
+		for p: ServerPlayer in players.values():   # v0.12.0: walking over a fallen apple while hurt eats it
+			if p.state.dead == 0 and p.state.hp < Sim.MAX_HP:
+				var gain := ecology.eat_under(p.state.pos, server_tick)
+				if gain > 0:
+					p.state.hp = mini(p.state.hp + gain, Sim.MAX_HP)
+					Sim.quantize(p.state)
 	if server_tick % Config.SNAPSHOT_EVERY == 0:
 		var ents := []
 		for p: ServerPlayer in players.values():

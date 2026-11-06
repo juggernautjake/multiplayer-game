@@ -91,5 +91,61 @@ func _init() -> void:
 	var rest2 := Ecology.path_pos(g.fall, g.land)
 	check(not inside_something(rest2) and rest2.x > b.cx + b.hx, "rolled at a pillar, it bounces off and stops outside it (x %.2f, face at %.2f)" % [rest2.x, b.cx + b.hx])
 
+	_apples()
 	print("%d failed" % bad)
 	quit(bad)
+
+
+## v0.12.0: every tree bears apples; any hit knocks one loose; walking over one while hurt eats it and heals; trees
+## regrow up to their cap; real apple trees round the arena; Thunderhorn's felling and trampling.
+func _apples() -> void:
+	var eco := Ecology.new()
+	var now := 100
+	var bearing := 0
+	for tr in eco.trees:
+		for f in eco.fruits.values():
+			if f.tree == tr.i:
+				bearing += 1
+				break
+	check(bearing == eco.trees.size(), "every tree (oaks too) has apples (%d of %d)" % [bearing, eco.trees.size()])
+	var c := Vector2(WorldLayout.ALTAR_C.x, WorldLayout.ALTAR_C.y + 10.0)
+	var arena := 0
+	for t in WorldLayout.TREES:
+		if Vector2(t[1].x, t[1].z).distance_to(c) < WorldLayout.ARENA_R:
+			arena += 1
+	check(arena >= 4, "real apple trees round the boss arena (%d)" % arena)
+	var oak := 2
+	var before := eco.fruits.size()
+	eco.hit_tree(oak, 5, now, Vector3(1, 0, 0))
+	var loose := eco.fruits.values().filter(func(f): return f.tree == oak and f.state != "hang")
+	check(loose.size() == 1, "one hit on an oak knocks an apple loose (%d)" % loose.size())
+	var f: Dictionary = loose[0]
+	var rest := Ecology.path_pos(f.fall, f.land)
+	eco.tick(f.land + 1, [])
+	check(eco.eat_under(rest + Vector3(0, -Ecology.FRUIT_R, 0), f.land + 2) == Ecology.HEAL and not eco.fruits.has(f.id),
+		"walking over it eats it and heals %d" % Ecology.HEAL)
+	# regrowth: never more than the four slots per tree
+	for k in 6:
+		now += Ecology.GROW_EVERY
+		eco.tick(now, [])
+	var most := 0
+	for tr in eco.trees:
+		most = maxi(most, eco._slots_used(tr).size())
+	check(most <= Ecology.SLOTS.size() and most >= 3, "trees regrow apples up to the cap (%d)" % most)
+	# Thunderhorn fells a tree: its apples are gone, hits do nothing, it grows none until restored
+	eco.fell_tree(oak, now, Vector3(1, 0, 0))
+	eco.hit_tree(oak, 10, now, Vector3(1, 0, 0))
+	now += Ecology.GROW_EVERY * 2
+	eco.tick(now, [])
+	var on_oak := eco.fruits.values().filter(func(q): return q.tree == oak and q.state == "hang").size()
+	check(on_oak == 0, "a felled tree bears nothing")
+	eco.restore_trees(now)
+	on_oak = eco.fruits.values().filter(func(q): return q.tree == oak and q.state == "hang").size()
+	check(on_oak > 0 and not eco.trees[oak].felled, "restored after the fight, with apples again")
+	# trampling: an apple on the ground is splatted
+	eco.hit_tree(oak, 5, now, Vector3(1, 0, 0))
+	var g: Array = eco.fruits.values().filter(func(q): return q.tree == oak and q.state != "hang")
+	if not g.is_empty():
+		var gid: int = g[0].id
+		eco.splat(gid, now + 200)
+		check(not eco.fruits.has(gid), "a trampled apple is gone (a splat)")

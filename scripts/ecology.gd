@@ -40,17 +40,19 @@ var next_worm_check := 6 * 60
 func _init() -> void:
 	rng.seed = 20261104
 	for t in WorldLayout.TREES:
-		trees.append({ "i": trees.size(), "pos": t[1], "kind": t[0], "hits": 0, "last_hit": -9999 })
+		trees.append({ "i": trees.size(), "pos": t[1], "kind": t[0], "hits": 0, "last_hit": -9999, "felled": false })
 	for tr in trees:
-		if tr.kind != "oak":
-			for s in 3:   # each fruit tree starts with three ripe
-				_new_fruit(tr, s, 1.0, 0)
+		for s in 3:   # v0.12.0: every tree (oaks too: apples) starts with three ripe
+			_new_fruit(tr, s, 1.0, 0)
 
 
 # ================================================================ late joiners
 ## Everything a new player needs to see the yard as it is now.
 func full_state(now: int) -> Array:
 	var out := []
+	for tr in trees:
+		if tr.felled:
+			out.append(["tree_fell", [tr.i, Vector3.ZERO]])
 	for f in fruits.values():
 		if f.state == "hang":
 			out.append(["fruit_hang", [f.id, f.tree, f.slot, f.grow]])
@@ -84,7 +86,7 @@ func tick(now: int, players: Array) -> void:
 	if now >= next_grow:
 		next_grow = now + GROW_EVERY
 		for tr in trees:
-			if tr.kind == "oak":
+			if tr.felled:
 				continue
 			var used := _slots_used(tr)
 			var free := []
@@ -135,15 +137,17 @@ func _new_fruit(tr: Dictionary, slot: int, grow: float, _now: int) -> void:
 
 
 ## Where a hanging fruit is (shared with the client's drawing).
-static func slot_pos(tree_pos: Vector3, slot: int) -> Vector3:
+static func slot_pos(tree_pos: Vector3, slot: int, kind := "apple") -> Vector3:
 	var s: Vector2 = SLOTS[slot]
+	if kind == "oak":   # v0.12.0: oaks bear apples too, under their bigger crown
+		return tree_pos + Vector3(s.x * 2.4, 2.35 + s.y * 0.5, 1.15 + s.y * 0.3)
 	return tree_pos + Vector3(s.x * 24.0 * PX * 2.2, 48.0 * PX + s.y * 40.0 * PX + 0.6, 0.35 + s.y * 0.3)
 
 
 ## Knock a fruit loose: it falls from its branch, maybe bounces once, rolls and comes to rest.
 func _drop(f: Dictionary, now: int, kick := 1.0) -> void:
 	var tr: Dictionary = trees[f.tree]
-	var p := slot_pos(tr.pos, f.slot)
+	var p := slot_pos(tr.pos, f.slot, tr.kind)
 	var v := Vector3(rng.randf_range(-14, 14) * PX * kick, rng.randf_range(0, 20) * PX * kick, rng.randf_range(4, 14) * PX * kick)
 	_launch(f, now, p, v)
 	event.emit("sound", ["fruitDrop", f.end])
@@ -326,22 +330,84 @@ func hit_fruit(origin: Vector3, face: Vector2, reach: float, arc_deg: float, kno
 ## A tree is hit (melee or arrow) with this much damage: it shakes and drops leaves; from the 3rd hit, ripe fruit falls.
 func hit_tree(i: int, damage: int, now: int, dir: Vector3) -> void:
 	var tr: Dictionary = trees[i]
-	tr.hits += 1 + (1 if damage >= 8 else 0) + (1 if damage >= 10 else 0)
+	if tr.felled:
+		return
+	tr.hits += 1
 	tr.last_hit = now
 	event.emit("tree_hit", [i, dir, damage])
-	if tr.kind == "oak":
-		return
+	# v0.12.0: any hit by any weapon or spell knocks ripe apples loose (one; two for a hard hit)
 	var ripe := []
 	for f in fruits.values():
 		if f.tree == i and f.state == "hang" and f.grow >= 1.0:
 			ripe.append(f)
-	if ripe.is_empty():
-		tr.hits = 0
+	var n := mini(2 if damage >= 8 else 1, MAX_GROUND - _ground_count(i))
+	for k in mini(n, ripe.size()):
+		_drop(ripe[k], now, 1.0)
+
+
+## v0.12.0: apples heal. Walking over a fallen fruit while hurt eats it: +HEAL health, a crunch and a small heal
+## effect (the "fruit_gone" event carries the amount). A worm inside: it isn't eaten (it gets kicked instead).
+const HEAL := 18
+const EAT_R := 0.55
+
+
+func eat_under(pos: Vector3, now: int) -> int:
+	if pos.y > 0.6:
+		return 0
+	for f in fruits.values():
+		if f.state != "ground" or f.worm != 0:
+			continue
+		var q = _loose_pos(f, now)
+		if q == null or Vector2(q.x - pos.x, q.z - pos.z).length() > EAT_R:
+			continue
+		fruits.erase(f.id)
+		event.emit("fruit_gone", [f.id, true, HEAL, q])
+		return HEAL
+	return 0
+
+
+## v0.12.0 Thunderhorn: a tree splintered and felled (no more fruit until restore_trees), and fruit trampled to mush.
+func fell_tree(i: int, now: int, dir: Vector3) -> void:
+	var tr: Dictionary = trees[i]
+	if tr.felled:
 		return
-	if tr.hits >= 3:
-		var n := mini(3 if damage >= 8 else 2, MAX_GROUND - _ground_count(i))
-		for k in mini(n, ripe.size()):
-			_drop(ripe[k], now, 1.0)
+	tr.felled = true
+	for f in fruits.values().duplicate():
+		if f.tree == i and f.state == "hang":
+			fruits.erase(f.id)
+			event.emit("fruit_gone", [f.id, false])
+	event.emit("tree_fell", [i, dir])
+
+
+func restore_trees(now: int) -> void:
+	for tr in trees:
+		if tr.felled:
+			tr.felled = false
+			tr.hits = 0
+			event.emit("tree_up", [tr.i])
+			for s in 2:
+				_new_fruit(tr, s, 1.0, now)
+
+
+## Fruit on the ground (resting or rolling) within r of p. -> [[id, position]]
+func ground_fruit_near(p: Vector3, r: float, now: int) -> Array:
+	var out := []
+	for f in fruits.values():
+		var q = _loose_pos(f, now)
+		if q != null and Vector2(q.x - p.x, q.z - p.z).length() <= r:
+			out.append([f.id, q])
+	return out
+
+
+func splat(id: int, now: int) -> void:
+	if not fruits.has(id):
+		return
+	var f: Dictionary = fruits[id]
+	var q = _loose_pos(f, now)
+	if f.worm != 0 and worms.has(f.worm):
+		_worm_leave(worms[f.worm], now)
+	fruits.erase(id)
+	event.emit("fruit_splat", [id, q if q != null else f.pos])
 
 
 ## E next to a fallen fruit: eat it (+8 HP). A worm inside: 70% it hops out and leaves, 30% it blows a raspberry and
@@ -365,8 +431,8 @@ func try_eat(pos: Vector3, now: int) -> int:
 		event.emit("say", ["worm", w.id, "Hey!"])
 		_worm_leave(w, now)
 	fruits.erase(best.id)
-	event.emit("fruit_gone", [best.id, true])
-	return 8
+	event.emit("fruit_gone", [best.id, true, HEAL, best.pos])
+	return HEAL
 
 
 # ================================================================ worms
