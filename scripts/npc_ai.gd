@@ -482,7 +482,9 @@ func _threat(net: Net, me: Net.ServerPlayer, tgt: Net.ServerPlayer, dist: float)
 		if net.players.has(int(e[3])) and net.players[int(e[3])].npc:
 			continue   # another challenger's: it can't hurt it
 		var r := 3.0
-		if kind == "meteor":
+		if kind == "lightning":   # v0.12.10: wider at the caster's mastery II / III
+			r = float(Weapons.spell_named_lv(Weapons.STAFF, "Lightning", int(e[4]) if e.size() > 4 else 1).get("radius", 3.0))
+		elif kind == "meteor":
 			r = float(Weapons.spell_named(Weapons.STAFF, "Meteor").radius)
 		elif kind == "storm_bolt":
 			r = float(Weapons.spell_named(Weapons.STAFF, "Arcane Storm").radius)

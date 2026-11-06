@@ -140,6 +140,27 @@ func _initialize() -> void:
 	check(Sim.MAX_HP - q.state.hp == 42 and Sim.MAX_HP - q2.state.hp == int(round(42 * 0.7)),
 		"Lightning III: 42 in the strike, and it forks 6 m to another for %d" % (Sim.MAX_HP - q2.state.hp))
 	net.pending_spells.clear()
+	# v0.12.10 the strike itself grows with mastery: 3 / 3.75 / 4.5 m; someone 4 m from where it lands is caught only at III
+	var qpos0 := q.state.pos
+	var q2pos0 := q2.state.pos
+	var radii := [1, 2, 3].map(func(l): return float(Weapons.spell_named_lv(Weapons.STAFF, "Lightning", l).radius))
+	check(radii == [3.0, 3.75, 4.5], "Lightning's strike widens with mastery %s" % str(radii))
+	var caught := []
+	for l in [1, 3]:
+		setlv(net, a, "Lightning", l)
+		q.state.hp = Sim.MAX_HP
+		q.state.dead = 0
+		q.state.pos = C + Vector3(4.0, 0, 0)
+		q2.state.pos = C + Vector3(40, 0, 40)   # (out of the way of chains and forks)
+		net.pending_spells = [[net.server_tick, "lightning", C, a.id, l]]
+		net._server_spells()
+		net.pending_spells.clear()
+		caught.append(q.state.hp < Sim.MAX_HP)
+	check(caught == [false, true], "someone 4 m from the strike: missed at I, hit at III (%s)" % str(caught))
+	q.state.pos = qpos0   # back where the next checks expect them
+	q2.state.pos = q2pos0
+	q.state.hp = Sim.MAX_HP
+	q2.state.hp = Sim.MAX_HP
 	# Frost Nova III freezes those close in; Gravity Well III bursts twice
 	setlv(net, a, "Frost Nova", 3)
 	a.state.pos = C + Vector3(0, 0, 2.5)

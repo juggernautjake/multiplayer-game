@@ -376,15 +376,17 @@ func _scorch(at: Vector3, r: float) -> void:
 func _warn_ring(at: Vector3, life: float, lv := 1) -> void:
 	var ring := MeshInstance3D.new()
 	var tm := TorusMesh.new()
-	tm.inner_radius = 2.75 if lv < 3 else 2.6   # v0.12.7 mastery: a bolder ring, white-gold at III
-	tm.outer_radius = 3.0
+	# v0.12.10: the ring marks the strike's real area, which grows with mastery (3 / 3.75 / 4.5 m)
+	var r := float(Weapons.spell_named_lv(Weapons.STAFF, "Lightning", lv).get("radius", 3.0))
+	tm.inner_radius = r - (0.25 if lv < 3 else 0.4)   # v0.12.7 mastery: a bolder ring, white-gold at III
+	tm.outer_radius = r
 	ring.mesh = tm
 	var m := _glow_mat([Color("bfe4ff"), Color("d8ecff"), Color("fff2c8")][lv - 1], 2.5 + lv * 0.5, 0.8)
 	ring.material_override = m
 	ring.scale = Vector3(1, 0.05, 1)
 	main.add_child(ring)
 	ring.global_position = at + Vector3(0, 0.05, 0)
-	var inner := _disc(at, 3.0, Color("9fd0ff"), 0.12)
+	var inner := _disc(at, r, Color("9fd0ff"), 0.12)
 	var tw := ring.create_tween().set_loops(int(ceil(life / 0.16)))
 	tw.tween_property(m, "albedo_color:a", 0.25, 0.08)
 	tw.tween_property(m, "albedo_color:a", 0.9, 0.08)

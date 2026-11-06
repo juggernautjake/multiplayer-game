@@ -49,10 +49,11 @@ const DATA := [
 		  # v0.12.7 mastery (see MASTERY below): II hits harder and chains further and more often, each jump keeping more;
 		  # III also forks: a second bolt leaps from the strike to the nearest enemy outside it (fork_k of the damage)
 		  "mastery": [600, 1800], "by": "damage dealt to enemies (chain jumps count double)",
-		  "m2": { "max_damage": 35, "min_damage": 10, "chain_range": 8.0, "chain_max": 7, "chain_keep": 0.6,
-			"text": "+25% damage, chains 8 m, 7 jumps" },
-		  "m3": { "max_damage": 42, "min_damage": 12, "chain_range": 10.0, "chain_max": 9, "chain_keep": 0.65,
-			"fork": 8.0, "fork_k": 0.7, "text": "+50% damage, chains 10 m, 9 jumps, the bolt forks" } },
+		  # v0.12.10 (Jacob): the strike's area grows with mastery too: 3 m, 3.75 m, 4.5 m
+		  "m2": { "max_damage": 35, "min_damage": 10, "radius": 3.75, "chain_range": 8.0, "chain_max": 7, "chain_keep": 0.6,
+			"text": "+25% damage, a wider strike (3.75 m), chains 8 m, 7 jumps" },
+		  "m3": { "max_damage": 42, "min_damage": 12, "radius": 4.5, "chain_range": 10.0, "chain_max": 9, "chain_keep": 0.65,
+			"fork": 8.0, "fork_k": 0.7, "text": "+50% damage, a wide strike (4.5 m), chains 10 m, 9 jumps, the bolt forks" } },
 		{ "name": "Fireball", "cost": 22, "windup": 12, "cast": 28, "cooldown": 12, "speed": 26.0, "gravity": 3.0,
 		  "radius": 3.4, "max_damage": 24, "min_damage": 6, "knock": 6.5,
 		  # v0.12.7 mastery: a bigger orb and blast; III bursts into `bomblets` small fire bombs that scatter and pop

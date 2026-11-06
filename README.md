@@ -980,7 +980,7 @@ their name. Everything also looks different at each level (bigger, brighter, new
 
 | Spell | Earned by (points for II / III) | II | III |
 |---|---|---|---|
-| **Lightning** | damage to enemies, chain jumps double (600 / 1800) | 35 damage (+25%), chains 8 m, 7 jumps, each jump keeps 60% | 42 (+50%), chains 10 m, 9 jumps (65%); the bolt **forks** to the nearest enemy outside the strike (70%), a fatter blue-white bolt |
+| **Lightning** | damage to enemies, chain jumps double (600 / 1800) | 35 damage (+25%), a **wider strike** (3.75 m, from 3), chains 8 m, 7 jumps, each jump keeps 60% | 42 (+50%), strike 4.5 m, chains 10 m, 9 jumps (65%); the bolt **forks** to the nearest enemy outside the strike (70%), a fatter blue-white bolt (0.12.10: the warning ring shows the real size) |
 | **Fireball** | damage to enemies (600 / 1800) | a bigger orb, blast 4.25 m, 29 damage (+20%), thicker trail | blast 5.1 m, 34 (+40%), a white-hot core; it bursts into **3 fire bomblets** that scatter and pop (8 each) |
 | **Shield** | damage the bubble soaks, +4 for every shot it turns away (250 / 750) | raising it costs 5 mana (half); hits drain 30% less | hits drain 50% less, and arrows, stones and fireballs are **reflected** straight back at whoever shot them, at full speed (they can hurt their shooter); a golden sheen |
 | **Frost Nova** | damage, + 2 for every second of slow on an enemy (350 / 1050) | 7.5 m (+25%), 21 damage, slows 3 s | 24 damage; enemies within 3.5 m are **frozen solid** for 1 s (an ice block), ice spikes erupt |
