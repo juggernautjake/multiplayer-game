@@ -6,6 +6,10 @@
 ## The Storm Altar: a ring of dark stone round a giant round button, out past the far end of the field. It lies flat
 ## and dull until you reach level 3; then it rises out of the ground with a rumble, its rim crackling and a small
 ## storm cloud turning over it ("The Storm Altar has risen!"). Jump on it to summon Thunderhorn.
+## v0.12.3 corrupted: when Thunderhorn slams it in the cutscene (Cutscene; boss status bit 128) its runes turn deep red
+## and violet, flickering, the stone darkens, glowing cracks split its faces, corrupted motes and smoke rise off it and
+## evil arcs crawl over it; it summons nobody ("The Duel Stone is corrupted"). When the fight ends (victory, defeat or
+## a restart) it is cleansed: gold again, with a burst of gold light.
 ## The server decides everything (Net._stone_interact, Net._server_altar); this only draws it and the prompts.
 class_name ArenaView
 extends Node3D
@@ -26,6 +30,12 @@ var rise := 0.0             # 0 sunk, 1 up
 var lvl_seen := -1
 var t := 0.0
 var _mote_t := 0.0
+var stone_mats: Array = []      # v0.12.3: [material, its own colour] (they darken when corrupted)
+var crack_mat: StandardMaterial3D
+var cracks: Node3D
+var corrupt := 0.0              # 0 clean .. 1 fully corrupted (eased)
+var _corrupted := false
+var _evil_t := 0.0
 
 
 func setup(n: Net, m: Node3D) -> void:
@@ -61,16 +71,21 @@ func _build_stone() -> void:
 	root.position = Vector3(c.x, 0, c.y)
 	add_child(root)
 	var stone := _m(Color("6e6a73"))
+	stone_mats.append([stone, stone.albedo_color])
 	var hx := WorldLayout.DUEL_HALF.x
 	var hz := WorldLayout.DUEL_HALF.y
 	var h := WorldLayout.DUEL_H
 	# the stone: a tapering slab, a little crooked, with a rough cap and a plinth of flat rocks round its foot
 	_box(root, Vector3(hx * 2.0, h * 0.7, hz * 2.0), Vector3(0, h * 0.35, 0), stone)
 	_box(root, Vector3(hx * 1.7, h * 0.32, hz * 1.75), Vector3(0.02, h * 0.82, 0), stone, Vector3(0, 0, 0.04))
-	_box(root, Vector3(hx * 1.2, 0.22, hz * 1.4), Vector3(-0.03, h + 0.02, 0), _m(Color("5d5a62")), Vector3(0.05, 0, -0.08))
+	var cap_m := _m(Color("5d5a62"))
+	stone_mats.append([cap_m, cap_m.albedo_color])
+	_box(root, Vector3(hx * 1.2, 0.22, hz * 1.4), Vector3(-0.03, h + 0.02, 0), cap_m, Vector3(0.05, 0, -0.08))
+	var plinth := _m(Color("5a5750"))
+	stone_mats.append([plinth, plinth.albedo_color])
 	for i in 7:
 		var a := i * TAU / 7.0 + 0.3
-		_box(root, Vector3(0.7, 0.14, 0.5), Vector3(cos(a) * 1.05, 0.07, sin(a) * 0.9), _m(Color("5a5750")), Vector3(0, a, 0.03 * i))
+		_box(root, Vector3(0.7, 0.14, 0.5), Vector3(cos(a) * 1.05, 0.07, sin(a) * 0.9), plinth, Vector3(0, a, 0.03 * i))
 	# the runes: glowing glyph strokes on both broad faces
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 42
@@ -86,6 +101,35 @@ func _build_stone() -> void:
 					var ang := rng.randf_range(-1.2, 1.2)
 					var off := Vector3(rng.randf_range(-0.07, 0.07), rng.randf_range(-0.08, 0.08), 0)
 					_box(root, Vector3(0.035, rng.randf_range(0.1, 0.2), 0.01), at + off, rm, Vector3(0, 0, ang))
+	# v0.12.3 the cracks the corruption splits open: jagged glowing lines over all four faces, hidden until then
+	cracks = Node3D.new()
+	cracks.visible = false
+	root.add_child(cracks)
+	crack_mat = MagicFx._glow_mat(Cutscene.EVIL, 0.0, 1.0)
+	crack_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var crng := RandomNumberGenerator.new()
+	crng.seed = 666
+	var normals := [Vector3(0, 0, 1), Vector3(0, 0, -1), Vector3(1, 0, 0), Vector3(-1, 0, 0)]
+	for face in 4:
+		var n: Vector3 = normals[face]
+		var half := hz if face < 2 else hx
+		var across := hx if face < 2 else hz
+		var side := Vector3(1, 0, 0) if face < 2 else Vector3(0, 0, 1)
+		for _ci in 3:   # each crack: a crooked line climbing the face, with a fork
+			var p := n * (half + 0.012) + side * crng.randf_range(-across * 0.7, across * 0.7) + Vector3(0, crng.randf_range(0.05, 0.3), 0)
+			for seg in 5:
+				var q := p + Vector3(0, crng.randf_range(0.18, 0.3), 0) + side * crng.randf_range(-0.16, 0.16)
+				q.y = minf(q.y, h * 0.95)
+				if q.distance_to(p) < 0.03:
+					break
+				var mi := _box(cracks, Vector3(0.045, 0.045, p.distance_to(q) + 0.02), (p + q) / 2.0, crack_mat)
+				mi.look_at_from_position(mi.position, q, n)
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				if seg == 2:
+					var f := q + Vector3(0, crng.randf_range(0.1, 0.2), 0) + side * crng.randf_range(-0.25, 0.25)
+					var fm := _box(cracks, Vector3(0.03, 0.03, q.distance_to(f) + 0.02), (q + f) / 2.0, crack_mat)
+					fm.look_at_from_position(fm.position, f, n)
+				p = q
 	stone_light = OmniLight3D.new()
 	stone_light.light_color = Color("ffc65a")
 	stone_light.light_energy = 0.8
@@ -201,11 +245,18 @@ func _process(delta: float) -> void:
 			Fx.burst(main, at, Vector3.UP, Color("b46bff"), 40, 5.0, 0.05)
 	var rc := Color("b46bff") if wizards else Color("ffc65a")
 	var pulse := 0.75 + 0.25 * sin(t * (3.0 if wizards else 1.6))
+	_update_corruption(delta)
+	if corrupt > 0.001:   # v0.12.3: deep red and violet, flickering like a bad heart
+		var flick := 0.55 + 0.45 * absf(sin(t * 7.0 + sin(t * 2.3) * 3.0))
+		var evil := Cutscene.EVIL.lerp(Cutscene.EVIL2, 0.5 + 0.5 * sin(t * 1.7))
+		rc = rc.lerp(evil, corrupt)
+		pulse = lerpf(pulse, flick * 1.4, corrupt)
 	for i in 2:
 		(rune_mats[i] as StandardMaterial3D).albedo_color = rc * pulse + Color(0, 0, 0, 1)
 	stone_light.light_color = rc
-	stone_light.light_energy = (1.4 if wizards else 0.7) * pulse
-	if wizards:
+	stone_light.light_energy = lerpf((1.4 if wizards else 0.7) * pulse, 3.5 * pulse, corrupt)
+	stone_light.omni_range = lerpf(4.0, 9.0, corrupt)
+	if wizards and corrupt < 0.5:
 		_mote_t -= delta
 		if _mote_t <= 0.0:
 			_mote_t = 0.25
@@ -256,11 +307,58 @@ func _process(delta: float) -> void:
 			tw.tween_callback(arc.queue_free)
 
 
+## v0.12.3 the corruption, from Thunderhorn's state (bit 128): turning evil quickly (it plays in the cutscene's
+## close-up), cleansed slowly with a burst of gold when the fight is over.
+func _update_corruption(delta: float) -> void:
+	var bv = main.get("boss_view")
+	var want: bool = bv != null and bv.alive and int(bv.flags) & 128 != 0
+	if want and not _corrupted:
+		_corrupted = true
+		var at := Vector3(WorldLayout.DUEL_C.x, 1.0, WorldLayout.DUEL_C.y)
+		Fx.burst(main, at, Vector3.UP, Cutscene.EVIL, 50, 6.0, 0.06)
+		Fx.burst(main, at, Vector3.UP, Cutscene.EVIL2, 40, 4.0, 0.05)
+	elif not want and _corrupted:
+		_corrupted = false
+		var at := Vector3(WorldLayout.DUEL_C.x, 1.0, WorldLayout.DUEL_C.y)
+		Fx.burst(main, at, Vector3.UP, Color("ffd76a"), 60, 5.0, 0.06)
+		if main.has_method("toast"):
+			main.toast("The Duel Stone is cleansed")
+	corrupt = move_toward(corrupt, 1.0 if _corrupted else 0.0, delta / (1.1 if _corrupted else 2.5))
+	cracks.visible = corrupt > 0.01
+	crack_mat.emission_energy_multiplier = corrupt * (3.0 + 2.5 * absf(sin(t * 5.0 + sin(t * 1.3))))
+	var hot := 0.5 + 0.5 * absf(sin(t * 4.0 + sin(t * 1.7) * 2.0))
+	crack_mat.emission = Color("ff4a3a").lerp(Color("ffc0e8"), hot * 0.6)   # hotter than the runes: molten red-white
+	crack_mat.albedo_color = Color(crack_mat.emission, corrupt)
+	for sm in stone_mats:
+		(sm[0] as StandardMaterial3D).albedo_color = (sm[1] as Color).lerp(Color("2a1d2c"), corrupt * 0.8)
+	if corrupt < 0.3:
+		return
+	_evil_t -= delta
+	if _evil_t > 0.0:
+		return
+	_evil_t = 0.07
+	var c := WorldLayout.DUEL_C
+	var top := Vector3(c.x + randf_range(-0.5, 0.5), randf_range(0.3, 1.8), c.y + randf_range(-0.4, 0.4))
+	Fx.burst(main, top, Vector3.UP, Cutscene.EVIL if randf() < 0.5 else Cutscene.EVIL2, 2, 1.6, 0.035)   # corrupted motes
+	var mfx: MagicFx = main.get("magic_fx")
+	if mfx != null and randf() < 0.25:   # evil arcs crawling over it
+		var a := Vector3(c.x + randf_range(-0.6, 0.6), randf_range(0.2, 1.8), c.y + randf_range(-0.45, 0.45))
+		var arc := mfx._ribbons([[MagicFx._fractal(a, a + Vector3(randf_range(-0.7, 0.7), randf_range(-0.5, 0.7), randf_range(-0.7, 0.7)), 3, 0.35), 0.03]],
+			Cutscene.EVIL2 if randf() < 0.5 else Cutscene.EVIL, 7.0)
+		var tw := arc.create_tween()
+		tw.tween_property(arc.material_override, "albedo_color:a", 0.0, 0.12)
+		tw.tween_callback(arc.queue_free)
+	if randf() < 0.12:   # dark smoke seeping up
+		CutsceneView.evil_smoke(main, Vector3(c.x, 0.8, c.y), 1, 0.5, 2.5, 0.45)
+
+
 ## What the prompt over the stone or altar says when you're close: [text, where] or [] if nothing.
 func prompt_for(me: Vector3) -> Array:
 	var st := net.predicted
 	var lvl := maxi(st.staff_lvl, st.wand_lvl) if st != null else 0
 	var c := WorldLayout.DUEL_C
+	if Vector2(me.x - c.x, me.z - c.y).length() < Net.DUEL_REACH and _corrupted:
+		return ["The Duel Stone is corrupted: defeat Thunderhorn to cleanse it", Vector3(c.x, WorldLayout.DUEL_H + 0.6, c.y)]
 	if Vector2(me.x - c.x, me.z - c.y).length() < Net.DUEL_REACH:
 		var who := "bow, slingshot, sword, club or wizard" if lvl >= 2 else "bow, slingshot, sword or club"
 		return ["E  summon a challenger (%s)" % who, Vector3(c.x, WorldLayout.DUEL_H + 0.6, c.y)]

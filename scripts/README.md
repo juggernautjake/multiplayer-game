@@ -1119,3 +1119,33 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   players' golems always fight Who.NPC and Who.BOSS and those enemies' golems). Killing one gives no level credit
   (golem kills never call `_magic_kill`). Chosen: they DISSOLVE when their wizard falls (`Golems.dissolve(owner)` from
   `Net._server_npcs` as soon as the wizard is down: they crumble). Test: wizard_test `_npc_golems`.
+
+## v0.12.3: the Duel Stone's corruption cutscene
+
+- `cutscene.gd` (`Cutscene`, statics): the shared timeline in ticks (`LEN` 720; `TURN_END`, `RUN_END`, `SLAM_AT`,
+  `CORRUPT_AT`, `RISE_AT`, `EYES_AT`, `TWITCH_AT`, `SNAP_AT`), `CUT_HP` 0.6, `boss_at(t, from, yaw0)` (his path: turn,
+  gallop, stand `STAND_D` from the stone; a cut hides the rest of a long run), `minion_spot(i, from)` (a ring on the far
+  side of the stone), `minion_y(t, i)` (rising from `UNDER`), `eyes_at(i)`, `puppet(ct, i)` (the minions' puppet
+  poses, deterministic), colours `EVIL` / `EVIL2`, `WEAPONS` / `NAMES` of the six.
+- `boss.gd`: `S.CUTSCENE`; `cut_on` (armed by `Net.summon_boss`; a bare Boss in tests never plays it), `cut_done`,
+  `cut_due()` (below 60%, not in a Storm Leap sequence, dazed, a pending daze, a phase change or the entrance),
+  `_start_cutscene` (clears rings, balls, orbs, plans); in `tick` the film moves him and every other clock is paused;
+  `hurt` / `stunned` do nothing during it; status bit 16 (untouchable) during it and 128 (stone corrupted) from the
+  slam until the fight ends.
+- `net.gd`: `cutscene_on()`; during it `_server_step_player` empties every player's buttons and drops their events,
+  `_damage` returns (everyone invulnerable), `_server_npcs` gives NPCs no inputs, golems don't tick;
+  `_server_cutscene(t)` clears projectiles, pending spells, wells and storms at t 0, `spawn_minions()` at `RISE_AT`
+  (ServerPlayer `minion`, NpcAI at tier 2 / 3 with `reach` `MINION_REACH`, level-1 wizards), raises them and turns them
+  to the nearest fighter at `SNAP_AT`; `_fell_minions` when he dies (fx `minion_fall`), `_clear_minions` on a new
+  fight, victory, defeat and restart (fx `minion_gone`); a fallen minion leaves with `minion_gone`. The corrupted stone
+  refuses `_stone_interact`. Roster rows carry a kind (0 player, 1 challenger, 2 minion). Clients: `cut_client` (from
+  the boss state) empties this client's buttons too.
+- `cutscene_view.gd` (`CutsceneView`): the client's film from `BossView.state_t` (late joiners see the rest): the
+  shots (`_shot`, `_clear` pulls a camera in front of obstacles), the camera easing back over `Cutscene.BLEND`, the
+  letterbox, the title card, the sounds and moments (`_events`), the HUDs and name tags hidden; the minions' corrupted
+  look (Pip `tint`, a multiply overlay on the figure), puppet poses, glowing eye trails (`BossModel.Trail`), purple
+  smoke (`evil_smoke`). Main calls `pre_avatars`, `camera`, `post_avatars`.
+- `boss_view.gd`: his poses for `S.CUTSCENE` (turn, gallop, rear, slam and channel, bellow, watch). `arena_view.gd`:
+  the stone's corruption (runes, darkening, cracks, motes, arcs, smoke; cleansed in gold), its prompt.
+  `avatar.gd` / `figure_avatar.gd`: `puppet`, `tint`, `eye_points`. `synth.gd`: `corrupt(kind)`: drone, creak,
+  whisper, snap, slam. `npc_ai.gd`: `reach`. `main.gd`: `--bot boss --cutscene`.

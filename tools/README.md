@@ -23,6 +23,7 @@ the script through `OS.get_cmdline_user_args()`.
 | [eco_test.gd](#eco_testgd) | test | no | Runs the yard for 20 minutes and checks that everything happens. |
 | [invite_test.gd](#invite_testgd) | test | no | Checks that invite codes round-trip. |
 | [cloth_test.gd](#cloth_testgd) | test | no | Dashes a robed body and checks the cloth keeps up without stretching. |
+| [cutscene_test.gd](#cutscene_testgd) | test | no | v0.12.3 the Duel Stone's corruption cutscene and its minions. |
 | [order_test.gd](#order_testgd) | test | no | v0.12.2 golem orders: follow, stay, go there, attack that, regroup, PvP rules, synced. |
 | [figure_poses.gd](#figure_posesgd) | renderer | yes | One pose of the 3D figure, saved as a PNG. |
 | [figure_strip.gd](#figure_stripgd) | renderer | yes | A filmstrip of one move of the 3D figure. |
@@ -422,3 +423,16 @@ dodge_test now expects no dodges at tier 1.
 wizard_test (`_npc_golems`): a wand challenger over 60 s keeps at most 3 golems alive; its golem hits a player with
 PvP off; a player's golem picks the challenger's golem; killing that golem gives no level; the challenger's golems
 crumble when it falls.
+
+## cutscene_test.gd
+
+`<godot> --headless --path . -s tools/cutscene_test.gd` (v0.12.3, offline, prints harmless RPC errors): nothing at
+61%; below 60% the cutscene starts at once and clears rings, orbs and pending spells; the boss state carries it to
+clients (`Net.cut_client`); players, Thunderhorn, golems and minions are invulnerable and players holding keys don't
+move; he gallops to the stone; the stone is corrupted at `CORRUPT_AT`; exactly six minions (sword, club, bow,
+slingshot, staff, wand) appear at `RISE_AT` under the ground and have risen by the snap, at tier 2 with level-1
+wizards, fighting players whatever PvP says (players' golems fight them); the corrupted stone summons nobody; at the
+snap they face the players; after it players move again and the minions come for them and can hurt them; a minion
+kill levels the staff; it never plays twice; his death fells every minion and they dissolve; it waits for a Storm
+Leap sequence and for a daze to end; with two fighters the minions are tier 3; a defeat removes them, the restart
+cleanses the stone, and the next fight plays it again.

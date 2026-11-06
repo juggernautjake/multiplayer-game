@@ -67,6 +67,7 @@ class ServerPlayer:
 	var duel_wins := 0          # v0.12.0: challengers this player has beaten (their tier rises with it)
 	var heal_t0 := 0            # v0.12.0: the tick this heal-aura channel's pulses count from
 	var heal_last := -100       # the last tick it was channelling
+	var minion := false         # v0.12.3: one of the six corrupted minions the Duel Stone raises in the cutscene (npc too)
 
 
 ## Something lying on the ground to pick up (server). `spawn` >= 0: one of the fixed spawns, which comes back 20 s
@@ -156,6 +157,7 @@ var _frame_us := 0          # how long the last frame took: samples taken right 
 var jitter_ms := 0.0        # how unevenly snapshots arrive (95th percentile lateness), for the readout
 var tailscale_path := {}    # address -> "direct" / "relayed (DERP ...)" / "checking" / "": see check_tailscale_path()
 var golem_orders := {}      # v0.12.2: summoner id -> [Golems.Order, point, target] as the server last said (not FOLLOW)
+var cut_client := false     # v0.12.3: the boss state says the corruption cutscene is playing (this client sends no buttons)
 
 
 func _ready() -> void:
@@ -366,7 +368,7 @@ func roster_update(list: Array) -> void:
 	for e in list:
 		roster[int(e[0])] = { "name": str(e[1]), "color": e[2], "character": str(e[3]) if e.size() > 3 else "pip",
 			"outfit": int(e[4]) if e.size() > 4 else 0, "pvp": bool(e[5]) if e.size() > 5 else false,
-			"kills": e[6] if e.size() > 6 else [0, 0] }
+			"kills": e[6] if e.size() > 6 else [0, 0], "kind": int(e[7]) if e.size() > 7 else 0 }   # kind: 0 player, 1 challenger, 2 minion
 	roster_changed.emit(roster)
 
 
@@ -584,7 +586,7 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 func _server_send_roster() -> void:
 	var list := []
 	for p: ServerPlayer in players.values():
-		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp, p.kills])
+		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp, p.kills, 2 if p.minion else (1 if p.npc else 0)])
 	roster_update.rpc(list)
 	if is_host_player:
 		roster_update(list)
@@ -677,10 +679,15 @@ func _server_step_player(p: ServerPlayer) -> void:
 		p.waited = 0
 		var inp: Sim.PlayerInput = p.queue[nxt]
 		p.queue.erase(nxt)
+		var frozen := cutscene_on()   # v0.12.3: nobody acts while the cutscene plays
+		if frozen and not p.npc:
+			inp.buttons = 0
 		var before := p.state.pos
 		var ev := Sim.step(p.state, inp)
 		p.last_applied = inp.seq
 		budget -= 1
+		if frozen:
+			ev = Sim.Ev.NONE
 		if ev == Sim.Ev.MELEE_HIT:
 			_melee(p, inp)
 		elif ev == Sim.Ev.SHOT:
@@ -698,7 +705,7 @@ func _server_step_player(p: ServerPlayer) -> void:
 			p.state.wand_lvl = old.wand_lvl
 		p.was_dead = p.state.dead > 0
 		var interact := inp.buttons & Sim.Btn.INTERACT != 0
-		if interact and not p.interact_prev and p.state.dead == 0:
+		if interact and not p.interact_prev and p.state.dead == 0 and not frozen:
 			if not _stone_interact(p) and not _vault_interact(p) and not _pick_up(p, 2.2, true) and ecology:
 				var gain := ecology.try_eat(p.state.pos, server_tick)
 				if gain > 0:
@@ -1033,6 +1040,8 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 	last_dealt = 0
 	if from > 0 and from == target:   # nobody hurts themselves (their own blasts, golems)
 		return
+	if cutscene_on():   # v0.12.3: everyone is invulnerable while the corruption cutscene plays
+		return
 	if not can_hurt(from, target):
 		return
 	# v0.12.0: who hurt whom, for golems (they go after whoever is attacking their summoner, and hold PvP grudges)
@@ -1134,6 +1143,9 @@ func _sim_push(q: Array, data: PackedByteArray) -> void:
 
 func _client_tick() -> void:
 	var b_y: Array = input_source.call() if input_source.is_valid() else [0, 0.0, 0.0, 0]
+	if cut_client:   # v0.12.3: the cutscene: hands off (the server empties our inputs too)
+		b_y = b_y.duplicate()
+		b_y[0] = 0
 	var pitch: float = round(float(b_y[2]) * 10000.0) / 10000.0   # the precision the packet carries, so the server agrees
 	var aim_yaw: float = PackedFloat32Array([float(b_y[4]) if b_y.size() > 4 else float(b_y[1])])[0]
 	var face_yaw: float = PackedFloat32Array([float(b_y[5]) if b_y.size() > 5 else float(b_y[1])])[0]
@@ -1846,7 +1858,8 @@ func _server_spells() -> void:
 	var people := _golem_people()
 	golems.fogs = fogs
 	golems.fog_pvp = fog_pvp() if not fogs.is_empty() else {}
-	for h in golems.tick(server_tick, people):
+	var golem_hits: Array = [] if cutscene_on() else golems.tick(server_tick, people)   # v0.12.3: they stand still in the cutscene
+	for h in golem_hits:
 		var g: Golems.G = h[0]
 		var tid: int = h[1]
 		dmg_src = Weapons.WAND
@@ -2064,6 +2077,9 @@ const NPC_NAMES := ["Brutus", "Grizelda", "Morwen", "Tobias", "Ragnhild", "Corvi
 func _stone_interact(p: ServerPlayer) -> bool:
 	if p.npc or Vector2(p.state.pos.x - WorldLayout.DUEL_C.x, p.state.pos.z - WorldLayout.DUEL_C.y).length() > DUEL_REACH:
 		return false
+	if boss != null and boss.cut_done:   # v0.12.3: Thunderhorn corrupted it; it answers nobody until he's gone
+		_toast(p.id, "The Duel Stone is corrupted! Defeat Thunderhorn to cleanse it")
+		return true
 	for q: ServerPlayer in players.values():
 		if q.npc and q.ai.owner == p.id and q.state.dead == 0:
 			_toast(p.id, "Defeat your challenger first")
@@ -2124,18 +2140,21 @@ func spawn_npc(presser: ServerPlayer, weapon := -1, difficulty := 1) -> ServerPl
 ## Every tick: each challenger thinks (its input goes in its queue like a player's), keeps its ammo, and once it has
 ## lain on the ground a moment after falling, it's gone.
 func _server_npcs() -> void:
+	var frozen := cutscene_on()
 	for q: ServerPlayer in players.values().duplicate():
 		if not q.npc:
 			continue
 		if q.state.dead > 0:
 			golems.dissolve(q.id)   # v0.12.0: an NPC wizard's golems crumble when it falls
 		if q.state.dead > 0 and q.state.dead < Sim.RESPAWN_TICKS - 90:
-			_fx("npc_leave", [q.id, q.state.pos])
+			_fx("minion_gone" if q.minion else "npc_leave", [q.id, q.state.pos])   # v0.12.3: minions dissolve into smoke
 			players.erase(q.id)
 			_server_send_roster()
 			continue
 		q.state.arrows = 99
 		q.state.rocks = 99
+		if frozen:   # v0.12.3: challengers and minions stand still (no inputs) while the cutscene plays
+			continue
 		var inp := q.ai.think(self, q)
 		inp.seq = q.last_applied + 1
 		q.queue[inp.seq] = inp
@@ -2183,8 +2202,10 @@ func summon_boss() -> void:
 		if not p.npc:
 			boss_fighters.append(p.id)
 	var at := Vector3(WorldLayout.ALTAR_C.x, 0, WorldLayout.ALTAR_C.y + 14.0)
+	_clear_minions()
 	boss = Boss.new(at, boss_fighters.size())
 	boss.yaw = 0.0
+	boss.cut_on = true   # v0.12.3: the Duel Stone's corruption plays once this fight (Cutscene)
 
 
 ## Thunderhorn each tick: his brain, then what he did (hits, slows, called lightning, effects); his state to everyone;
@@ -2219,6 +2240,10 @@ func _server_boss() -> void:
 		if q.npc and q.state.dead == 0:
 			boss.bystanders.append([q.id, q.state.pos])
 	boss.tick(server_tick, people, gl)
+	if boss.state == Boss.S.CUTSCENE:   # v0.12.3 the Duel Stone's corruption
+		_server_cutscene(boss.t)
+	elif boss.state == Boss.S.DEATH:   # v0.12.3: his minions die with him (they collapse and dissolve into smoke)
+		_fell_minions()
 	for h in boss.hits:
 		_damage(int(h[0]), int(h[1]), Boss.ID, h[2], float(h[3]))
 	boss.hits.clear()
@@ -2257,6 +2282,7 @@ func _server_boss() -> void:
 			boss_state(server_tick, data)
 	if boss.done:   # victory!
 		boss = null
+		_clear_minions()
 		if ecology:
 			ecology.restore_trees(server_tick)
 		boss_state.rpc(server_tick, [])
@@ -2271,6 +2297,7 @@ func _server_boss() -> void:
 	if down == boss_fighters.size() and boss_fighters.size() > 0:
 		_fx("boss_leave", [boss.pos])
 		boss = null
+		_clear_minions()
 		boss_state.rpc(server_tick, [])
 		if is_host_player:
 			boss_state(server_tick, [])
@@ -2390,6 +2417,7 @@ func restart_after_defeat() -> void:
 			p.state.wand_lvl = old.wand_lvl
 			p.was_dead = false
 	boss_fighters = []
+	_clear_minions()
 	if ecology:
 		ecology.restore_trees(server_tick)
 	_result("restart")
@@ -2422,7 +2450,135 @@ func boss_end(kind: String) -> void:
 
 @rpc("authority", "call_remote", "unreliable_ordered", 5)
 func boss_state(tick: int, data: Array) -> void:
-	if not multiplayer.is_server():
+	if multiplayer != null and not multiplayer.is_server():
 		WorldLayout.altar_pressed = not data.is_empty()
+	cut_client = not data.is_empty() and int(data[0]) == Boss.S.CUTSCENE
 	boss_changed.emit(tick, data)
+
+
+# ================================================================ v0.12.3 the Duel Stone's corruption (Cutscene)
+## Is the cutscene playing (server side)? Then nobody acts or gets hurt, and clocks stand still.
+func cutscene_on() -> bool:
+	return boss != null and boss.state == Boss.S.CUTSCENE
+
+
+## Each tick of the film (t from the boss): at its start everything in flight is cleared; at RISE_AT the six minions
+## are made (under the ground); then they rise with the timeline, facing the stone, and at SNAP_AT turn to face the
+## nearest fighter.
+func _server_cutscene(t: int) -> void:
+	if t == 0:
+		for pr: Proj in projectiles.values().duplicate():   # arrows, stones and fireballs in the air: gone
+			projectiles.erase(pr.id)
+			proj_end.rpc(pr.id, server_tick, pr.last, false)
+			if is_host_player:
+				proj_end(pr.id, server_tick, pr.last, false)
+		pending_spells.clear()   # lightning warnings, meteors, his called bolts
+		wells.clear()
+		storms.clear()
+		golem_toss.clear()
+		for p: ServerPlayer in players.values():   # (inputs still queued play out with their buttons emptied)
+			p.state.charge = 0
+			p.state.shield = 0
+			Sim.quantize(p.state)
+		print("[cutscene] the Duel Stone's corruption begins (Thunderhorn at %d / %d)" % [boss.hp, boss.max_hp])
+	if t == Cutscene.RISE_AT:
+		spawn_minions()
+	var s := Cutscene.stone()
+	var i := 0
+	for q: ServerPlayer in _minions():
+		var st := q.state
+		var spot := Cutscene.minion_spot(i, boss.cut_from)
+		st.pos = Vector3(spot.x, Cutscene.minion_y(t, i), spot.z)
+		st.vel = Vector3.ZERO
+		st.grounded = true
+		if t < Cutscene.SNAP_AT:   # facing out, away from the stone, until they snap round to the players
+			st.yaw = Cutscene.yaw_to(st.pos, st.pos * 2.0 - s)
+		else:
+			var best := INF
+			for id in boss_fighters:
+				if players.has(id) and players[id].state.dead == 0:
+					var d: float = (players[id].state.pos as Vector3).distance_to(st.pos)
+					if d < best:
+						best = d
+						st.yaw = Cutscene.yaw_to(st.pos, players[id].state.pos)
+		Sim.quantize(st)
+		i += 1
+
+
+## The minions alive or dead, oldest first (their index in Cutscene.WEAPONS).
+func _minions() -> Array:
+	var out := []
+	for q: ServerPlayer in players.values():
+		if q.minion:
+			out.append(q)
+	out.sort_custom(func(a, b): return a.id < b.id)
+	return out
+
+
+## The six corrupted minions (one each: sword, club, bow, slingshot, staff wizard, wand wizard): challengers' brains
+## (NpcAI) at the fight's tier (2 alone, 3 with two or more fighters), wizards with their level-1 spells (the wand
+## wizard keeps at most 3 golems, NpcAI.MAX_GOLEMS), fighting every player and their golems. They start under the
+## ground at their spots round the stone (Cutscene.minion_spot); _server_cutscene raises them.
+const MINION_TIER_SOLO := 1
+func spawn_minions() -> void:
+	if boss == null:
+		return
+	var tier := MINION_TIER_SOLO + (1 if boss_fighters.size() >= 2 else 0)
+	for i in Cutscene.WEAPONS.size():
+		var w: int = Cutscene.WEAPONS[i]
+		var q := ServerPlayer.new()
+		q.id = next_npc
+		next_npc += 1
+		q.npc = true
+		q.minion = true
+		q.name = "Corrupted %s (tier %d)" % [Cutscene.NAMES[i], tier + 1]
+		q.color = Cutscene.MINION_COL
+		q.character = "pip"
+		q.outfit = 3
+		q.pvp = true
+		q.slot = 0
+		q.state = Sim.PlayerState.new()
+		var at := Cutscene.minion_spot(i, boss.cut_from)
+		q.state.pos = Vector3(at.x, Cutscene.UNDER, at.z)
+		q.state.yaw = Cutscene.yaw_to(at, at * 2.0 - Cutscene.stone())
+		q.state.grounded = true
+		q.state.owned = 1 | (1 << w)
+		q.state.weapon = w
+		q.state.arrows = 99
+		q.state.rocks = 99
+		q.state.staff_lvl = 1   # level-1 spells only (NpcAI.kit)
+		q.state.wand_lvl = 1
+		Sim.quantize(q.state)
+		q.primed = true
+		q.ai = NpcAI.new(q.id, 0, w, tier)
+		q.ai.reach = MINION_REACH
+		players[q.id] = q
+	_server_send_roster()
+	_fx("minions_rise", [Cutscene.stone()])
+const MINION_REACH := 160.0   # minions look for players this far off (they rise at the stone, far from the arena)
+
+
+## Thunderhorn is dying: every minion still standing collapses (they leave in purple smoke a moment later, through
+## _server_npcs).
+func _fell_minions() -> void:
+	for q: ServerPlayer in _minions():
+		if q.state.dead == 0:
+			q.state.hp = 0
+			q.state.dead = Sim.RESPAWN_TICKS
+			q.state.charge = 0
+			q.state.shield = 0
+			Sim.quantize(q.state)
+			_fx("minion_fall", [q.id, q.state.pos])
+
+
+## Gone at once (defeat, victory, a restart, a new fight), in purple smoke.
+func _clear_minions() -> void:
+	var any := false
+	for q: ServerPlayer in _minions():
+		golems.dissolve(q.id)
+		_fx("minion_gone", [q.id, q.state.pos])
+		players.erase(q.id)
+		any = true
+	if any:
+		_server_send_roster()
 

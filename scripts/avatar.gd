@@ -34,6 +34,8 @@ var label: Label3D
 var hp_bar: Sprite3D
 var zap_bar: Sprite3D        # v0.11.0: Thunderhorn's Static build-up, over the health bar
 var npc := false             # v0.12.0: a challenger (Main sets it): wizards show a mana bar under the health bar
+var tint := Color.WHITE      # v0.12.3: a corrupted minion is drawn darker and purple (CutsceneView sets it)
+var puppet := {}             # v0.12.3: a minion's puppet pose in the cutscene (Cutscene.puppet); empty: himself
 var mana_back: Sprite3D
 var mana_bar: Sprite3D
 var zap_back: Sprite3D
@@ -389,7 +391,8 @@ func animate(delta: float, cam: Camera3D) -> void:
 	_dress(delta, cam)
 
 	_flash = maxf(_flash - delta, 0.0)
-	sprite.modulate = Color(1, 0.45, 0.45) if _flash > 0.0 else Color.WHITE
+	sprite.modulate = (Color(1, 0.45, 0.45) if _flash > 0.0 else Color.WHITE) * tint
+	_carry.modulate = tint
 	if state != null:
 		var k := float(state.hp) / float(Sim.MAX_HP)
 		hp_bar.scale.x = maxf(0.9 * k, 0.001)
@@ -403,10 +406,44 @@ func animate(delta: float, cam: Camera3D) -> void:
 		if dizzy and state.zap >= Sim.ZAP_STUN and int(Time.get_ticks_msec() / 90) % 4 == 0:
 			sprite.modulate = Color(0.85, 0.7, 1.4)
 
+	_puppet_pose()
 	var ground := WorldLayout.ground_height(position.x, position.z, position.y)
 	blob.global_position = Vector3(position.x, ground + 0.012, position.z)
 	var s := clampf(1.0 - (position.y - ground) / 6.0, 0.35, 1.0)
 	blob.scale = Vector3(s, 1, s)
+	blob.visible = position.y > -0.3   # (a minion still under the ground has no ring yet)
+
+
+## v0.12.3 a corrupted minion in the cutscene (Cutscene.puppet): Pip is a drawn sprite, so the puppet reads through
+## squash (hunched), sideways jerks and a dip, and no weapon in his hand until he draws it.
+func _puppet_pose() -> void:
+	if puppet.is_empty():
+		return
+	var hunch := float(puppet.get("hunch", 0.0)) * float(puppet.get("limp", 0.0))
+	sprite.scale = Vector3(sprite.scale.x * (1.0 + 0.07 * hunch), sprite.scale.y * (1.0 - 0.13 * hunch), 1.0)
+	sprite.position.x += float(puppet.get("twist", 0.0)) * 0.12 + float(puppet.get("roll", 0.0)) * 0.1
+	sprite.position.y += float(puppet.get("head", 0.0)) * 0.04
+	if bool(puppet.get("hide_weapon", false)):
+		_carry.visible = false
+	if _accent:
+		_accent.scale = sprite.scale
+		_accent.position.x = sprite.position.x
+		_accent.position.y = sprite.position.y
+
+
+## v0.12.3 where his eyes are now (for the minions' glowing eye trails): [left, right] in the world.
+func eye_points(cam: Camera3D) -> Array:
+	var right := Vector3(1, 0, 0)
+	var toward := Vector3(0, 0, 1)
+	if cam:
+		right = cam.global_transform.basis.x
+		right.y = 0.0
+		right = right.normalized() if right.length() > 0.01 else Vector3(1, 0, 0)
+		toward = cam.global_transform.basis.z
+		toward.y = 0.0
+		toward = toward.normalized() if toward.length() > 0.01 else Vector3(0, 0, 1)
+	var c := global_position + sprite.position + Vector3(0, 1.36 * sprite.scale.y, 0) + toward * 0.12
+	return [c - right * 0.09, c + right * 0.09]
 
 
 ## The slash trail, on the tick the hit lands (shared with the 3D figure).

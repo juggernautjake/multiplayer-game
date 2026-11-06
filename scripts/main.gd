@@ -69,6 +69,7 @@ var pause_char: OptionButton
 var joining_until := 0     # msec: waiting for the host to answer a Join
 var arena_view: ArenaView  # v0.10.0: the Duel Stone and the Storm Altar
 var boss_view: BossView    # Thunderhorn
+var cutscene_view: CutsceneView   # v0.12.3 the Duel Stone's corruption: the film (camera, letterbox, puppets, eyes)
 var prize: PrizeScreen     # victory (the prize) and defeat screens
 var audit := {}   # --log: counts of every replicated event this client received (network audit)
 # v0.12.2 selection and orders (see "controls"): the spell hotbar, the radial wheels, taps and holds
@@ -317,6 +318,10 @@ void fragment() {
 	boss_view.name = "Boss"
 	add_child(boss_view)
 	boss_view.setup(net, self, magic_fx)
+	cutscene_view = CutsceneView.new()
+	cutscene_view.name = "Cutscene"
+	add_child(cutscene_view)
+	cutscene_view.setup(net, self, boss_view)
 	prize = PrizeScreen.new()
 	prize.name = "Prize"
 	add_child(prize)
@@ -396,6 +401,8 @@ func _process(_delta: float) -> void:
 		return
 	_process_joining()
 	var frac := Engine.get_physics_interpolation_fraction()
+	if cutscene_view:
+		cutscene_view.pre_avatars(avatars, _delta)   # v0.12.3: the minions' puppet poses, name tags hidden in the film
 	for id in avatars.keys():
 		var av = avatars[id]
 		if id == net.my_id and net.predicted != null:
@@ -407,7 +414,7 @@ func _process(_delta: float) -> void:
 			av.state = net.predicted
 			if "aim_pitch" in av:
 				av.aim_pitch = aim_pitch
-			av.model.visible = view == View.THIRD
+			av.model.visible = view == View.THIRD or (cutscene_view != null and cutscene_view.showing())
 		else:
 			var d := net.remote_draw(id, frac)
 			if d.is_empty():
@@ -445,6 +452,9 @@ func _process(_delta: float) -> void:
 		cam.position = p
 		cam.look_at(focus, Vector3.UP)
 		_chase_cam()
+	if cutscene_view:   # v0.12.3: the film takes the camera, then eases it back to you
+		cutscene_view.camera(cam, _delta)
+		cutscene_view.post_avatars(avatars, _delta)
 
 	_update_projectiles(frac)
 	_update_items(_delta)
@@ -1169,8 +1179,32 @@ func _bot_boss() -> Array:
 			snap.call("leap_%04d_%s" % [bt, Boss.S.keys()[boss.state]])
 		if bt > int(_args().get("until", 1800)):
 			get_tree().quit()
+	# v0.12.3 --cutscene: he drops under 60% at once (after his entrance), the Duel Stone's corruption plays, then a short
+	# fight with the minions round, then he dies (the minions collapse into smoke); --every N pictures, --until T quits
+	var cut := _args().has("cutscene")
+	if cut:
+		if bt == int(_args().get("cut-at", 330)):
+			boss.hp = int(boss.max_hp * 0.59)
+		if boss.state != Boss.S.CUTSCENE and boss.cut_done:
+			boss.hp = maxi(boss.hp, int(boss.max_hp * 0.52))
+		if not has_meta("cut_frame") and boss.state == Boss.S.CUTSCENE:
+			set_meta("cut_frame", frames)
+			print("[bot] the cutscene starts at frame %d" % frames)
+		if not has_meta("cut_end") and boss.cut_done and boss.state != Boss.S.CUTSCENE:
+			set_meta("cut_end", bt)
+			boss.leaps = Boss.LEAP_MAX   # (no Storm Leap carrying him off: the demo watches the minions come)
+			print("[bot] the cutscene ends at frame %d" % frames)
+		if has_meta("cut_end") and bt == int(get_meta("cut_end")) + int(_args().get("kill-after", 600)):
+			net._damage(Boss.ID, 999999, net.my_id, Vector3.FORWARD, 0.0)
+		var every := int(_args().get("every", 0))
+		if every > 0 and bt % every == 0 and bt > 300:
+			snap.call("cut_%04d_%s" % [bt, Boss.S.keys()[boss.state]])
+		if bt > int(_args().get("until", 99999)):
+			get_tree().quit()
 	# his health, scripted: full for 30 s, then half (enraged) for 20 s, then a quarter (the storm) for 20 s, then done
 	var floor_k := 1.0 if bt < 1800 else (0.45 if bt < 3000 else (0.2 if bt < 4200 else 0.0))
+	if cut:
+		floor_k = -1.0
 	if floor_k > 0.0:
 		boss.hp = maxi(boss.hp, int(boss.max_hp * floor_k)) if bt != 1800 and bt != 3000 else int(boss.max_hp * floor_k)
 	elif bt == 4200:
@@ -1189,7 +1223,7 @@ func _bot_boss() -> Array:
 	cam_pitch = -0.12
 	if bt > 300 and bt % 150 < 3:
 		b |= Sim.Btn.ATTACK
-	if bt % 15 == 0 and not _args().has("leap"):
+	if bt % 15 == 0 and not _args().has("leap") and not cut:
 		snap.call("boss_%04d_%s" % [bt, Boss.S.keys()[boss.state]])
 	var aim := c + Vector3(0, 1.5, 0)
 	spell_sel[weapon_slot] = 0

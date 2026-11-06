@@ -89,7 +89,8 @@
 ## Weaknesses (hurt()): Lightning x1/4 (he's made of it), Meteor x1.5, Fireball burns 3 s, Frost Nova slows a lot for
 ## 4 s (not a charge or the rush), wand Stuns fill the stun meter (stunned(): the only way to stop a charge or the
 ## rush), gravity wells can't move him. Earth Spikes are gone from the game (their charge-stopping weakness with them);
-## the wand's Fog doesn't touch him at all. Health: hp_for()
+## the wand's Fog doesn't touch him at all. v0.12.3: below 60% the Duel Stone's corruption cutscene plays once (S.CUTSCENE,
+## cut_due; see scripts/cutscene.gd). Health: hp_for()
 ## (x1.7 for two), shorter wind-ups with two or more.
 class_name Boss
 extends RefCounted
@@ -145,7 +146,7 @@ const ORB_SLOW_R := 30.0
 const ORB_DMG := 6
 enum S { ENTER, IDLE, WALK, CHARGE_WIND, CHARGE, STOMP_WIND, STOMP, BEAM_WIND, BEAM, CALL, ROAR, BALLS, STAGGER, DEATH,
 	STRAFE, BACKOFF, HOP, TURN, GORE_WIND, GORE, TAIL_WIND, TAIL, PHASE, LEAP_WIND, LEAP, LEAP_LAND, HOWL, SLAMS, PAW,
-	RUSH, RECOVER, LUNGE, TREE, HOME, DAZED }
+	RUSH, RECOVER, LUNGE, TREE, HOME, DAZED, CUTSCENE }
 ## v0.12.0 the stun meter (header)
 const STUN_NEED := 7          # Jacob: 7 wand Stuns
 const STUN_TICKS := 420
@@ -233,6 +234,11 @@ var gols: Array = []
 var gthreat := {}
 var g_att := 0.0
 var p_att := 0.0
+# v0.12.3 the Duel Stone's corruption (Cutscene): armed by Net for a real fight (tests driving a bare Boss leave it off)
+var cut_on := false
+var cut_done := false            # it has started this fight (once only)
+var cut_from := Vector3.ZERO     # where he was and which way he faced when it began
+var cut_yaw0 := 0.0
 
 
 func _init(at: Vector3, n_players: int, seed_v := 0) -> void:
@@ -290,7 +296,7 @@ func windup_k() -> float:
 ## Damage him (after his resistances); from: the attacker (player id, -1000 - golem id, 0); spell: the spell's name, or
 ## "" for weapons, golems and anything else. -> what he really took.
 func hurt(amount: int, from: int, spell: String) -> int:
-	if state == S.ENTER or state == S.DEATH:
+	if state == S.ENTER or state == S.DEATH or state == S.CUTSCENE:
 		return 0
 	var k := 1.0
 	match spell:
@@ -349,7 +355,7 @@ static func _is_golem(p: Array) -> bool:
 
 ## v0.12.0 a wand Stun caught him: one point on the stun meter; at STUN_NEED he is dazed for 7 s (header).
 func stunned(_now: int) -> void:
-	if state in [S.ENTER, S.DEATH, S.DAZED]:
+	if state in [S.ENTER, S.DEATH, S.DAZED, S.CUTSCENE]:
 		return
 	stun_m = minf(stun_m + 1.0, float(STUN_NEED))
 	stun_hold = stun_hold_ticks()
@@ -383,6 +389,31 @@ func _daze() -> void:
 	fx.append(["boss_dazed", [pos, yaw]])
 
 
+## v0.12.3 the Duel Stone's corruption is due: armed, not played yet this fight, below Cutscene.CUT_HP and still
+## alive, and not in the middle of something it mustn't cut into (a Storm Leap sequence, a daze or one waiting to
+## land, a phase change, his arrival): those finish first.
+func cut_due() -> bool:
+	return cut_on and not cut_done and hp > 0 and float(hp) < Cutscene.CUT_HP * float(max_hp) and not in_sequence() \
+		and state not in [S.ENTER, S.DEATH, S.DAZED, S.PHASE, S.CUTSCENE] and not daze_pending and pos.y < 0.01
+
+
+func _start_cutscene() -> void:
+	cut_done = true
+	cut_from = Vector3(pos.x, 0, pos.z)
+	cut_yaw0 = yaw
+	pos.y = 0.0
+	rings.clear()
+	balls.clear()
+	orbs.clear()
+	plan.clear()
+	rep = 0
+	orb_plan = 0
+	tree_target = -1
+	charge_hit = {}
+	_go(S.CUTSCENE)
+	fx.append(["cutscene_start", [cut_from, yaw]])
+
+
 ## A wind-up of `base` ticks: shorter enraged and with two or more, never under MIN_TELL.
 func _wind(base: int) -> int:
 	return maxi(int(base * windup_k()), MIN_TELL)
@@ -412,6 +443,20 @@ static func _p_helpless(p: Array) -> bool:
 
 ## One server tick. people: as above; golems: [[golem id, position]].
 func tick(now: int, people: Array, golems: Array) -> void:
+	if state == S.CUTSCENE:   # v0.12.3: the film plays; every other clock of his is paused
+		t += 1
+		var at: Array = Cutscene.boss_at(t, cut_from, cut_yaw0)
+		pos = at[0]
+		yaw = at[1]
+		if t >= Cutscene.LEN:
+			fx.append(["boss_roar", [pos, 1]])
+			_go(S.IDLE)
+			moved = true
+			t = 999   # straight back to choosing
+		return
+	if cut_due():
+		_start_cutscene()
+		return
 	t += 1
 	total_t += 1
 	if slow > 0:
@@ -1641,10 +1686,12 @@ func _flat(v: Vector3) -> Vector2:
 ## His state, flat, for the network: [state, t, x, y, z, yaw, hp, max hp, status bits, beam angle, rings, balls, orbs,
 ## extra]. Rings: [r, cx, cz, kind]; balls: [pos, static]; orbs: positions as one PackedVector3Array; extra: [leap x,
 ## leap z, variant, phase, target, rush target, rep, leap air ticks, stun meter (v0.12.0, 0..STUN_NEED)]. Status bits:
-## 1 staggered, 2 slowed, 4 burning, 8 enraged, 16 untouchable (arriving), 32 storm, 64 dazed (v0.12.0).
+## 1 staggered, 2 slowed, 4 burning, 8 enraged, 16 untouchable (arriving), 32 storm, 64 dazed (v0.12.0), 128 the Duel
+## Stone is corrupted (v0.12.3: from the slam in the cutscene until the fight ends).
 func pack() -> Array:
 	var flags := (1 if state == S.STAGGER else 0) | (2 if slow > 0 else 0) | (4 if burn > 0 else 0) | (8 if enraged else 0) \
-		| (16 if state == S.ENTER else 0) | (32 if storm else 0) | (64 if state == S.DAZED else 0)
+		| (16 if state == S.ENTER or state == S.CUTSCENE else 0) | (32 if storm else 0) | (64 if state == S.DAZED else 0) \
+		| (128 if cut_done and not (state == S.CUTSCENE and t < Cutscene.CORRUPT_AT) else 0)
 	var ov := PackedVector3Array()
 	for o in orbs:
 		ov.append(o[0])

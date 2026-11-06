@@ -55,6 +55,9 @@ var hp_bar: Sprite3D
 var zap_bar: Sprite3D        # v0.11.0: Static build-up (Avatar.static_bars)
 var zap_back: Sprite3D
 var npc := false             # v0.12.0: a challenger: wizards show a mana bar (Avatar.mana_bars)
+var puppet := {}             # v0.12.3: a corrupted minion's puppet pose in the cutscene (Cutscene.puppet); empty: none
+var tint := Color.WHITE      # (set for minions; the figure is darkened by CutsceneView's overlay instead)
+var _pup_head := Vector2.ZERO   # the puppet's head: pitch (+ up), roll
 var mana_back: Sprite3D
 var mana_bar: Sprite3D
 var _tumble := 0.0
@@ -335,11 +338,16 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	var speed := Vector2(_vel.x, _vel.z).length()
 	var st := state
 	var w := st.weapon if st != null else Weapons.FISTS
+	if not puppet.is_empty() and bool(puppet.get("hide_weapon", false)):
+		w = Weapons.FISTS   # v0.12.3: a puppet's hands hang empty until it draws
 	_update_held(w)
 	_track_release(st, w, delta)
 
 	_fight_t = 0.0 if st != null and st.atk > 0 else _fight_t + delta
 	var pose := _pose(st, speed)
+	_pup_head = Vector2.ZERO
+	if not puppet.is_empty():
+		_puppet_pose(pose)
 	var a := 1.0 if instant else clampf(delta * (30.0 if pose.get("snap", false) else 12.0), 0.0, 1.0)
 	# hands, torso: critically damped springs (snappy into attacks, softer settling back)
 	var hl := 0.025 if pose.get("snap", false) else 0.1
@@ -469,6 +477,8 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	var dizzy := st != null and st.stun > 0 and not dead
 	if not tumbling:
 		model.rotation.z = sin(_t * 5.0) * 0.1 if dizzy else lerpf(model.rotation.z, 0.0, a)
+		if not puppet.is_empty():   # v0.12.3: a puppet lolls and jerks sideways
+			model.rotation.z = lerpf(model.rotation.z, float(puppet.get("roll", 0.0)), 1.0 if bool(puppet.get("snap", false)) else a)
 	dead = dead or downed
 	var breathe := sin(_t * 1.6) * 0.01                                    # ~15 breaths a minute
 	var moving := clampf(speed / 1.5, 0.0, 1.0) if grounded else 0.0
@@ -507,6 +517,8 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	var neck := chest + spine * Vector3(0, 0.17, 0)
 	# the head stays steady: it undoes most of the gait's twist and keeps looking ahead
 	var head_basis := Basis(Vector3.UP, _twist + _look + _turn_look - chest_yaw * 0.8) * Basis(Vector3.RIGHT, (_lean - run_lean) * 0.3)
+	if _pup_head != Vector2.ZERO:   # v0.12.3: the puppet's head hangs, lolls, jerks up
+		head_basis = head_basis * Basis(Vector3.RIGHT, _pup_head.x) * Basis(Vector3.BACK, _pup_head.y)
 	var head := neck + head_basis * Vector3(0, 0.15, 0)
 	var hip_r := pelvis + low * Vector3(0.1, -0.04, 0)
 	var hip_l := pelvis + low * Vector3(-0.1, -0.04, 0)
@@ -574,6 +586,34 @@ func animate(delta: float, _cam: Camera3D) -> void:
 	blob.global_position = Vector3(position.x, ground + 0.012, position.z)
 	var bs := clampf(1.0 - (position.y - ground) / 6.0, 0.35, 1.0)
 	blob.scale = Vector3(bs, 1, bs)
+
+
+## v0.12.3 a corrupted minion as a puppet in the cutscene (Cutscene.puppet): limp arms hanging from a body hunched
+## forward, the head dangling, then jerking up; possessed, it twists, lolls and flails in sudden snaps (no easing).
+func _puppet_pose(pose: Dictionary) -> void:
+	var limp := float(puppet.get("limp", 0.0))
+	var hunch := float(puppet.get("hunch", 0.0)) * limp
+	var arms := float(puppet.get("arms", 0.0))
+	var hang_r := Vector3(0.24 + 0.1 * arms, 0.86 - 0.12 * hunch + 0.25 * maxf(arms, 0.0), -0.06 - 0.32 * hunch - 0.2 * absf(arms))
+	var hang_l := Vector3(-0.24 + 0.08 * arms, 0.84 - 0.12 * hunch + 0.25 * maxf(-arms, 0.0), -0.04 - 0.3 * hunch - 0.15 * absf(arms))
+	pose.hand_r = (pose.hand_r as Vector3).lerp(hang_r, limp)
+	pose.hand_l = (pose.hand_l as Vector3).lerp(hang_l, limp)
+	pose.lean = lerpf(float(pose.lean), -0.8 * hunch, limp)
+	pose.crouch = lerpf(float(pose.crouch), 0.1 * hunch, limp)
+	pose.twist = float(pose.twist) + float(puppet.get("twist", 0.0)) * limp
+	pose.look = 0.0
+	if bool(puppet.get("snap", false)):
+		pose.snap = true
+	_pup_head = Vector2(float(puppet.get("head", 0.0)) + 0.3 * hunch, float(puppet.get("roll", 0.0)) * 0.8)
+
+
+## v0.12.3 where its eyes are now (the minions' glowing eye trails): [left, right] in the world.
+func eye_points(_cam: Camera3D) -> Array:
+	var out := []
+	for sd in ["eye_l", "eye_r"]:
+		var e: MeshInstance3D = parts[sd]
+		out.append(e.global_position + e.global_transform.basis.z.normalized() * -0.015)
+	return out
 
 
 ## A foot's place in its step cycle: forward through the air when sin(phase) > 0, planted and sliding back otherwise.

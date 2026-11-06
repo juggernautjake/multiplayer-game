@@ -38,7 +38,8 @@ var threat_kind := ""          # what _threat found: "shot", "draw", "melee", "s
 var dodges := 0                # dashes made to dodge (tests)
 
 var id := 0
-var owner := 0              # the player who pressed the stone
+var owner := 0              # the player who pressed the stone (0 for a corrupted minion: it fights everyone)
+var reach := 45.0           # v0.12.3: how far off it looks for a player (minions rise far from the arena: Net.MINION_REACH)
 var weapon := Weapons.SWORD
 var archetype := "melee"
 var difficulty := 1
@@ -393,7 +394,7 @@ static func _basic_spell(w: int) -> int:
 ## v0.12.0: never anyone hidden from it in a fog.
 func _pick_target(net: Net, me: Net.ServerPlayer):
 	var best = null
-	var best_d := 45.0
+	var best_d := reach
 	var fogged := not net.fogs.is_empty()
 	var pvp := net.fog_pvp() if fogged else {}
 	for q: Net.ServerPlayer in net.players.values():
@@ -407,7 +408,7 @@ func _pick_target(net: Net, me: Net.ServerPlayer):
 			best = q
 	# v0.12.0: a players' golem in its face (or one that just hit it) is dealt with first
 	var gbest: Golems.G = null
-	var gd := best_d if best != null else 45.0
+	var gd := best_d if best != null else reach
 	for g: Golems.G in net.golems.list.values():
 		if g.state == Golems.State.DIE or g.state == Golems.State.RISE or (net.players.has(g.owner) and net.players[g.owner].npc):
 			continue

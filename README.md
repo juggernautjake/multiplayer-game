@@ -286,6 +286,22 @@ than a fair share of his attention, so they can't soak him while you hit him for
 hurts a golem in its reach (Stone Titans take a bit over half); his charge and rush throw them. He can kill them, and
 nobody gets level credit for a golem he kills.
 
+### The Duel Stone's corruption (0.12.3)
+
+The first time Thunderhorn drops below **60%** health in a fight, a cutscene plays for everyone (about 12 s; never in
+the middle of a Storm Leap or while he's dazed: it waits for that to end). He gallops to the Duel Stone, rears up and
+slams it; lightning strikes, its runes turn deep red and violet and cracks glow ("THE DUEL STONE IS CORRUPTED"); six
+figures claw up out of the ground round it, limp and hunched, jerk their heads up with evil smoke streaming from their
+eyes, twitch like puppets, then freeze, snap round to face you and draw their weapons. While it plays nobody can act
+or be hurt (players, golems, him, the minions) and anything in flight is cleared.
+
+The six **corrupted minions** (a swordsman, a clubber, an archer, a slinger, a staff wizard and a wand wizard: dark,
+red-eyed, purple-red) fight like Duel Stone challengers (tier 2 alone, tier 3 with two or more players; wizards with
+their level-1 spells, the wand wizard at most 3 golems). They go for you and your golems; kill them or ignore them.
+Killing one counts toward your levels like a challenger. His charge tramples them too. When Thunderhorn dies they
+collapse and dissolve into purple smoke; a defeat or restart removes them. The corrupted stone summons nobody until
+the fight is over; then it is cleansed (gold again). It plays once per fight and again after a restart.
+
 ### Winning and losing
 
 - **Win:** confetti, "CONGRATULATIONS!", then the prize. Press any key to move the words along and, at the end, to
@@ -527,6 +543,7 @@ These need no window and exit with code 0 when everything passes.
 | `<godot> --headless --path . -s tools/dodge_test.gd` | Challengers dashing out of warning rings and the charge line, by tier. |
 | `<godot> --headless --path . -s tools/heal_test.gd` | The staff's Heal Aura. |
 | `<godot> --headless --path . -s tools/order_test.gd` | v0.12.2 golem orders: Follow distance, Stay radius, Go there, the ordered target hit first, attack orders ending (target down, out of reach 5 s), Regroup, PvP off blocking orders against players, golems fighting Thunderhorn, and the server refusing / syncing orders. |
+| `<godot> --headless --path . -s tools/cutscene_test.gd` | v0.12.3 the Duel Stone's corruption: once per fight below 60%, waits for a leap or a daze, exactly six minions, everyone invulnerable and frozen during it and free after, the stone corrupted, his death fells the minions, a restart cleanses the stone and arms it again. |
 | `<godot> --headless --path . -s tools/rehost_test.gd [-- --port 7811]` | Leaving and hosting / joining again in one session (UDP 7777 unless `--port` says otherwise). |
 
 ### Visual checks (need a window)
@@ -566,6 +583,7 @@ The bot modes (all in `scripts/main.gd`, functions `_bot_input`, `_bot_fight` an
 | `--bot magic` | Casts every staff and wand spell at the middle dummy (`--plan2`, `--plan3` for the level 3 and 4 spells, `--every` to save a picture every 6 ticks with `--shots`). |
 | `--bot duel` | (`--host --give-all --shots <folder>`) Walks to the Duel Stone and presses E, then meets a challenger of every kind (sword, club, bow, slingshot, then after a level-up staff and wand) for 7 s each, with pictures through each fight. |
 | `--bot boss --leap` | (v0.11.0, `--host --give-all --shots <folder>`) Static stacks on you, then a Storm Leap at once; a picture every 10 ticks for 25 s. |
+| `--bot boss --cutscene` | (v0.12.3, `--host --give-all`) As `--bot boss`, but drops him under 60% right after his entrance so the Duel Stone's corruption plays at once, lets the minions come for 10 s (`--kill-after <ticks>`), then kills him (the minions collapse into smoke). `--every N --shots <folder>` saves pictures, `--until T` quits. Record it with `--write-movie cut.avi --fixed-fps 30 --quit-after 1150` before `--`. |
 | `--bot boss [--defeat]` | (`--host --give-all --shots <folder>`) Levels up to 3 (the stone turns violet, the altar rises), jumps on the altar, watches Thunderhorn come down and fight from 10-16 m (kept alive), takes him to half and a quarter of his health, then beats him and pictures the victory and the prize. With `--defeat` it dies instead: the defeat screen, a key, the restart. |
 | `--bot prize [--defeat] [--no-prize-pic]` | Just the end screens (victory and the prize, or defeat); `--no-prize-pic` shows the drawn stand-in. |
 | `--bot close` | Close-quarters test. After picking everything up, for each weapon it walks right into the middle dummy and then into the nearest tall pillar (7 s each), keeps the crosshair on the target, and attacks (clicks, then holds; bows draw and release). Every 6 ticks it logs how far the body is turned from the target and from the camera; at the end it prints the worst angle per weapon and quits. Add `--shots <folder>` to save screenshots at three moments of each phase. |
@@ -798,3 +816,10 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
   and shakes it off in a burst of sparks as the meter empties.
 - His charge lifts its victim on the nose spike for a moment before the toss, and the horn beam's core no longer
   blooms to pure white up close.
+
+## What's new in 0.12.3
+
+- **The Duel Stone's corruption**: the first time Thunderhorn falls below 60% a cutscene plays for everyone (letterbox,
+  camera shots, sounds): he slams the Duel Stone, it turns evil, and six corrupted minions rise to fight you. See
+  [The Duel Stone's corruption](#the-duel-stones-corruption-0123). Test: `tools/cutscene_test.gd`; demo bot
+  `--bot boss --cutscene`.

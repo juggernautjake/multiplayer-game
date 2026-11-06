@@ -246,6 +246,97 @@ static func sad_trombone() -> AudioStreamWAV:
 	return _wav(d)
 
 
+## v0.12.3 the Duel Stone's corruption (Cutscene), made here like everything else:
+##   "drone"   the corrupting drone: low detuned saws a tritone apart beating against each other, swelling, a sub-rumble
+##             and a slow filter sweep, darkening as it goes (5 s);
+##   "creak"   bone creaks as the dead claw up: stick-slip clicks speeding up and slowing in bursts over a low groan of
+##             earth (1.6 s; played a few times, overlapping);
+##   "whisper" the possessed whisper-chord: breathy noise through shifting vowel formants (many voices whispering) over
+##             a dissonant chord (minor second and tritone sines) with a tremolo that quickens (3.4 s);
+##   "snap"    every bone snapping straight at once as they freeze and turn (0.5 s);
+##   "slam"    Thunderhorn's hooves meeting the stone: a stone crack with a deep boom (1.2 s).
+static func corrupt(kind: String) -> AudioStreamWAV:
+	var dur: float = {"drone": 5.0, "creak": 1.6, "whisper": 3.4, "snap": 0.5, "slam": 1.2}.get(kind, 1.0)
+	var n := int(RATE * dur)
+	var d := PackedFloat32Array()
+	d.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("corrupt_" + kind)
+	var lp := 0.0
+	var lp2 := 0.0
+	var bp := [0.0, 0.0, 0.0, 0.0]   # the whisper's formant filters (state-variable: low and band per voice)
+	var ph := [0.0, 0.0, 0.0, 0.0, 0.0]
+	var click_t := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var u := t / dur
+		var noise := rng.randf_range(-1.0, 1.0)
+		lp += (noise - lp) * 0.06
+		lp2 += (noise - lp2) * 0.01
+		var v := 0.0
+		match kind:
+			"drone":
+				var env := minf(t / 0.8, 1.0) * clampf((dur - t) / 1.0, 0.0, 1.0)
+				var f0 := 55.0 * (1.0 - 0.08 * u)
+				var fs := [f0, f0 * 1.007, f0 * 1.414, f0 * 1.421, f0 * 0.5]
+				var s := 0.0
+				for k in fs.size():
+					ph[k] += float(fs[k]) / RATE
+					s += (2.0 * fposmod(ph[k], 1.0) - 1.0) * (0.6 if k == 4 else 0.3)
+				var cut := 0.04 + 0.1 * (0.5 + 0.5 * sin(t * TAU * 0.35))   # a slow sweep of the filter
+				bp[0] += (s - bp[0]) * cut
+				v = (bp[0] * 0.8 + lp2 * 2.2) * env * (0.85 + 0.15 * sin(t * TAU * 1.3))
+			"creak":
+				var env := minf(t / 0.05, 1.0) * clampf((dur - t) / 0.3, 0.0, 1.0)
+				var rate := 30.0 + 160.0 * (0.5 + 0.5 * sin(t * TAU * (1.1 + 0.4 * sin(t * 3.0))))   # stick-slip speeding up and slowing
+				click_t += rate / RATE
+				var click := 0.0
+				if click_t >= 1.0:
+					click_t -= 1.0
+					click = 1.0
+				ph[0] = ph[0] * 0.86 + click   # each click rings a little (a hollow, woody knock)
+				ph[1] += (190.0 + 60.0 * sin(t * 7.0)) / RATE
+				var knock: float = ph[0] * sin(ph[1] * TAU)
+				ph[2] += (42.0 + 6.0 * sin(t * 2.0)) / RATE
+				var groan := (2.0 * fposmod(ph[2], 1.0) - 1.0)
+				bp[1] += (groan - bp[1]) * 0.03
+				v = (knock * 0.5 + bp[1] * 0.9 + lp2 * 1.6) * env
+			"whisper":
+				var env := minf(t / 0.6, 1.0) * clampf((dur - t) / 0.8, 0.0, 1.0)
+				var breath := noise - lp   # bright breath noise
+				var w := 0.0
+				for k in 3:   # three formants sliding between vowels at different speeds: a crowd of whispers
+					var fc: float = float([600.0, 1200.0, 2600.0][k]) * (1.0 + 0.35 * sin(t * TAU * float([0.7, 1.3, 2.1][k]) + k))
+					var f := 2.0 * sin(PI * fc / RATE)
+					var lo: float = bp[k]
+					var ba: float = ph[k + 2] if k < 3 else 0.0
+					lo += f * ba
+					var hi := breath - lo - 0.5 * ba
+					ba += f * hi
+					bp[k] = lo
+					if k < 3:
+						ph[k + 2] = ba
+					w += ba * float([0.9, 0.6, 0.35][k])
+				var trem := 0.6 + 0.4 * sin(t * TAU * (4.0 + 6.0 * u))
+				ph[0] += 233.08 / RATE   # B flat, A natural and E: a minor second and a tritone
+				ph[1] += 220.0 / RATE
+				var e := sin(t * TAU * 329.63) * 0.5 + sin(t * TAU * 155.56) * 0.6
+				var chord := (sin(ph[0] * TAU) + sin(ph[1] * TAU) + e) * 0.11 * trem
+				v = (w * 0.55 * (0.7 + 0.3 * sin(t * TAU * 3.3)) + chord) * env
+			"snap":
+				var crack := noise * exp(-t * 60.0) * 1.2
+				var crack2 := noise * exp(-maxf(t - 0.07, 0.0) * 70.0) * (1.0 if t > 0.07 else 0.0) * 0.8
+				ph[0] += (120.0 - 60.0 * u) / RATE
+				v = crack + crack2 + sin(ph[0] * TAU) * exp(-t * 12.0) * 0.6
+			"slam":
+				ph[0] += (40.0 - 14.0 * u) / RATE
+				var boom := sin(ph[0] * TAU) * exp(-t * 3.0) * 1.3
+				var crack := (noise - lp) * exp(-t * 25.0) * 1.2
+				v = boom + crack + lp2 * 4.0 * exp(-t * 2.0)
+		d[i] = clampf(v, -1.0, 1.0)
+	return _wav(d)
+
+
 ## v0.12.2 a golem acknowledging an order: a short, gravelly "hrm" (a low buzzy tone through a moving low-pass, with
 ## a rasp of noise), pitched down for the titan. kind 0: an order taken, 1: a lower, longer "hrrmm" (attack).
 static func grunt(kind := 0, titan := false) -> AudioStreamWAV:

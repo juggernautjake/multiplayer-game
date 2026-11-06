@@ -518,6 +518,76 @@ func _process(delta: float) -> void:
 			shake = 0.05 * (1.0 - smoothstep(0.0, 0.5, t)) + 0.025 * _daze_strain
 			col = GOLD
 			hot = 0.15 + 0.8 * _daze_shake
+		Boss.S.CUTSCENE:   # v0.12.3 the Duel Stone's corruption (Cutscene): his part of the film
+			var ct := t / Config.DT
+			if ct < Cutscene.TURN_END:   # swinging round toward the stone, head low, a hoof raking
+				p.head_dip = 0.35
+				p.bend = 0.35 * sin(t * 5.0)
+				p.brow = -1.0
+				p.flare = 1.0
+				scrape = int(t * 8.0) % 4
+				hot = 0.5
+			elif ct < Cutscene.RUN_END:   # the gallop to the stone
+				gait = 2.0
+				p.brow = -1.0
+				p.lid = 0.6
+				p.head_dip = 0.45
+				p.flare = 1.0
+				hot = 0.9
+				for kk in ["horn_l", "horn_r", "hoof_FL", "hoof_FR", "hoof_BL", "hoof_BR"]:
+					on[kk] = 1.0
+			elif ct < Cutscene.SLAM_AT:   # up on his haunches over the stone, roaring
+				var k := clampf((ct - Cutscene.RUN_END) / 34.0, 0.0, 1.0)
+				rear = smoothstep(0.0, 1.0, k)
+				p.brow = 1.0
+				p.lid = 0.0
+				p.head_up = 0.7 * k
+				p.jaw = 0.9 * k
+				p.tongue = k
+				p.thrash = sin(t * 22.0) * 0.08 * k
+				hot = 1.6 * k
+				on["hoof_FL"] = 1.0
+				on["hoof_FR"] = 1.0
+				shake = 0.02 * k
+			elif ct < Cutscene.RISE_AT + 50:   # slammed down onto it: horns to the stone, pouring the storm into it
+				var k := clampf((ct - Cutscene.SLAM_AT) / 6.0, 0.0, 1.0)
+				rear = 0.3 * (1.0 - k) + 0.12
+				p.crouch = 0.35 * k
+				p.head_dip = 0.9 * k
+				p.jaw = 0.45
+				p.brow = -1.0
+				p.lid = 0.7
+				p.flare = 1.0
+				p.thrash = sin(t * 31.0) * 0.06
+				shake = 0.025
+				col = Cutscene.EVIL.lerp(Cutscene.EVIL2, 0.5 + 0.5 * sin(t * 6.0))
+				hot = 2.2
+				for kk in ["horn_l", "horn_r", "spike", "hoof_FL", "hoof_FR"]:
+					on[kk] = 1.0
+				if randf() < delta * 40.0:   # the storm pouring out of him into the stone
+					var a := root.position + Vector3(randf_range(-2, 2), randf_range(3.0, 6.0), randf_range(-2, 2))
+					_arc(a, Cutscene.stone() + Vector3(randf_range(-0.5, 0.5), randf_range(0.4, 1.7), randf_range(-0.4, 0.4)),
+						Cutscene.EVIL if randf() < 0.5 else Cutscene.EVIL2, 0.1)
+			elif ct < Cutscene.SNAP_AT:   # he lifts his head and bellows as they rise, then watches, pleased
+				var k := clampf((ct - Cutscene.RISE_AT - 50.0) / 20.0, 0.0, 1.0) * (1.0 - clampf((ct - Cutscene.TWITCH_AT) / 30.0, 0.0, 1.0))
+				rear = 0.55 * k
+				p.head_up = 0.9 * k
+				p.jaw = 0.95 * k
+				p.brow = 1.0 - 2.0 * (1.0 - k)
+				p.tongue = k
+				p.head_dip = 0.3 * (1.0 - k)
+				p.flare = 1.0
+				shake = 0.03 * k
+				col = Cutscene.EVIL
+				hot = 1.2 + 0.8 * k
+			else:   # turning to the players: head low, ready
+				p.head_dip = 0.4
+				p.brow = -1.0
+				p.lid = 0.6
+				p.flare = 1.0
+				scrape = int(t * 6.0) % 2
+				col = Cutscene.EVIL
+				hot = 1.0
 		Boss.S.DEATH:
 			var k := clampf(t / 1.2, 0.0, 1.0)
 			p.crouch = 1.6 * k
@@ -528,7 +598,7 @@ func _process(delta: float) -> void:
 			p.brow = 0.3
 			col = Color("cfe4ff")
 			hot = 1.5 * (1.0 - k)
-	if enraged and state not in [Boss.S.LEAP_WIND, Boss.S.LEAP, Boss.S.LEAP_LAND, Boss.S.HOWL, Boss.S.SLAMS, Boss.S.PAW, Boss.S.RUSH]:
+	if enraged and state not in [Boss.S.LEAP_WIND, Boss.S.LEAP, Boss.S.LEAP_LAND, Boss.S.HOWL, Boss.S.SLAMS, Boss.S.PAW, Boss.S.RUSH, Boss.S.CUTSCENE]:
 		col = col.lerp(RED, 0.6)
 	if hot > 0.3:
 		on["eye_l"] = 1.0
