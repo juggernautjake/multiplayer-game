@@ -87,6 +87,7 @@ var _thrash_at := Vector3.ZERO
 #   - tells: WINDUP[tier] ticks standing still facing the target (an "npc_tell" glow in the spell's colour) before the
 #     button goes down, then the cast itself, then a PAUSE[tier] (random range) before it starts another.
 const KIT_LEVEL := 1
+const MAX_GOLEMS := 3         # a challenger / minion wand wizard's own golems alive at once (Jacob)
 const LOW_MANA := 22          # mana (not fifths): below this it rests
 const REST_MANA := 55
 const REPEAT_WINDOW := 4
@@ -592,7 +593,7 @@ func _score(s: Sim.PlayerState, i: int, dist: float, tgt, threat: bool, net: Net
 			for g: Golems.G in net.golems.list.values():
 				if g.owner == id and g.state != Golems.State.DIE:
 					mine += 1
-			if dist < 22.0:
+			if dist < 22.0 and mine < MAX_GOLEMS:   # never more than MAX_GOLEMS of its own at once
 				v = (1.3 if mine < 2 else 0.4) + (0.4 if low_hp else 0.0)
 		"Teleport":
 			v = 2.6 if dist < 4.0 else (1.4 if low_hp and dist < 8.0 else 0.0)

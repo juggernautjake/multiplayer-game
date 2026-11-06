@@ -385,3 +385,6 @@ npc_test (v0.12.0 additions): over nine duels the challengers' tiers go 1, 1, 1,
 wins, tier 3 after eight; level 2 / 3 also give tier 2 / 3) and the name tag shows the tier; no dash-dodging at tier 1.
 dodge_test now expects no dodges at tier 1.
 
+wizard_test (`_npc_golems`): a wand challenger over 60 s keeps at most 3 golems alive; its golem hits a player with
+PvP off; a player's golem picks the challenger's golem; killing that golem gives no level; the challenger's golems
+crumble when it falls.

@@ -138,6 +138,13 @@ func spawn(owner: int, pos: Vector3, yaw: float, now: int, titan := false) -> G:
 	return g
 
 
+## v0.12.0: an NPC wizard went down: its golems crumble with it.
+func dissolve(owner: int) -> void:
+	for g: G in list.values():
+		if g.owner == owner and g.state != State.DIE:
+			_to_state(g, State.DIE)
+
+
 func _to_state(g: G, s: int) -> void:
 	g.state = s
 	g.t = 0

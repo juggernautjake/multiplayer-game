@@ -2062,6 +2062,8 @@ func _server_npcs() -> void:
 	for q: ServerPlayer in players.values().duplicate():
 		if not q.npc:
 			continue
+		if q.state.dead > 0:
+			golems.dissolve(q.id)   # v0.12.0: an NPC wizard's golems crumble when it falls
 		if q.state.dead > 0 and q.state.dead < Sim.RESPAWN_TICKS - 90:
 			_fx("npc_leave", [q.id, q.state.pos])
 			players.erase(q.id)

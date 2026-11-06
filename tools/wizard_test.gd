@@ -156,5 +156,70 @@ func _initialize() -> void:
 		net.players.erase(npc.id)
 		for g in net.golems.list.keys():
 			net.golems.list.erase(g)
+	_npc_golems(net, a, P)
 	print("%d failed" % bad)
 	quit(1 if bad > 0 else 0)
+
+
+## NPC wand wizards' golems: at most 3 of their own; they go for players (PvP or not) and players' golems; players'
+## golems go for them; killing one gives no level; they crumble when their wizard falls.
+func _npc_golems(net: Net, a: Net.ServerPlayer, P: Vector3) -> void:
+	a.state = Sim.spawn_state(1)
+	a.state.pos = P
+	a.pvp = false
+	var wd := net.spawn_npc(a, Weapons.WAND, 1)
+	wd.state.pos = P + Vector3(0, 0, -10)
+	var most := 0
+	for t in 3600:
+		a.state.pos = P
+		net._server_tick()
+		a.state.hp = Sim.MAX_HP
+		a.state.dead = 0
+		a.state.stun = 0
+		if wd.state.hp < 40:
+			wd.state.hp = Sim.MAX_HP
+		var n := 0
+		for g: Golems.G in net.golems.list.values():
+			if g.owner == wd.id and g.state != Golems.State.DIE:
+				n += 1
+		most = maxi(most, n)
+	check(most == NpcAI.MAX_GOLEMS, "an NPC wand wizard summons golems but never more than 3 at once (%d)" % most)
+	# its golem goes for a player with PvP off
+	var ng: Golems.G = null
+	for g: Golems.G in net.golems.list.values():
+		if g.owner == wd.id and g.state != Golems.State.DIE:
+			ng = g
+	var hits := 0
+	for t in 300:
+		net.server_tick += 1
+		var hp0 := a.state.hp
+		net._server_spells()
+		if a.state.hp < hp0:
+			hits += 1
+		a.state.hp = Sim.MAX_HP
+		a.state.pos = ng.pos + Vector3(1.0, 0, 0)
+	check(not a.pvp and hits > 0, "its golems attack players, PvP or not (%d hits)" % hits)
+	# a player's golem goes for the NPC's golem; killing it gives no level
+	var pg := net.golems.spawn(1, ng.pos + Vector3(2.5, 0, 0), 0.0, net.server_tick)
+	a.state.pos = ng.pos + Vector3(6, 0, 0)   # within the golem's leash of its summoner
+	var picked := false
+	for t in 120:
+		net.server_tick += 1
+		net._server_spells()
+		if pg.target == -1000 - ng.id or (pg.target <= -1000 and net.golems.list.has(-1000 - pg.target) and net.golems.list[-1000 - pg.target].owner == wd.id):
+			picked = true
+	check(picked, "players' golems attack the NPC's golems")
+	var k0: Array = a.kills.duplicate()
+	net.dmg_src = Weapons.WAND
+	net._damage(-1000 - ng.id, 500, 1, Vector3(1, 0, 0), 0.0)
+	net.dmg_src = -1
+	check(a.kills == k0, "killing an NPC's golem gives no level credit")
+	# the wizard falls: its golems crumble
+	net._damage(wd.id, 500, 1, Vector3(1, 0, 0), 0.0)
+	net._server_npcs()
+	var left := 0
+	for g: Golems.G in net.golems.list.values():
+		if g.owner == wd.id and g.state != Golems.State.DIE:
+			left += 1
+	check(left == 0, "when the wizard falls its golems crumble")
+	check(net.golems.foe(1, wd.id, {}) and not net.golems.foe(wd.id, wd.id, {}), "players' golems count challengers / minions as foes (golem_test covers Thunderhorn)")

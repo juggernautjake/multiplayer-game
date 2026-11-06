@@ -1039,4 +1039,9 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   58% out of lightning rings, 0% / 27% / 50% out of a charge); aim (`SHOT_ERR`, `AIM_ERR`, `WIZ_ERR`) tightens, draws
   (`SHOT_START`) come faster and reactions (`REACT`) quicker per tier, as before. Test: npc_test (a run of nine duels
   goes tier 1, 1, 1, 2, 2, 2, 2, 2, 3).
-
+- NPC wizards' golems (v0.12.0, Jacob): challenger / minion wand wizards summon golems (Golem is in their level-1
+  kit) but never more than `NpcAI.MAX_GOLEMS` (3) of their own alive at once (`_score` gives Golem 0 at 3). Their
+  golems fight players whatever PvP says, and players' golems (`Golems.foe`: an NPC's golems fight Who.PLAYER only;
+  players' golems always fight Who.NPC and Who.BOSS and those enemies' golems). Killing one gives no level credit
+  (golem kills never call `_magic_kill`). Chosen: they DISSOLVE when their wizard falls (`Golems.dissolve(owner)` from
+  `Net._server_npcs` as soon as the wizard is down: they crumble). Test: wizard_test `_npc_golems`.
