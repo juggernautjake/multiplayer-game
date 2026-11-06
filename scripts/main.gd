@@ -71,6 +71,35 @@ var arena_view: ArenaView  # v0.10.0: the Duel Stone and the Storm Altar
 var boss_view: BossView    # Thunderhorn
 var prize: PrizeScreen     # victory (the prize) and defeat screens
 var audit := {}   # --log: counts of every replicated event this client received (network audit)
+# v0.12.2 selection and orders (see "controls"): the spell hotbar, the radial wheels, taps and holds
+const HOLD_MS := 220         # a key held this long opens its wheel; let go sooner: a tap
+const HELP_LINE := "WASD move  Shift sprint  Space jump  Q dash  LMB attack / cast  RMB aim  E use  V view  P PvP  Esc menu  F1 all controls\nWeapons: 1-7, mouse wheel, tap Tab last, hold Tab wheel     Spells: Ctrl+1-8, R next, Shift+R back, hold R wheel     Golems: tap G follow / stay, hold G orders, middle mouse attack / go"
+## Every control, for the F1 panel (and the Esc menu's Controls button). Keep in step with README "Controls".
+const CONTROLS := [
+	["Move", "WASD (relative to the camera); Shift sprint, Space jump, Q dash"],
+	["Look / aim", "Mouse orbits the camera; right mouse aims (zoom, finer mouse, face the crosshair)"],
+	["Attack / cast", "Left mouse: swing (click again for the combo), hold to draw a bow or slingshot, hold to cast"],
+	["Use", "E: pick up a weapon, open the vault, press the Duel Stone, eat fruit"],
+	["Weapons", "1-7 fists, club, sword, bow, slingshot, staff, wand (the ones you have)"],
+	["", "Mouse wheel: next / previous weapon you own     Tap Tab: back to the last weapon"],
+	["", "Hold Tab: the weapon wheel (point with the mouse, let go of Tab or click to take it)"],
+	["Spells", "(staff or wand in hand; the hotbar over your health shows them all)"],
+	["", "Ctrl+1-8: that spell     Tap R: next spell     Shift+R: previous     Right mouse + wheel: scroll"],
+	["", "Hold R: the spell wheel (locked spells show the level that unlocks them)"],
+	["Golems", "Tap G: Follow me <-> Stay here     Middle mouse: attack the enemy under the crosshair, else go there"],
+	["", "Hold G: the order wheel: Follow me, Stay here, Go there, Attack that, Regroup"],
+	["Camera", "V first / third person     Ctrl + mouse wheel: camera distance"],
+	["Game", "P PvP on / off     F2 Pip / 3D figure (host)     F1 this list     Esc menu"],
+]
+var spell_bar: SpellBar
+var radial: RadialMenu
+var wheel_kind := ""         # the wheel that's open: "weapon", "spell", "golem" or ""
+var wheel_target := []       # the golem wheel: [id, position, name] of the enemy under the crosshair when it opened
+var wheel_ground := Vector3.ZERO   # and the spot on the ground under it
+var held := {}               # physical key -> msec it went down (Tab, R, G), until it comes up
+var last_weapon := 0         # tap Tab: back to this one
+var switch_label: Label      # "Fireball", "Sword", "Golems: Go there" under the crosshair for a moment
+var controls_panel: Control  # F1: every control
 
 
 func _ready() -> void:
@@ -275,7 +304,7 @@ void fragment() {
 	golem_view = GolemView.new()
 	golem_view.name = "Golems"
 	add_child(golem_view)
-	golem_view.setup(net)
+	golem_view.setup(net, self)
 	fog_view = FogView.new()
 	fog_view.name = "Fog"
 	add_child(fog_view)
@@ -419,6 +448,7 @@ func _process(_delta: float) -> void:
 
 	_update_projectiles(frac)
 	_update_items(_delta)
+	_update_holds()
 	if magic_fx:
 		magic_fx.avatars = avatars
 		var sts := {}
@@ -473,7 +503,7 @@ func _sample_input() -> Array:
 		if Input.is_physical_key_pressed(KEY_SPACE): b |= Sim.Btn.JUMP
 		if Input.is_physical_key_pressed(KEY_SHIFT): b |= Sim.Btn.SPRINT
 		if Input.is_physical_key_pressed(KEY_Q): b |= Sim.Btn.DASH
-		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and Time.get_ticks_msec() > attack_block_until:
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and Time.get_ticks_msec() > attack_block_until and not (radial and radial.visible):
 			b |= Sim.Btn.ATTACK
 		if Input.is_physical_key_pressed(KEY_E): b |= Sim.Btn.INTERACT
 		if view == View.FIRST or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT): b |= Sim.Btn.FACE_CAM
@@ -583,6 +613,8 @@ func _bot_input() -> Array:
 		return [0, cam_yaw, 0.0, weapon_slot]
 	if bot_mode == "golems":
 		return _bot_golems()
+	if bot_mode == "ui":
+		return _bot_ui()
 	if bot_mode == "archery":
 		return _bot_archery()
 	if bot_mode == "fog":
@@ -818,6 +850,159 @@ func _bot_golems() -> Array:
 		get_tree().quit()
 	spell_sel[weapon_slot] = spell
 	return [b, cam_yaw, 0.0, weapon_slot, atan2(-(aim - me).x, -(aim - me).z), atan2(-(aim - me).x, -(aim - me).z), spell, aim]
+
+
+## v0.12.2 UI pictures (--host --give-all --max-level --bot ui --shots <dir>): the staff's hotbar mid-cooldown, the
+## wand's with recharges running, the spell wheel, the weapon wheel, the golem order wheel over the dummy, then an
+## Attack that order (ring round the dummy, icons over the golems) and a Go there order (the marker on the ground).
+func _bot_ui() -> Array:
+	bot_t += 1
+	if net.predicted == null:
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var dummy: Vector3 = WorldLayout.DUMMIES[1]
+	var me := net.predicted.pos
+	var stand := dummy + Vector3(1.5, 0, 9.0)
+	var to := stand - me
+	var b := 0
+	var face := atan2(-(dummy - me).x, -(dummy - me).z)
+	if Vector2(to.x, to.z).length() > 0.5 and bot_t < 900:
+		b |= Sim.Btn.FORWARD
+		cam_yaw = atan2(-to.x, -to.z)
+	elif bot_t < 560:
+		cam_yaw = lerp_angle(cam_yaw, face, 0.2)
+	else:   # the orders: looking down at the dummy from one side, further back
+		cam_yaw = lerp_angle(cam_yaw, face + 0.55, 0.1)
+		cam_dist = 8.0
+	cam_pitch = -0.1 if bot_t < 560 else -0.42
+	var shots := str(_args().get("shots", ""))
+	var shot := func(nm: String):
+		if shots != "":
+			get_viewport().get_texture().get_image().save_png(shots.path_join(nm + ".png"))
+			print("[ui] saved ", nm)
+	var aim := dummy + Vector3(-1.5, 0, 2.5)
+	if bot_t < 200:   # (the --give-all pick-up puts the wand in hand on the first frames)
+		weapon_slot = Weapons.STAFF
+	if bot_t == 100:
+		spell_sel[Weapons.STAFF] = Weapons.idx(Weapons.STAFF, "Fireball")
+	if bot_t >= 160 and bot_t < 163:
+		b |= Sim.Btn.ATTACK
+	if bot_t == 176:
+		_pick_spell(Weapons.idx(Weapons.STAFF, "Meteor"))
+	if bot_t == 182:
+		shot.call("hotbar_staff")
+	if bot_t == 200:
+		_pick_weapon(Weapons.WAND)
+		spell_sel[Weapons.WAND] = Weapons.idx(Weapons.WAND, "Golem")
+	if bot_t >= 210 and bot_t < 213:
+		b |= Sim.Btn.ATTACK
+	if bot_t == 280:
+		spell_sel[Weapons.WAND] = Weapons.idx(Weapons.WAND, "Stone Titan")
+	if bot_t >= 285 and bot_t < 288:
+		b |= Sim.Btn.ATTACK
+	if bot_t == 370:
+		spell_sel[Weapons.WAND] = Weapons.idx(Weapons.WAND, "Spark Beam")
+	if bot_t >= 375 and bot_t < 378:
+		b |= Sim.Btn.ATTACK
+	if bot_t == 395:
+		_pick_spell(Weapons.idx(Weapons.WAND, "Stun"))
+	if bot_t == 400:
+		shot.call("hotbar_wand")
+	if bot_t == 420:
+		_open_wheel(KEY_R)
+		radial.point_at(Weapons.idx(Weapons.WAND, "Gravity Well"))
+	if bot_t == 436:
+		shot.call("wheel_spells")
+	if bot_t == 440:
+		_wheel_pick(wheel_kind, radial.close())
+		wheel_kind = ""
+	if bot_t == 460:
+		_open_wheel(KEY_TAB)
+		radial.point_at(Weapons.SWORD)
+	if bot_t == 476:
+		shot.call("wheel_weapons")
+	if bot_t == 480:
+		radial.close()
+		wheel_kind = ""
+	if bot_t == 520:
+		_open_wheel(KEY_G)
+		print("[ui] crosshair on ", wheel_target)
+		radial.point_at(Golems.Order.ATTACK)
+	if bot_t == 536:
+		shot.call("wheel_golems")
+	if bot_t == 540:
+		_wheel_pick(wheel_kind, radial.close())
+		wheel_kind = ""
+	if bot_t == 600:
+		shot.call("order_attack")
+	if bot_t == 700:
+		_golem_order(Golems.Order.GOTO, dummy + Vector3(-12.0, 0, 6.0))   # (clear of the dummies: HOLD_R)
+	if bot_t == 712:
+		shot.call("order_go_1")
+	if bot_t == 880:
+		shot.call("order_go_2")
+	_bot_ui_keys()
+	if bot_t > 1010:
+		get_tree().quit()
+	var sp := int(spell_sel.get(weapon_slot, 0))
+	return [b, cam_yaw, -0.1, weapon_slot, atan2(-(aim - me).x, -(aim - me).z), face, sp, aim]
+
+
+## The end of --bot ui: real key and mouse events through the input pipeline (Input.parse_input_event), checking the
+## taps and holds: Ctrl+3 picks spell 3, the wheel steps the weapon, a tap of Tab goes back, a tap of R steps the
+## spell, Shift+R steps back, holding G opens the order wheel and letting go in the middle takes nothing.
+var _ui_check := {}
+
+func _bot_ui_keys() -> void:
+	var key := func(code: int, down: bool, ctrl := false, shift := false):
+		var e := InputEventKey.new()
+		e.physical_keycode = code
+		e.keycode = code
+		e.pressed = down
+		e.ctrl_pressed = ctrl
+		e.shift_pressed = shift
+		Input.parse_input_event(e)
+	var say := func(ok: bool, what: String):
+		print("[ui-check] %s  %s" % ["ok  " if ok else "FAIL", what])
+	match bot_t:
+		905:
+			key.call(KEY_3, true, true)
+			key.call(KEY_3, false, true)
+		912:
+			say.call(weapon_slot == Weapons.WAND and int(spell_sel.get(Weapons.WAND, -1)) == 2, "Ctrl+3 picks the wand's third spell (%d)" % int(spell_sel.get(Weapons.WAND, -1)))
+			_ui_check["w"] = weapon_slot
+			var e := InputEventMouseButton.new()
+			e.button_index = MOUSE_BUTTON_WHEEL_UP
+			e.pressed = true
+			Input.parse_input_event(e)
+		920:
+			say.call(weapon_slot == Weapons.STAFF, "the mouse wheel steps to the previous weapon (%s)" % Weapons.NAMES[weapon_slot])
+			key.call(KEY_TAB, true)
+		924:
+			key.call(KEY_TAB, false)
+		932:
+			say.call(weapon_slot == Weapons.WAND and not radial.visible, "a tap of Tab goes back to the last weapon (%s)" % Weapons.NAMES[weapon_slot])
+			_ui_check["s"] = int(spell_sel.get(Weapons.WAND, 0))
+			key.call(KEY_R, true)
+		935:
+			key.call(KEY_R, false)
+		942:
+			say.call(int(spell_sel.get(Weapons.WAND, 0)) == int(_ui_check["s"]) + 1, "a tap of R picks the next spell (%d)" % int(spell_sel.get(Weapons.WAND, 0)))
+			key.call(KEY_R, true, false, true)
+		945:
+			key.call(KEY_R, false, false, true)
+		952:
+			say.call(int(spell_sel.get(Weapons.WAND, 0)) == int(_ui_check["s"]), "Shift+R steps back (%d)" % int(spell_sel.get(Weapons.WAND, 0)))
+			_ui_check["o"] = net.golem_orders.get(net.my_id, [0])[0]
+			key.call(KEY_G, true)
+		980:
+			say.call(radial.visible and wheel_kind == "golem", "holding G opens the order wheel")
+			key.call(KEY_G, false)
+		990:
+			say.call(not radial.visible and net.golem_orders.get(net.my_id, [0])[0] == _ui_check["o"], "letting go in the middle takes nothing (order %d)" % net.golem_orders.get(net.my_id, [0])[0])
+			key.call(KEY_G, true)
+			key.call(KEY_G, false)
+		1000:
+			say.call(net.golem_orders.get(net.my_id, [0])[0] == Golems.Order.STAY, "a tap of G: Stay here (order %d)" % net.golem_orders.get(net.my_id, [0])[0])
 
 
 ## Duel bot (--host --give-all --bot duel --shots <dir>): walks to the Duel Stone and presses E (the real way), then
@@ -1203,45 +1388,403 @@ func _unhandled_input(event: InputEvent) -> void:
 	var mm := event as InputEventMouseMotion
 	var mb := event as InputEventMouseButton
 	var key := event as InputEventKey
+	var down := key != null and key.pressed and not key.echo
+	var code := key.physical_keycode if key else KEY_NONE
 	if mm and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		if radial and radial.visible:   # a wheel is open: the mouse points at its options, the camera stays put
+			radial.push(mm.relative)
+			return
 		var sens := mouse_sens * (0.55 if aiming else 1.0)
 		cam_yaw = wrapf(cam_yaw - mm.relative.x * sens, -PI, PI)
 		var lo := -1.45 if view == View.FIRST else -1.25
 		var hi := 1.45 if view == View.FIRST else 0.85
 		cam_pitch = clampf(cam_pitch - mm.relative.y * sens, lo, hi)
-	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_TAB and net.predicted != null:
-		for k in range(1, Weapons.NAMES.size() + 1):   # next weapon you own
-			var w := (weapon_slot + k) % Weapons.NAMES.size()
-			if (net.predicted.owned >> w) & 1:
-				weapon_slot = w
-				break
-	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_F2:
+	elif key and not key.pressed and held.has(code):   # Tab / R / G let go: a tap, or take what the wheel points at
+		_key_up(code)
+	elif down and (code == KEY_TAB or code == KEY_R or code == KEY_G) and _playing():
+		if not held.has(code):
+			held[code] = Time.get_ticks_msec()
+			if code == KEY_R:
+				held["shift"] = key.shift_pressed
+	elif down and code == KEY_F1:
+		if controls_panel:
+			controls_panel.visible = not controls_panel.visible
+	elif down and code == KEY_F2:
 		_switch_character()
-	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_P and menu and not menu.visible:
+	elif down and code == KEY_P and menu and not menu.visible:
 		net.request_pvp(not bool(net.roster.get(net.my_id, {}).get("pvp", false)))
-	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_R and net.predicted != null and Weapons.is_magic(weapon_slot):
-		var n: int = (Weapons.get_data(weapon_slot).spells as Array).size()
-		var lv := net.predicted.staff_lvl if weapon_slot == Weapons.STAFF else net.predicted.wand_lvl
-		var nxt := int(spell_sel.get(weapon_slot, 0))
-		for k in n:   # the next spell this weapon's level has unlocked
-			nxt = (nxt + 1) % n
-			if Weapons.unlocked(weapon_slot, nxt, lv):
-				break
-		spell_sel[weapon_slot] = nxt
-	elif key and key.pressed and not key.echo and key.physical_keycode >= KEY_1 and key.physical_keycode <= KEY_7:
-		var want := key.physical_keycode - KEY_1
-		if net.predicted != null and (net.predicted.owned >> want) & 1:
-			weapon_slot = want
-	elif key and key.pressed and not key.echo and key.physical_keycode == KEY_V:
+	elif down and key.ctrl_pressed and code >= KEY_1 and code <= KEY_9 and _playing():   # Ctrl+number: that spell
+		if Weapons.is_magic(weapon_slot):
+			_pick_spell(code - KEY_1)
+		else:
+			_flash_msg("Ctrl+number picks a spell: take the staff (6) or the wand (7)", Color("c9c9d6"))
+	elif down and code >= KEY_1 and code <= KEY_7 and _playing():
+		var want := code - KEY_1
+		if (net.predicted.owned >> want) & 1:
+			_pick_weapon(want)
+		else:
+			_flash_msg("No %s yet" % Weapons.NAMES[want].to_lower(), Color("c9c9d6"))
+	elif down and code == KEY_V:
 		view = View.FIRST if view == View.THIRD else View.THIRD
 		cam_pitch = clampf(cam_pitch, -1.2, 0.5)
 	elif mb and mb.pressed and (mb.button_index == MOUSE_BUTTON_WHEEL_UP or mb.button_index == MOUSE_BUTTON_WHEEL_DOWN):
-		cam_dist = clampf(cam_dist + (-0.6 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 0.6), 2.5, 14.0)
+		var step := -1 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else 1
+		if radial and radial.visible:
+			pass
+		elif mb.ctrl_pressed or not _playing():   # Ctrl + wheel: camera distance
+			cam_dist = clampf(cam_dist + 0.6 * step, 2.5, 14.0)
+		elif Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and Weapons.is_magic(weapon_slot):   # aiming: spells
+			_step_spell(step)
+		else:
+			_cycle_weapon(step)
+	elif mb and mb.pressed and mb.button_index == MOUSE_BUTTON_MIDDLE and _playing() and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		_smart_order()
+	elif mb and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT and radial and radial.visible:
+		attack_block_until = Time.get_ticks_msec() + 300   # a click takes what the wheel points at (no swing)
+		for k in held.keys():
+			if k is int:
+				_key_up(k)
+				break
 	elif mb and mb.pressed and menu and not menu.visible and not pause_menu.visible and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		attack_block_until = Time.get_ticks_msec() + 250
 	elif event.is_action_pressed("ui_cancel") and menu and not menu.visible:
+		if radial and radial.visible:   # Esc closes a wheel without picking
+			radial.close()
+			wheel_kind = ""
+			held.clear()
+			return
+		if controls_panel and controls_panel.visible:
+			controls_panel.visible = false
+			return
 		_set_paused(not pause_menu.visible)
+
+
+# ================================================================ v0.12.2 controls: weapons, spells, golem orders
+## Weapons: 1-7, the mouse wheel (owned ones, in turn), tap Tab = the last one, hold Tab = the weapon wheel.
+## Spells (staff / wand in hand): Ctrl+1-8, tap R = next, Shift+R = back, right mouse + wheel, hold R = the spell
+## wheel. Golems: tap G = Follow <-> Stay, hold G = the order wheel, middle mouse = attack what's under the crosshair
+## (or go to the spot). Every pick shows its name under the crosshair for a moment. The pick is part of every input
+## (weapon, spell) or a request to the server (orders), so everyone sees the same.
+func _playing() -> bool:
+	return net.predicted != null and menu != null and not menu.visible and pause_menu != null and not pause_menu.visible
+
+
+## Tab / R / G held long enough: open its wheel.
+func _update_holds() -> void:
+	if radial == null or held.is_empty() or radial.visible:
+		return
+	var now := Time.get_ticks_msec()
+	for code in [KEY_TAB, KEY_R, KEY_G]:
+		if held.has(code) and now - int(held[code]) >= HOLD_MS:
+			_open_wheel(code)
+			return
+
+
+func _key_up(code: int) -> void:
+	var was_held := held.has(code)
+	var shift := bool(held.get("shift", false))
+	held.erase(code)
+	held.erase("shift")
+	if not was_held:
+		return
+	if radial and radial.visible:
+		var kind := wheel_kind
+		wheel_kind = ""
+		var pick := radial.close()
+		if pick >= 0:
+			_wheel_pick(kind, pick)
+		return
+	if not _playing():
+		return
+	match code:   # a tap
+		KEY_TAB:
+			if last_weapon != weapon_slot and (net.predicted.owned >> last_weapon) & 1:
+				_pick_weapon(last_weapon)
+			else:
+				_cycle_weapon(1)
+		KEY_R:
+			if Weapons.is_magic(weapon_slot):
+				_step_spell(-1 if shift else 1)
+			else:
+				_flash_msg("R picks a spell: take the staff (6) or the wand (7)", Color("c9c9d6"))
+		KEY_G:
+			var mode: int = (net.golem_orders.get(net.my_id, [Golems.Order.FOLLOW]) as Array)[0]
+			_golem_order(Golems.Order.FOLLOW if mode == Golems.Order.STAY else Golems.Order.STAY)
+
+
+func _pick_weapon(w: int, quiet := false) -> void:
+	if w == weapon_slot:
+		return
+	last_weapon = weapon_slot
+	weapon_slot = w
+	if not quiet:
+		var extra := ""
+		if Weapons.is_magic(w):
+			var sp := Weapons.spell(w, int(spell_sel.get(w, 0)))
+			extra = "  (%s)" % sp.name
+		_flash_msg(Weapons.NAMES[w] + extra, Color("fff2a8"))
+
+
+## The next owned weapon up (+1) or down (-1) the list, round the end.
+func _cycle_weapon(step: int) -> void:
+	if net.predicted == null:
+		return
+	var n := Weapons.NAMES.size()
+	for k in range(1, n):
+		var w := posmod(weapon_slot + step * k, n)
+		if (net.predicted.owned >> w) & 1:
+			_pick_weapon(w)
+			return
+
+
+func _spell_level() -> int:
+	if net.predicted == null:
+		return 1
+	return net.predicted.staff_lvl if weapon_slot == Weapons.STAFF else net.predicted.wand_lvl
+
+
+func _pick_spell(i: int) -> void:
+	var spells: Array = Weapons.get_data(weapon_slot).spells
+	if i < 0 or i >= spells.size():
+		return
+	var sp: Dictionary = spells[i]
+	if not Weapons.unlocked(weapon_slot, i, _spell_level()):
+		_flash_msg("%s unlocks at %s level %d" % [sp.name, Weapons.NAMES[weapon_slot].to_lower(), int(sp.get("level", 1))], Color("ff9a8a"))
+		return
+	spell_sel[weapon_slot] = i
+	_flash_msg(str(sp.name), Color("bcd6ff"))
+
+
+## The next (+1) or previous (-1) unlocked spell, round the end.
+func _step_spell(step: int) -> void:
+	var n: int = (Weapons.get_data(weapon_slot).spells as Array).size()
+	var cur := int(spell_sel.get(weapon_slot, 0))
+	for k in range(1, n + 1):
+		var i := posmod(cur + step * k, n)
+		if Weapons.unlocked(weapon_slot, i, _spell_level()):
+			if i != cur:
+				_pick_spell(i)
+			return
+
+
+## Under the crosshair for a moment: what was just picked.
+func _flash_msg(text: String, col := Color.WHITE) -> void:
+	if switch_label == null:
+		return
+	switch_label.text = text
+	switch_label.add_theme_color_override("font_color", col)
+	switch_label.modulate.a = 1.0
+	if switch_label.has_meta("tw"):
+		(switch_label.get_meta("tw") as Tween).kill()
+	var tw := switch_label.create_tween()
+	tw.tween_interval(0.9)
+	tw.tween_property(switch_label, "modulate:a", 0.0, 0.5)
+	switch_label.set_meta("tw", tw)
+
+
+func _open_wheel(code: int) -> void:
+	var st := net.predicted
+	match code:
+		KEY_TAB:
+			var its := []
+			for i in Weapons.NAMES.size():
+				var own := ((st.owned >> i) & 1) == 1
+				var sub := "%d" % (i + 1)
+				if i == Weapons.BOW:
+					sub += "   %d arrows" % st.arrows
+				elif i == Weapons.SLING:
+					sub += "   %d rocks" % st.rocks
+				elif Weapons.is_magic(i) and own:
+					sub += "   " + str(Weapons.spell(i, int(spell_sel.get(i, 0))).name)
+				its.append({ "icon": "w:%d" % i, "label": Weapons.NAMES[i], "sub": sub if own else "not found yet", "enabled": own })
+			wheel_kind = "weapon"
+			radial.open(its, "Weapons", weapon_slot, "point, then let go of Tab")
+		KEY_R:
+			if not Weapons.is_magic(weapon_slot):
+				held.erase(KEY_R)
+				_flash_msg("R picks a spell: take the staff (6) or the wand (7)", Color("c9c9d6"))
+				return
+			var its := []
+			var spells: Array = Weapons.get_data(weapon_slot).spells
+			var wand := weapon_slot == Weapons.WAND
+			for i in spells.size():
+				var sp: Dictionary = spells[i]
+				var ok := Weapons.unlocked(weapon_slot, i, _spell_level())
+				var sub := ""
+				if not ok:
+					sub = "Lv %d" % int(sp.get("level", 1))
+				elif wand:
+					var left: int = st.recharge[i] if i < st.recharge.size() else 0
+					sub = ("%d s" % int(ceil(left * Config.DT))) if left > 0 else "ready"
+				elif bool(sp.get("channel", false)):
+					sub = "%d mana/s" % int(round(float(sp.get("drain", 1)) * Config.TICK_RATE / 5.0))
+				else:
+					sub = "%d mana" % int(sp.cost)
+				its.append({ "icon": str(sp.name), "label": "%d  %s" % [i + 1, sp.name], "sub": sub, "enabled": ok })
+			wheel_kind = "spell"
+			radial.open(its, Weapons.NAMES[weapon_slot] + " spells", int(spell_sel.get(weapon_slot, 0)), "point, then let go of R")
+		KEY_G:
+			wheel_target = _crosshair_enemy()
+			wheel_ground = _ground_point()
+			var n := _my_golems()
+			var mode: int = (net.golem_orders.get(net.my_id, [Golems.Order.FOLLOW]) as Array)[0]
+			var col: Color = net.roster.get(net.my_id, {}).get("color", Color.WHITE)
+			var tgt := "nothing under the crosshair"
+			var tgt_ok := false
+			if not wheel_target.is_empty():
+				tgt_ok = _may_order_attack(int(wheel_target[0]))
+				tgt = str(wheel_target[2]) + ("" if tgt_ok else " (PvP off)")
+			var its := [
+				{ "icon": "o:follow", "label": "Follow me", "sub": "guard me as I go", "enabled": n > 0, "tint": col },
+				{ "icon": "o:stay", "label": "Stay here", "sub": "hold where I stand", "enabled": n > 0, "tint": col },
+				{ "icon": "o:go", "label": "Go there", "sub": "hold the crosshair spot", "enabled": n > 0, "tint": col },
+				{ "icon": "o:attack", "label": "Attack that", "sub": tgt, "enabled": n > 0 and tgt_ok, "tint": col },
+				{ "icon": "o:regroup", "label": "Regroup", "sub": "drop it, come back", "enabled": n > 0, "tint": col },
+			]
+			wheel_kind = "golem"
+			radial.open(its, "Golems (%d)" % n if n > 0 else "No golems", mode, "point, then let go of G" if n > 0 else "summon some with the wand")
+
+
+func _wheel_pick(kind: String, i: int) -> void:
+	match kind:
+		"weapon":
+			_pick_weapon(i)
+		"spell":
+			_pick_spell(i)
+		"golem":
+			match i:
+				0: _golem_order(Golems.Order.FOLLOW)
+				1: _golem_order(Golems.Order.STAY)
+				2: _golem_order(Golems.Order.GOTO, wheel_ground)
+				3: _golem_order(Golems.Order.ATTACK, Vector3.ZERO, int(wheel_target[0]) if not wheel_target.is_empty() else 0)
+				4: _golem_order(Golems.Order.REGROUP)
+
+
+## How many golems (titan included) this player has standing, as drawn.
+func _my_golems() -> int:
+	var n := 0
+	if golem_view:
+		for g: Dictionary in golem_view.golems.values():
+			if g.owner == net.my_id and g.state != Golems.State.DIE:
+				n += 1
+	return n
+
+
+## Ask the server to order this player's golems (it checks and tells everyone).
+func _golem_order(mode: int, point := Vector3.ZERO, target := 0) -> void:
+	if _my_golems() == 0:
+		_flash_msg("No golems: summon them with the wand's Golem spell", Color("c9c9d6"))
+		return
+	if mode == Golems.Order.STAY and net.predicted:
+		point = net.predicted.pos
+	net.request_golem_order(mode, point, target)
+	var words := ["Golems: follow me", "Golems: stay here", "Golems: go there", "Golems: attack!", "Golems: regroup"]
+	var txt: String = words[mode]
+	if mode == Golems.Order.ATTACK and not wheel_target.is_empty() and int(wheel_target[0]) == target:
+		txt = "Golems: attack %s!" % wheel_target[2]
+	_flash_msg(txt, net.roster.get(net.my_id, {}).get("color", Color.WHITE).lightened(0.3))
+
+
+## Middle mouse: attack the enemy under the crosshair, or go to the spot on the ground there.
+func _smart_order() -> void:
+	var e := _crosshair_enemy()
+	if not e.is_empty() and _may_order_attack(int(e[0])):
+		wheel_target = e
+		_golem_order(Golems.Order.ATTACK, Vector3.ZERO, int(e[0]))
+	else:
+		_golem_order(Golems.Order.GOTO, _ground_point())
+
+
+## Could our golems be ordered against this target (the server checks again)? Thunderhorn, challengers, their golems
+## and the dummies always; players and their golems only when both of you have PvP on.
+func _may_order_attack(t: int) -> bool:
+	var mine := bool(net.roster.get(net.my_id, {}).get("pvp", false))
+	if t == Boss.ID or t >= Fog.NPC_ID0 or (t < 0 and t > -1000):
+		return true
+	if t > 0:
+		return mine and bool(net.roster.get(t, {}).get("pvp", false))
+	var g = golem_view.golems.get(-1000 - t, null) if golem_view else null
+	if g == null:
+		return false
+	return int(g.owner) >= Fog.NPC_ID0 or (mine and bool(net.roster.get(int(g.owner), {}).get("pvp", false)))
+
+
+## The spot on the ground the crosshair points at (or 80 m out along it), for Go there.
+func _ground_point() -> Vector3:
+	var o := cam.global_position
+	var d := -cam.global_transform.basis.z
+	var t := 80.0
+	if d.y < -0.001:
+		t = minf(t, -o.y / d.y)
+	t = minf(t, WorldLayout.ray_hit(o, d, t))
+	var p := o + d * t
+	return Vector3(p.x, 0.0, p.z)
+
+
+## Distance along a ray to an upright cylinder (feet at c, radius r, height h), or INF.
+static func _ray_cyl(o: Vector3, d: Vector3, c: Vector3, r: float, h: float, max_t: float) -> float:
+	var oc := Vector2(o.x - c.x, o.z - c.z)
+	var dd := Vector2(d.x, d.z)
+	var a := dd.dot(dd)
+	if a < 1e-8:
+		return INF
+	var b := 2.0 * oc.dot(dd)
+	var cc := oc.dot(oc) - r * r
+	var disc := b * b - 4.0 * a * cc
+	if disc < 0.0:
+		return INF
+	for tt in [(-b - sqrt(disc)) / (2.0 * a), (-b + sqrt(disc)) / (2.0 * a)]:
+		if tt > 0.0 and tt < max_t:
+			var y: float = o.y + d.y * tt
+			if y > c.y - 0.2 and y < c.y + h:
+				return tt
+	return INF
+
+
+## What enemy (or practice dummy) the crosshair is on: [id, feet position, name], or []. Players and challengers
+## (by their drawn bodies), other summoners' golems and titans, Thunderhorn, the dummies; walls and the ground stop
+## the look. A little generous (+0.25 m), so a moving target is easy to pick.
+func _crosshair_enemy() -> Array:
+	if cam == null:
+		return []
+	var o := cam.global_position
+	var d := -cam.global_transform.basis.z
+	var max_t := 80.0
+	if d.y < -0.001:
+		max_t = minf(max_t, -o.y / d.y + 0.5)
+	max_t = minf(max_t, WorldLayout.ray_hit(o, d, max_t) + 0.3)
+	var best := []
+	var best_t := INF
+	for id in avatars.keys():
+		if id == net.my_id or not avatars[id].visible:
+			continue
+		var p: Vector3 = avatars[id].position
+		var t := _ray_cyl(o, d, p, 0.7, 1.95, max_t)
+		if t < best_t:
+			best_t = t
+			best = [id, p, str(net.roster.get(id, {}).get("name", "them"))]
+	if golem_view:
+		for gid in golem_view.golems.keys():
+			var g: Dictionary = golem_view.golems[gid]
+			if g.owner == net.my_id or g.state == Golems.State.DIE:
+				continue
+			var p: Vector3 = (g.root as Node3D).position
+			var t := _ray_cyl(o, d, p, 1.2 if g.titan else 0.6, 3.6 if g.titan else 1.4, max_t)
+			if t < best_t:
+				best_t = t
+				best = [-1000 - int(gid), p, ("%s's titan" if g.titan else "%s's golem") % str(net.roster.get(g.owner, {}).get("name", "a"))]
+	if boss_view and boss_view.alive:
+		var t := _ray_cyl(o, d, boss_view.pos, Boss.RADIUS + 0.3, Boss.HEIGHT, max_t)
+		if t < best_t:
+			best_t = t
+			best = [Boss.ID, boss_view.pos, "Thunderhorn"]
+	for i in WorldLayout.DUMMIES.size():
+		var t := _ray_cyl(o, d, WorldLayout.DUMMIES[i], 0.6, 1.9, max_t)
+		if t < best_t:
+			best_t = t
+			best = [-(i + 1), WorldLayout.DUMMIES[i], "the dummy"]
+	return best
 
 
 ## Esc menu: resume, mouse sensitivity, which look to play as, leave the game. The game keeps running underneath
@@ -1308,10 +1851,53 @@ func _build_pause_menu(layer: CanvasLayer) -> void:
 	pause_char.add_item("3D figure (test character)")
 	pause_char.item_selected.connect(func(i): _pause_pick_style(i))
 	box.add_child(pause_char)
+	var ctl := Button.new()
+	ctl.text = "Controls (F1)"
+	ctl.pressed.connect(func(): controls_panel.visible = not controls_panel.visible)
+	box.add_child(ctl)
 	var leave := Button.new()
 	leave.text = "Leave game"
 	leave.pressed.connect(_leave_game)
 	box.add_child(leave)
+
+
+## v0.12.2 F1: every control in one panel (the game keeps running under it).
+func _build_controls_panel(layer: CanvasLayer) -> void:
+	var panel := PanelContainer.new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.03, 0.04, 0.08, 0.86)
+	sb.set_corner_radius_all(8)
+	sb.set_content_margin_all(16)
+	panel.add_theme_stylebox_override("panel", sb)
+	panel.visible = false
+	layer.add_child(panel)
+	controls_panel = panel
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 18)
+	grid.add_theme_constant_override("v_separation", 4)
+	panel.add_child(grid)
+	var head := Label.new()
+	head.text = "Controls"
+	head.add_theme_font_size_override("font_size", 22)
+	head.add_theme_color_override("font_color", Icons.GOLD)
+	grid.add_child(head)
+	var close := Label.new()
+	close.text = "F1 or Esc to close"
+	close.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
+	grid.add_child(close)
+	for row in CONTROLS:
+		var a := Label.new()
+		a.text = row[0]
+		a.add_theme_color_override("font_color", Color("ffe9a8"))
+		grid.add_child(a)
+		var b := Label.new()
+		b.text = row[1]
+		grid.add_child(b)
 
 
 # ================================================================ menu and HUD
@@ -1324,9 +1910,11 @@ func _build_ui() -> void:
 	hud.add_theme_constant_override("outline_size", 6)
 	layer.add_child(hud)
 	var help := Label.new()
-	help.text = "WASD move  Shift sprint  Space jump  Q dash  LMB attack (click again for combos, hold to draw)  RMB aim  E pick up  1-7 / Tab weapons  R spell  V view  P PvP on/off  F2 Pip / 3D figure  Esc menu"
+	help.text = HELP_LINE
 	help.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	help.position = Vector2(12, -34)
+	help.position = Vector2(12, -36)
+	help.add_theme_font_size_override("font_size", 12)
+	help.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
 	help.add_theme_color_override("font_outline_color", Color.BLACK)
 	help.add_theme_constant_override("outline_size", 6)
 	layer.add_child(help)
@@ -1393,13 +1981,38 @@ func _build_ui() -> void:
 	hud_spells.grow_vertical = Control.GROW_DIRECTION_BEGIN   # grows upward, above the weapons line
 	hud_spells.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	hud_spells.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hud_spells.offset_top = -210
-	hud_spells.offset_bottom = -110
-	hud_spells.add_theme_font_size_override("font_size", 18)
+	hud_spells.offset_top = -330
+	hud_spells.offset_bottom = -222   # the level line, over the spell hotbar
+	hud_spells.add_theme_font_size_override("font_size", 16)
 	hud_spells.add_theme_color_override("font_color", Color("bcd6ff"))
 	hud_spells.add_theme_color_override("font_outline_color", Color.BLACK)
 	hud_spells.add_theme_constant_override("outline_size", 6)
 	layer.add_child(hud_spells)
+	spell_bar = SpellBar.new()   # v0.12.2: the spell hotbar, over the weapons line and the health bar
+	spell_bar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	spell_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	spell_bar.offset_left = -300
+	spell_bar.offset_right = 300
+	spell_bar.offset_top = -182
+	spell_bar.offset_bottom = -130
+	spell_bar.visible = false
+	layer.add_child(spell_bar)
+	switch_label = Label.new()   # what was just picked, under the crosshair
+	switch_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)   # over the crosshair, clear of your body
+	switch_label.offset_left = -300
+	switch_label.offset_right = 300
+	switch_label.offset_top = -110
+	switch_label.offset_bottom = -80
+	switch_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	switch_label.add_theme_font_size_override("font_size", 22)
+	switch_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	switch_label.add_theme_constant_override("outline_size", 7)
+	switch_label.modulate.a = 0.0
+	layer.add_child(switch_label)
+	radial = RadialMenu.new()
+	radial.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(radial)
+	_build_controls_panel(layer)
 	charge_fill = ColorRect.new()  # bow / slingshot draw, under the crosshair
 	charge_fill.color = Color(1, 0.85, 0.3)
 	charge_fill.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -1819,7 +2432,7 @@ func _update_combat_hud() -> void:
 		var gained := st.owned & ~owned_seen
 		for i in range(Weapons.NAMES.size() - 1, 0, -1):
 			if (gained >> i) & 1:
-				weapon_slot = i
+				_pick_weapon(i, true)
 				break
 		owned_seen = st.owned
 	hp_fill.size.x = 296.0 * float(st.hp) / float(Sim.MAX_HP)
@@ -1828,21 +2441,10 @@ func _update_combat_hud() -> void:
 	charge_fill.size.x = 60.0 * float(st.charge) / float(w.draw) if w.kind == "ranged" else 0.0
 	mana_fill.size.x = 296.0 * float(st.mana) / float(Sim.MANA_FULL)
 	_static_hud(st)
+	if spell_bar:   # v0.12.2: the hotbar (icons, keys, costs, recharges) replaces the old line of names
+		spell_bar.show_state(st, int(spell_sel.get(st.weapon, 0)))
 	if w.kind == "magic":
-		var parts := []
-		var sel := int(spell_sel.get(st.weapon, 0))
 		var lv := st.staff_lvl if st.weapon == Weapons.STAFF else st.wand_lvl
-		for i in (w.spells as Array).size():
-			var sp: Dictionary = w.spells[i]
-			if not Weapons.unlocked(st.weapon, i, lv):
-				continue
-			var t: String
-			if w.get("uses", "mana") == "recharge":
-				var left: int = st.recharge[i]
-				t = "%s %s" % [sp.name, ("%.0fs" % ceil(left * Config.DT)) if left > 0 else "ready"]
-			else:
-				t = "%s %d" % [sp.name, int(sp.cost)] + ("" if st.mana >= int(sp.cost) * 5 else " (mana)")
-			parts.append(("[ %s ]" if i == sel else "  %s  ") % t)
 		var kills: Array = net.roster.get(net.my_id, {}).get("kills", [0, 0])
 		var kn := int(kills[0 if st.weapon == Weapons.STAFF else 1])
 		var lvl_line := "%s level %d" % [Weapons.NAMES[st.weapon], lv]
@@ -1850,10 +2452,7 @@ func _update_combat_hud() -> void:
 			lvl_line += "   kills %d / %d to the next level" % [kn, int(Weapons.LEVEL_KILLS[lv])]
 		else:
 			lvl_line += "   (ultimate unlocked)"
-		var rows := ["   ".join(parts.slice(0, 4))]   # four spells a row (v0.12.0: the wand has eight)
-		if parts.size() > 4:
-			rows.append("   ".join(parts.slice(4)))
-		hud_spells.text = lvl_line + "\nR spell:  " + "\n".join(rows) + ("\nSTUNNED" if st.stun > 0 else "")
+		hud_spells.text = ("STUNNED\n" if st.stun > 0 else "") + lvl_line
 	else:
 		hud_spells.text = "STUNNED" if st.stun > 0 else ""
 	if st.dead > 0:

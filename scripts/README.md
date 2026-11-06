@@ -28,6 +28,9 @@ Back to the [project README](../README.md).
 | [fx.gd](#fxgd) | `Fx` | client | Combat effects: slash trails, thrusts, shockwaves, bursts, impact words. |
 | [dummy.gd](#dummygd) | `Dummy` | client | A practice dummy that rocks when hit and shows damage and DPS. |
 | [updater.gd](#updatergd) | `Updater` | client | Checks GitHub for a newer release and downloads the update pack. |
+| [icons.gd](#iconsgd-spell_bargd-radial_menugd-v0122) | `Icons` | client | v0.12.2 procedural icons for spells, weapons and golem orders (2D and as textures). |
+| [spell_bar.gd](#iconsgd-spell_bargd-radial_menugd-v0122) | `SpellBar` | client | v0.12.2 the spell hotbar over the health bar. |
+| [radial_menu.gd](#iconsgd-spell_bargd-radial_menugd-v0122) | `RadialMenu` | client | v0.12.2 the hold-Tab / R / G wheels. |
 
 "Runs on: client" means it only draws things; on a host (which is server and client at once) it runs too. A dedicated
 server (`--server`) never builds the world, so none of the drawing scripts run there.
@@ -120,8 +123,23 @@ when the host switches the look.
   (`_ray_people`) to find what the crosshair is on. From that it works out `aim_yaw` (where a shot should fly from the
   muzzle), `face_yaw` (where the body should turn: toward the target's centre, at most 60 degrees off the camera) and,
   for ranged weapons, the pitch of the low arc that lands on the point at the current draw speed.
-- `_unhandled_input` handles mouse look, Tab and 1-5 (weapon slots you own), F2 (switch look), V (view), the mouse
-  wheel (distance 2.5 to 14 m), the click that recaptures the mouse, and Esc.
+- `_unhandled_input` handles mouse look (or, while a wheel is open, the wheel's pointer), 1-7 (weapons you own),
+  Ctrl+1-8 (spells), the mouse wheel (weapons; with right mouse held and a magic weapon, spells; with Ctrl, the camera
+  distance 2.5 to 14 m), Tab / R / G (taps and holds, below), middle mouse (a golem order), F1 (the controls panel),
+  F2 (switch look), P (PvP), V (view), the click that recaptures the mouse, and Esc (closes a wheel or the F1 panel
+  first).
+- v0.12.2 taps and holds: Tab, R and G go into `held` when pressed; `_update_holds` (every frame) opens the key's
+  wheel (`_open_wheel`, a `RadialMenu`) once it's been down `HOLD_MS` (0.22 s); `_key_up` either takes what the
+  wheel points at (`_wheel_pick`) or does the tap: Tab = `last_weapon`, R = `_step_spell(+1)` (Shift: -1), G =
+  Follow <-> Stay. `_pick_weapon` / `_cycle_weapon` / `_pick_spell` / `_step_spell` change `weapon_slot` and
+  `spell_sel` (both sent with every input, so the server and everyone else follow) and show the name over the
+  crosshair (`_flash_msg`).
+- v0.12.2 golem orders: `_golem_order(mode, point, target)` asks the server (`Net.request_golem_order`);
+  `_smart_order` (middle mouse) attacks `_crosshair_enemy()` (a camera-ray test against the drawn players, other
+  summoners' golems, Thunderhorn and the dummies, stopped by walls and the ground) if `_may_order_attack` allows it,
+  else goes to `_ground_point()`. `--bot ui` takes the pictures of all this.
+- `CONTROLS` and `HELP_LINE` hold the F1 panel's rows and the two-line help at the bottom; keep them, README
+  "Controls" and the bindings in step.
 - `_set_paused` shows the Esc menu. The game keeps running underneath, since it's online.
 - `_switch_character` / `_pause_pick_style`: the host changes the look with `net.host_set_style`; anyone else sees
   "the host picks the look".
@@ -569,6 +587,16 @@ round pillars (the first free direction fanning out from the straight line, keep
 stuck), start the slam on the run as it closes in and keep chasing while the arms come up. Never targets its own
 summoner, who can't hurt it. The titan is slower and tougher and its slam hits everyone within 2.8 m of where it lands.
 
+v0.12.2 orders: `orders` (summoner id -> `Ord`: `mode` (`Order.FOLLOW / STAY / GOTO / ATTACK / REGROUP`), `point`,
+`target`), set by `order(owner, mode, point, target, now, people)`, which returns "" or why not (no golems; an attack
+target that `may_attack` refuses: players and their golems need PvP on for both, no grudge needed for an order). Each
+tick `_check_orders` ends attack orders whose target is gone, can't be fought any more, or has stayed more than
+`ORDER_LEASH` (30 m) from the summoner for `ORDER_OUT` (5 s), and regroups once everyone is back (or after 4 s), and
+drops orders whose summoner has no golems left; ended or changed orders go into `orders_dirty` for Net to send.
+In the AI: ATTACK sets every golem's target to the order's; REGROUP clears it; STAY / GOTO move the guard ring and the
+`_pick` leash to the point (`HOLD_R`, 8 m). `_pos_of` / `_target_pos` also fix Thunderhorn's id (`Boss.ID` = -5000 used
+to read as golem 4000) and aim for the near side of his body.
+
 ## golem_view.gd
 
 `class_name GolemView`: draws the golems from `Net.golems_changed` (a few updates a second), easing each toward where
@@ -576,6 +604,27 @@ the server says it is. Built from stone blocks (moss on the shoulders, glowing a
 eyes and a molten glow in its chest) and animated in code: rising out of the ground, breathing, walking (legs and arms
 swinging, body rocking), slamming (arms up, lean back, slam, lean in; legs still running when it swings on the move),
 stunned (violet, trembling) and crumbling (the blocks fly apart, tumble and sink).
+
+v0.12.2 orders (`Net.golem_order_changed`): `orders` per summoner; `_update_markers` keeps a marker per standing order
+in the owner's colour (a pulsing ring and a shaft of light on the spot to hold, or a ring round the target's feet sized
+to it, with the order's icon over it); each golem has an order icon (`Icons.texture("o:<order>", colour)`) shown
+while the order isn't Follow and for 4 s after any order; `_order_look` turns the heads to the spot / target / owner
+for 1.6 s; the owner hears `Synth.grunt`. `setup(net, main)` takes Main to find players (`main.avatars`) and
+Thunderhorn (`main.boss_view`).
+
+## icons.gd, spell_bar.gd, radial_menu.gd (v0.12.2)
+
+- **icons.gd** `class_name Icons`: procedural glyphs (lines, circles, rings, polygons in a unit square) for every
+  spell, weapon (`"w:<index>"`) and golem order (`"o:follow"`, `"o:stay"`, `"o:go"`, `"o:attack"`, `"o:regroup"`).
+  `draw(canvas_item, key, centre, half_size, tint, grey)` for the HUD; `texture(key, tint, size)` rasterises one (with a
+  dark outline, cached) for Sprite3D icons in the world.
+- **spell_bar.gd** `class_name SpellBar` (Control): the hotbar. `show_state(state, selected)` every frame; `_draw`
+  lays out one slot per spell: icon, key number, staff cost (greyed when unaffordable, a shade while the staff is
+  busy) or wand recharge (a clock sweep and seconds), padlock and "Lv N" when locked, the gold frame on the pick, its
+  name and cost over the bar and a one-line hint.
+- **radial_menu.gd** `class_name RadialMenu` (Control): `open(items, title, current, hint)`, `push(mouse_motion)`,
+  `point_at(i)`, `close()` -> the picked index or -1. Items are `{icon, label, sub, enabled, tint}`; disabled ones are
+  greyed and can't be taken.
 
 ## Magic in the other scripts
 
@@ -586,9 +635,13 @@ stunned (violet, trembling) and crumbling (the blocks fly apart, tumble and sink
   the shared simulation, so they are predicted exactly; `Ev.CAST` tells the server a spell went off.
 - **net.gd**: `_cast` and the spell code (lightning, fireballs as projectile kind 2, `_blast` for area damage, `_stun_target`,
   gravity wells, storms, golems), `_shield_soak` (hits on a shield cost mana; out of mana it shatters), `_magic_kill`
-  (levels), PvP (`set_pvp`, `can_hurt`), the vault door, the one-of-a-kind staff and wand.
+  (levels), PvP (`set_pvp`, `can_hurt`), the vault door, the one-of-a-kind staff and wand. v0.12.2 golem orders:
+  `request_golem_order` (the host directly, a guest through `golem_order_req`) -> `_server_golem_order` (Golems.order;
+  a refusal is a toast) -> `golem_order_sync` to everyone (`golem_orders`, `golem_order_changed`; late joiners get the
+  standing orders in `hello`); orders the golems end themselves go out after each tick (`_send_golem_orders`).
+  `_golem_people()` builds the list golems work from.
 - **world_layout.gd**: the tower (`TOWER_*`) and the vault (`VAULT_*`) as boxes with a `kind`, the staff and wand spawns.
-- **main.gd**: R picks a spell, the mana bar, the spell and level lines, the aim point sent with every input, the vault's
+- **main.gd**: spell picking (Ctrl+1-8, R / Shift+R, the spell wheel; v0.12.2), the mana bar, the spell hotbar and level line, the aim point sent with every input, the vault's
   look and door, the tower's beacon, `--give-all`, `--max-level` and `--bot magic` (`--plan2`, `--plan3`) for testing.
 - **avatar.gd** / **figure_avatar.gd**: the staff or wand in hand (Pip holds a small 3D model at his side), cast poses,
   the staff raised overhead while shielding; outfits per player (`tools/make_outfits.py`).

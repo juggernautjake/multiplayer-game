@@ -46,13 +46,34 @@ Contents:
 | Left mouse | attack the way you face (in place, or stepping into it if you're moving); click again for the combo; hold to draw a bow or slingshot, let go to shoot. While you hold it, your character turns toward the crosshair |
 | Right mouse | aim: face where the camera looks, zoom in, finer mouse |
 | E | pick up the weapon you're standing at (ammo is picked up by walking over it); next to a fallen fruit with no weapon in reach, eat it (+18 HP; walking over a fallen apple while hurt eats it too) |
-| 1-5 / Tab | fists, club, sword, bow, slingshot (the ones you have) |
-| V, mouse wheel | first / third person, camera distance |
+| 1-7 | fists, club, sword, bow, slingshot, staff, wand (the ones you have) |
+| Mouse wheel | next / previous weapon you own |
+| Tab | tap: back to the last weapon; hold: the **weapon wheel** (point with the mouse, let go to take it) |
+| Ctrl+1-8 | (staff or wand in hand) pick that spell |
+| R | tap: next spell; Shift+R: previous; hold: the **spell wheel**. Right mouse + wheel also scrolls the spells |
+| G | tap: your golems Follow me / Stay here; hold: the **golem order wheel** |
+| Middle mouse | golems: attack the enemy under the crosshair, or go to the spot on the ground there |
+| V, Ctrl + mouse wheel | first / third person, camera distance |
+| P | PvP on / off |
+| F1 | every control in one panel |
 | F2 | host only: switch everyone between Pip (sprite) and the 3D figure |
-| Esc | menu: resume, mouse sensitivity, look (host), leave |
+| Esc | menu: resume, mouse sensitivity, look (host), controls, leave (or closes an open wheel / the F1 panel) |
 
 The first click after the mouse is released (for example after closing the Esc menu) only grabs the mouse again; it
 does not also swing.
+
+**Wheels (0.12.2).** Holding Tab, R or G for a moment (0.22 s) opens a radial wheel in the middle of the screen. The
+game doesn't pause (it's online): you keep moving with WASD, and the mouse moves a pointer from the wheel's centre
+instead of the camera. Lean the pointer toward an option and let go of the key (or click) to take it; let go with the
+pointer back in the middle to take nothing; Esc closes it. Options you can't take yet (a weapon you haven't found, a
+locked spell, Attack that with nothing under the crosshair) are greyed out. Every pick shows its name over the
+crosshair for a moment, and your choice is part of every input you send, so everyone sees the same.
+
+**The spell hotbar (0.12.2).** With the staff or wand in hand, a row of slots sits over the weapons line: each spell's
+icon, its number (Ctrl + that number picks it), and the staff's mana cost (greyed out while you can't pay, with a
+shade while the staff is busy casting) or the wand's recharge (a clock sweep with the seconds left). Locked spells
+show a padlock and the level that unlocks them. The picked spell has a gold frame, with its name and cost over the
+bar, and the weapon's level and kills over that.
 
 ## Combat
 
@@ -97,7 +118,26 @@ Two magic weapons, each one of a kind (only one player has each; they go back wh
 - **The Magic wand** is hidden in **the vault**, a low stone block far from the spawn: walk round to its far side, open
   the door (E) and take the wand off its shelf. The wand uses no mana: each spell has its own **recharge** instead.
 
-Pick a weapon (6 staff, 7 wand), pick a spell with **R**, hold the left mouse button to cast where the crosshair is.
+Pick a weapon (6 staff, 7 wand), pick a spell (Ctrl+1-8, R / Shift+R, or hold R for the spell wheel; see
+[Controls](#controls)), hold the left mouse button to cast where the crosshair is.
+
+**Golem orders (0.12.2).** Your golems and your Stone Titan take orders, all together (you keep the usual limits: six
+golems and one titan). Tap **G** to switch between Follow me and Stay here; hold **G** for the order wheel; **middle
+mouse** is the quick one: attack the enemy under the crosshair, or go to the spot on the ground there.
+
+| Order | What they do |
+|---|---|
+| Follow me | (the normal way) stand guard round you as you go, and fight enemies within 18 m of you |
+| Stay here | hold the spot where you stood: a guard ring round it, fighting only what comes within 8 m of it |
+| Go there | walk to the spot the crosshair is on (up to 60 m from you) and hold it the same way |
+| Attack that | everyone goes after the enemy under the crosshair first, whatever else is near: Thunderhorn, challengers, corrupted minions, enemy golems, a practice dummy, or another player if you both have PvP on. Ends when it's down, or once it has stayed more than 30 m from you for 5 s; then they follow you again |
+| Regroup | drop everything and come back to you; then they follow you again (and may well go back to the fight) |
+
+The server decides every order and tells everyone, so all players see the same: a ring in the owner's colour on the
+spot to hold (with a faint shaft of light) or round the target's feet, a small icon over each golem showing its
+order, and the golems turn their heads to look; the owner hears a grunt. With PvP off, an order against a player (or
+a player's golem) is refused, and an attack order on a player ends the moment either of you turns PvP off. 0.12.2
+also fixed golems never closing in on Thunderhorn (his id read as a golem's).
 
 | Level | Staff (mana) | Wand (recharge) |
 |---|---|---|
@@ -479,6 +519,8 @@ These need no window and exit with code 0 when everything passes.
 | `<godot> --headless --path . -s tools/wizard_test.gd` | Challenger wizards: level-1 kits, mana and resting, spell choice, aim error, wind-up tells. |
 | `<godot> --headless --path . -s tools/dodge_test.gd` | Challengers dashing out of warning rings and the charge line, by tier. |
 | `<godot> --headless --path . -s tools/heal_test.gd` | The staff's Heal Aura. |
+| `<godot> --headless --path . -s tools/order_test.gd` | v0.12.2 golem orders: Follow distance, Stay radius, Go there, the ordered target hit first, attack orders ending (target down, out of reach 5 s), Regroup, PvP off blocking orders against players, golems fighting Thunderhorn, and the server refusing / syncing orders. |
+| `<godot> --headless --path . -s tools/rehost_test.gd [-- --port 7811]` | Leaving and hosting / joining again in one session (UDP 7777 unless `--port` says otherwise). |
 
 ### Visual checks (need a window)
 
@@ -509,6 +551,7 @@ The bot modes (all in `scripts/main.gd`, functions `_bot_input`, `_bot_fight` an
 | `--bot fight` | Walks to every weapon and ammo spawn and picks everything up, then walks to the middle practice dummy and uses each weapon on it for 6 s in turn (melee from 1.6 m, bow and slingshot from 10 m, aimed with the low-arc launch angle). Every 10 s it prints an audit line if `--log` is on. If it is the host, at 25 s it switches the look for everyone, to test F2. |
 | `--bot aim` | Like fight, but only with the bow and slingshot, aiming like a person: it steers the camera so the crosshair sits on the dummy's chest, then draws and lets go. Alternates 10 m and 22 m every 12 s. Tests that shots land where the crosshair is. |
 | `--bot show` | Showcase (host with `--give-staff`, `--give-wand` or `--give-all`; add `--style figure` for the 3D figure): runs toward the camera, strafes, backpedals, dashes, jumps, swings the sword and casts with the staff or wand while the camera circles, saving a picture every 6 ticks with `--shots <folder>`. For checking animation, the wizard garb and effects by eye. |
+| `--bot ui` | (v0.12.2, `--host --give-all [--max-level] --shots <folder>`) Pictures of the controls: the staff's and the wand's spell hotbar, the spell, weapon and golem order wheels, an Attack that order on a dummy and a Go there order. Without `--max-level` the hotbar shows the locked slots. |
 | `--bot golems` | Golem showcase (`--host --give-all --max-level`): summons a golem at the dummies, then the stone titan, and watches from the side; `--shots <folder>`. |
 | `--bot show --orbit` / `--bot show --carry` | The showcase standing still while the camera goes all the way round (front, side, back) / with every weapon in turn, walking and standing. |
 | `--bot archery [--sling]` | Draws, holds and looses the bow (or slingshot) aiming level, up and down, seen from behind, the side, the front and above; pictures at half draw, full draw, the release and rest. |
@@ -725,3 +768,15 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
   tier 2 they dash out of spell warning rings and Thunderhorn's charge (not every time).
 - Challenger wand wizards keep at most 3 golems; their golems fight you and your golems and crumble when their wizard
   falls.
+
+## What's new in 0.12.2 (not released yet)
+
+- **Easier weapon and spell picking**: the mouse wheel steps through your weapons, a tap of Tab goes back to the last
+  one, and holding Tab opens a weapon wheel. With the staff or wand, a **spell hotbar** over your health shows every
+  spell (icon, key, mana cost or recharge, locked ones with their level); Ctrl+1-8 picks one directly, R / Shift+R
+  step through them, holding R opens a spell wheel, and right mouse + wheel scrolls them. The camera distance moved to
+  Ctrl + mouse wheel. F1 shows every control. See [Controls](#controls).
+- **Golem orders**: tap G for Follow me / Stay here, hold G for the order wheel (Follow me, Stay here, Go there,
+  Attack that, Regroup), middle mouse to send them at what's under the crosshair. Markers in your colour show everyone
+  the order. See [Golem orders](#magic-the-staff-and-the-wand).
+- Golems now really fight Thunderhorn (they used to hang back: his id read as a golem's).

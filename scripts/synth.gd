@@ -244,3 +244,29 @@ static func sad_trombone() -> AudioStreamWAV:
 				d[i0 + i] = tone * env * wah * 0.6
 		i0 += len
 	return _wav(d)
+
+
+## v0.12.2 a golem acknowledging an order: a short, gravelly "hrm" (a low buzzy tone through a moving low-pass, with
+## a rasp of noise), pitched down for the titan. kind 0: an order taken, 1: a lower, longer "hrrmm" (attack).
+static func grunt(kind := 0, titan := false) -> AudioStreamWAV:
+	var dur := 0.32 if kind == 0 else 0.48
+	var base := (92.0 if kind == 0 else 74.0) * (0.7 if titan else 1.0)
+	var n := int(RATE * dur)
+	var d := PackedFloat32Array()
+	d.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 31 + kind
+	var ph := 0.0
+	var lp := 0.0
+	var f1 := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var u := t / dur
+		ph += base * (1.0 + 0.18 * sin(u * PI) - 0.12 * u) / RATE
+		var buzz := 2.0 * fposmod(ph, 1.0) - 1.0
+		f1 += (buzz - f1) * (0.08 + 0.05 * sin(u * PI * 2.0))
+		var noise := rng.randf_range(-1.0, 1.0)
+		lp += (noise - lp) * 0.12
+		var env := minf(t / 0.03, 1.0) * clampf((dur - t) / 0.12, 0.0, 1.0)
+		d[i] = clampf((f1 * 1.6 + lp * 0.5 * (0.6 + 0.4 * sin(t * TAU * 23.0))) * env * 0.8, -1.0, 1.0)
+	return _wav(d)
