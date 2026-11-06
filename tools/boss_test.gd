@@ -241,6 +241,7 @@ func _initialize() -> void:
 	check(stun_t < 15, "a stunned, low-health player is mostly left alone (%d of 60 picks)" % stun_t)
 
 	_throw_tests()
+	_maximin_tests()
 	print("%d failed" % bad)
 	quit(bad)
 
@@ -303,6 +304,29 @@ func _throw_tests() -> void:
 				thrown_n = thrown_n or int(l[0]) == 1000001
 			b.launches.clear(); b.hits.clear(); b.fx.clear(); b.zaps.clear()
 		check(thrown_p and thrown_n, "%s: the player and a challenger in his path are both thrown" % ("the charge" if st == Boss.S.CHARGE else "the rush"))
+
+
+## v0.12.0: the Storm Leap lands at the point furthest from every living player (maximin over the grid).
+func _maximin_tests() -> void:
+	var c := Boss.arena_c()
+	var cands := Boss.leap_candidates()
+	check(cands.size() > 100, "a grid of landing candidates over the arena (%d)" % cands.size())
+	var cases := [[c], [c + Vector3(8, 0, 3)], [c + Vector3(-12, 0, -10)], [c + Vector3(5, 0, 0), c + Vector3(-5, 0, 0)],
+		[c + Vector3(0, 0, 14), c + Vector3(10, 0, -10)], [c + Vector3(-15, 0, 2), c + Vector3(15, 0, 2)]]
+	var all_ok := true
+	var inside := true
+	for pts in cases:
+		var q := Boss.maximin_spot(pts)
+		var m := Boss.min_dist(q, pts)
+		for o in cands:
+			if Boss.min_dist(o, pts) > m + 0.011:
+				all_ok = false
+		inside = inside and Vector2(q.x - c.x, q.z - c.z).length() <= WorldLayout.ARENA_R - Boss.LEAP_MARGIN + 0.01
+		print("players %s -> lands %s, %.1f m from the nearest" % [str(pts.map(func(p): return Vector2(snappedf(p.x - c.x, 0.1), snappedf(p.z - c.z, 0.1)))), str(Vector2(q.x - c.x, q.z - c.z)), m])
+	check(all_ok, "with 1 and 2 players anywhere, no candidate is further from the nearest player than his pick")
+	check(inside, "and the pick is always inside the arena, short of the edge")
+	check(Boss.maximin_spot([c]) == Boss.maximin_spot([c]), "the same answer every time (deterministic)")
+	check(Boss.LEAP_H >= 30.0 and Boss.LEAP_AIR * Config.DT >= 2.0, "he leaps super high (%d m, %.1f s in the air)" % [int(Boss.LEAP_H), Boss.LEAP_AIR * Config.DT])
 
 
 ## Ten orbs at one player: standing still, or sprinting in a circle and dashing now and then. -> hits.

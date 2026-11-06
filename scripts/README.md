@@ -802,3 +802,16 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   head over heels with a cartwheel (also while skidding), Pip spins in the view's plane (`Avatar._pip_tumble`: the
   billboards off, the body rolled round its middle); both throw dust at each bounce and ricochet and trail it while
   skidding. Tests: boss_test (`_throw_tests`).
+- Storm Leap (v0.12.0): `LEAP_H` 34 m, `LEAP_AIR` 135 ticks (2.25 s). Take-off: a crater (scorch, cracks, debris,
+  dust) and a shake; in the air, lightning streaks trail behind him (`_update_marker`) and his shadow grows and darkens
+  on the landing marker; landing: a white impact flash, gold sparks, debris, a stray bolt, a big shake.
+- Landing spot (`Boss._leap_spot` -> `maximin_spot(points)`): candidates are a 1.5 m grid (`LEAP_GRID`) over the arena
+  disc less a 3 m margin (`LEAP_MARGIN`), minus points within `RADIUS + 1` m of any `WorldLayout.boxes()` obstacle
+  (`leap_candidates()`). Each candidate scores its distance to the nearest living player (`min_dist`); the highest
+  wins (maximise the minimum distance). Ties within 1 cm go to the candidate nearer the arena's centre, then grid
+  order: deterministic on the server. No one alive: the centre. Test: boss_test `_maximin_tests` (1 and 2 players,
+  the pick's min-distance >= every candidate's, inside the bounds).
+- Static looks (v0.12.0, `BossView.static_star`): every Static source (homing orbs, static balls) is a spinning spiky
+  caltrop, a hot-pink core with six white needle spikes in a violet shell, crackling white and trailing violet
+  sparks, with a buzz (`Synth.fx("buzz")`) when one appears; his plain damage balls stay smooth blue-white spheres. The
+  first one shows the banner "Violet orbs build STATIC / 6 hits = stun!".

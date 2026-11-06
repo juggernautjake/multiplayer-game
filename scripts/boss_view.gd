@@ -189,6 +189,9 @@ func _despawn() -> void:
 	beam = null
 	marker = null
 	path = null
+	if _leap_shadow != null:
+		_leap_shadow.queue_free()
+		_leap_shadow = null
 	for n in ring_nodes + ball_nodes + orb_nodes + _swirl:
 		(n as Node).queue_free()
 	ring_nodes = []
@@ -605,18 +608,53 @@ func _update_beam(col: Color) -> void:
 			fx._scorch_ragged(gp, 0.8, 3)
 
 
+var _leap_shadow: MeshInstance3D
+
+
 func _update_marker() -> void:
 	var leaping := state in [Boss.S.LEAP_WIND, Boss.S.LEAP]
 	marker.visible = leaping
+	if _leap_shadow != null:
+		_leap_shadow.visible = state == Boss.S.LEAP
 	if not leaping:
 		return
-	marker.global_position = Vector3(float(extra[0]), 0.06, float(extra[1]))
+	var land := Vector3(float(extra[0]), 0.06, float(extra[1]))
+	marker.global_position = land
 	var total := (90 + Boss.LEAP_AIR) * Config.DT
 	var k := clampf((state_t + (90 * Config.DT if state == Boss.S.LEAP else 0.0)) / total, 0.0, 1.0)
 	var fill: Node3D = marker.get_node("fill")
 	fill.scale = Vector3(4.0 * k, 1, 4.0 * k)
 	marker_mat.albedo_color.a = 0.55 + 0.4 * absf(sin(Time.get_ticks_msec() * 0.012))
 	marker.rotation.y += get_process_delta_time() * 1.5
+	if state == Boss.S.LEAP:
+		# v0.12.0: his shadow grows and darkens on the landing spot as he comes down, and lightning streaks behind
+		# him through the air
+		if _leap_shadow == null:
+			_leap_shadow = MeshInstance3D.new()
+			var cm := CylinderMesh.new()
+			cm.top_radius = 1.0
+			cm.bottom_radius = 1.0
+			cm.height = 0.02
+			cm.radial_segments = 32
+			_leap_shadow.mesh = cm
+			var m := StandardMaterial3D.new()
+			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.albedo_color = Color(0, 0, 0, 0.0)
+			_leap_shadow.material_override = m
+			_leap_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			main.add_child(_leap_shadow)
+		var u := clampf(state_t / (Boss.LEAP_AIR * Config.DT), 0.0, 1.0)
+		_leap_shadow.global_position = land + Vector3(0, 0.03, 0)
+		var r := lerpf(1.0, Boss.RADIUS + 2.5, u * u)
+		_leap_shadow.scale = Vector3(r, 1, r)
+		(_leap_shadow.material_override as StandardMaterial3D).albedo_color.a = 0.15 + 0.6 * u * u
+		var dt := get_process_delta_time()
+		if root != null and randf() < dt * 24.0:
+			var c := root.position + Vector3(0, 4.0, 0)
+			var back := Vector3(c.x - land.x, 0, c.z - land.z).normalized()
+			var tail := c + back * randf_range(6.0, 12.0) + Vector3(randf_range(-2, 2), randf_range(-1.5, 3.0), randf_range(-2, 2))
+			_arc(c + Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)), tail, GOLD if randf() < 0.6 else Color.WHITE, 0.18)
 
 
 func _update_path(col: Color) -> void:
@@ -695,33 +733,120 @@ func _draw_rings() -> void:
 
 func _draw_balls(col: Color) -> void:
 	while ball_nodes.size() < balls.size():
-		var mi := MeshInstance3D.new()
+		var holder := Node3D.new()
+		var mi := MeshInstance3D.new()   # a plain damage ball: a smooth blue-white sphere
 		var sm := SphereMesh.new()
 		sm.radius = 0.4
 		sm.height = 0.8
 		mi.mesh = sm
+		mi.name = "plain"
 		mi.material_override = MagicFx._glow_mat(Color("dff0ff"), 8.0)
 		var l := OmniLight3D.new()
 		l.light_color = Color("9fc4ff")
 		l.light_energy = 2.0
 		l.omni_range = 4.0
 		mi.add_child(l)
-		main.add_child(mi)
-		ball_nodes.append(mi)
+		holder.add_child(mi)
+		var star := static_star(1.3)   # a Static ball
+		star.name = "static"
+		holder.add_child(star)
+		main.add_child(holder)
+		ball_nodes.append(holder)
+	var stat_n := 0
 	for i in ball_nodes.size():
-		var mi: MeshInstance3D = ball_nodes[i]
-		mi.visible = i < balls.size()
-		if mi.visible:
+		var holder: Node3D = ball_nodes[i]
+		holder.visible = i < balls.size()
+		if holder.visible:
 			var b = balls[i]
 			var target: Vector3 = b[0] if b is Array else b
 			var stat: bool = b is Array and bool(b[1])
-			mi.global_position = mi.global_position.lerp(target, 0.5) if mi.global_position.distance_to(target) < 3.0 else target
-			mi.scale = Vector3.ONE * (0.9 + 0.25 * randf())
-			var c := VIOLET if stat else col
-			(mi.material_override as StandardMaterial3D).emission = c.lightened(0.4)
-			if randf() < 0.3:
-				var c0 := mi.global_position
-				_arc(c0, c0 + Vector3(randf_range(-0.8, 0.8), randf_range(-0.8, 0.8), randf_range(-0.8, 0.8)), c, 0.1)
+			holder.global_position = holder.global_position.lerp(target, 0.5) if holder.global_position.distance_to(target) < 3.0 else target
+			var mi: MeshInstance3D = holder.get_node("plain")
+			var star: Node3D = holder.get_node("static")
+			mi.visible = not stat
+			star.visible = stat
+			if stat:
+				stat_n += 1
+				_static_spin(star, get_process_delta_time())
+			else:
+				mi.scale = Vector3.ONE * (0.95 + 0.1 * randf())
+				(mi.material_override as StandardMaterial3D).emission = col.lightened(0.4)
+				if randf() < 0.3:
+					var c0 := holder.global_position
+					_arc(c0, c0 + Vector3(randf_range(-0.8, 0.8), randf_range(-0.8, 0.8), randf_range(-0.8, 0.8)), col, 0.1)
+	if stat_n > _stat_seen and root != null:
+		_static_seen(root.position)
+	_stat_seen = stat_n
+
+
+## v0.12.0: every Static source (homing orbs, static balls) looks the same, and nothing like his plain blue damage
+## balls: a spinning, spiky magenta-violet caltrop (six white-hot spikes round a hot pink core), crackling white,
+## trailing violet sparks, with an electric buzz when it appears.
+const STATIC_CORE := Color("ff4fd8")
+var _static_banner_shown := false
+var _orbs_buzzed := 0
+var _stat_seen := 0
+
+
+static func static_star(size := 1.0) -> Node3D:
+	var root_n := Node3D.new()
+	var core := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.22 * size
+	sm.height = 0.44 * size
+	sm.radial_segments = 8
+	sm.rings = 4
+	core.mesh = sm
+	core.material_override = MagicFx._glow_mat(STATIC_CORE, 9.0)
+	root_n.add_child(core)
+	var spike_mat := MagicFx._glow_mat(Color("fff0ff"), 6.0)
+	var dirs := [Vector3.RIGHT, Vector3.UP, Vector3.BACK, Vector3(1, 1, 1).normalized(), Vector3(-1, 1, 1).normalized(), Vector3(1, -1, 1).normalized()]
+	for d: Vector3 in dirs:
+		var sp := MeshInstance3D.new()
+		var cm := CylinderMesh.new()   # a double cone: thick in the middle, needle points at both ends
+		cm.top_radius = 0.0
+		cm.bottom_radius = 0.07 * size
+		cm.height = 0.55 * size
+		cm.radial_segments = 4
+		cm.rings = 1
+		for end in [1.0, -1.0]:
+			var half := MeshInstance3D.new()
+			half.mesh = cm
+			half.material_override = spike_mat
+			var y: Vector3 = d * end
+			var x: Vector3 = y.cross(Vector3.FORWARD if absf(y.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT).normalized()
+			half.transform = Transform3D(Basis(x, y, x.cross(y)), y * 0.3 * size)
+			sp.add_child(half)
+		root_n.add_child(sp)
+	var shell := MeshInstance3D.new()
+	var sh := SphereMesh.new()
+	sh.radius = 0.5 * size
+	sh.height = 1.0 * size
+	sh.radial_segments = 10
+	sh.rings = 6
+	shell.mesh = sh
+	var smat := MagicFx._glow_mat(VIOLET, 2.5, 0.25)
+	smat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	shell.material_override = smat
+	root_n.add_child(shell)
+	return root_n
+
+
+func _static_spin(n: Node3D, delta: float) -> void:
+	n.rotate_y(delta * 9.0)
+	n.rotate_x(delta * 5.0)
+	if randf() < delta * 30.0:
+		Fx.burst(main, n.global_position, Vector3.UP, VIOLET, 2, 1.5, 0.04)
+	if randf() < delta * 8.0:
+		var c0 := n.global_position
+		_arc(c0, c0 + Vector3(randf_range(-0.9, 0.9), randf_range(-0.9, 0.9), randf_range(-0.9, 0.9)), Color("fff0ff"), 0.08)
+
+
+func _static_seen(at: Vector3) -> void:
+	_sound("buzz", at, -4.0)
+	if not _static_banner_shown:
+		_static_banner_shown = true
+		_banner("Violet orbs build STATIC" + char(10) + "6 hits = stun!", VIOLET, 3.5)
 
 
 ## The homing orbs: violet cores in a crackling shell, each trailing sparks; a zip as each one launches.
@@ -730,45 +855,26 @@ func _draw_orbs(delta: float) -> void:
 		_sound("chirp", root.position, -6.0)
 	_orbs_seen = orbs.size()
 	while orb_nodes.size() < orbs.size():
-		var mi := MeshInstance3D.new()
-		var sm := SphereMesh.new()
-		sm.radius = 0.3
-		sm.height = 0.6
-		sm.radial_segments = 10
-		sm.rings = 6
-		mi.mesh = sm
-		mi.material_override = MagicFx._glow_mat(Color("e6c8ff"), 10.0)
-		var shell := MeshInstance3D.new()
-		var sh := SphereMesh.new()
-		sh.radius = 0.55
-		sh.height = 1.1
-		sh.radial_segments = 10
-		sh.rings = 6
-		shell.mesh = sh
-		var smat := MagicFx._glow_mat(VIOLET, 3.0, 0.35)
-		smat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		shell.material_override = smat
-		mi.add_child(shell)
+		var mi := static_star(1.1)
 		if orb_nodes.size() % 4 == 0:   # a light on every fourth (cheap)
 			var l := OmniLight3D.new()
-			l.light_color = VIOLET
+			l.light_color = STATIC_CORE
 			l.light_energy = 1.5
 			l.omni_range = 5.0
 			mi.add_child(l)
 		main.add_child(mi)
 		orb_nodes.append(mi)
+	if orbs.size() > _orbs_buzzed and root != null:
+		_static_seen(root.position)
+	_orbs_buzzed = orbs.size()
 	for i in orb_nodes.size():
-		var mi: MeshInstance3D = orb_nodes[i]
+		var mi: Node3D = orb_nodes[i]
 		mi.visible = i < orbs.size()
 		if mi.visible:
 			var target := orbs[i]
 			mi.global_position = mi.global_position.lerp(target, clampf(delta * 30.0, 0.0, 1.0)) if mi.global_position.distance_to(target) < 4.0 else target
-			mi.scale = Vector3.ONE * (0.85 + 0.3 * randf())
-			if randf() < delta * 30.0:
-				Fx.burst(main, mi.global_position, Vector3.UP, VIOLET, 2, 1.5, 0.04)
-			if randf() < delta * 6.0:
-				var c0 := mi.global_position
-				_arc(c0, c0 + Vector3(randf_range(-0.9, 0.9), randf_range(-0.9, 0.9), randf_range(-0.9, 0.9)), VIOLET, 0.08)
+			mi.scale = Vector3.ONE * (0.9 + 0.2 * randf())
+			_static_spin(mi, delta)
 
 
 # ================================================================ events
@@ -927,20 +1033,28 @@ func _on_fx(kind: String, a: Array) -> void:
 			_sound("roar2", a[0], 2.0, 0.6)
 			fx._flash_light(a[1] + Vector3(0, 2, 0), GOLD, 4.0, 10.0, 2.5)
 			fx._warn_ring(a[1], float(a[2]) * Config.DT)
-		"boss_leap":
-			_sound("whoosh", a[0], 6.0)
-			MotionFx.land(main, a[0], 3.0)
-			fx._cracks(a[0], 4.0, 8)
-			fx._shake_near_scaled(a[0], 0.4)
+		"boss_leap":   # v0.12.0 take-off: the ground caves in under him, debris flies, everything shakes
+			_sound("whoosh", a[0], 8.0)
+			_sound("slam", a[0], 4.0)
+			MotionFx.land(main, a[0], 3.5)
+			fx._cracks(a[0], 7.0, 14)
+			fx._scorch_ragged(a[0], 4.5, 12)
+			Fx.burst(main, a[0] + Vector3(0, 0.5, 0), Vector3.UP, Color("6b5a44"), 36, 12.0, 0.12)
+			Fx.burst(main, a[0] + Vector3(0, 0.5, 0), Vector3.UP, GOLD, 18, 9.0, 0.05)
+			fx._smoke(a[0], 8, 4.0, 2.0, 0.5)
+			fx._shake_near_scaled(a[0], 0.9)
 		"boss_leap_land":
 			var at: Vector3 = a[0]
 			fx._bolt(at)
 			fx._cracks(at, 10.0, 18)
 			fx._scorch_ragged(at, 6.0, 14)
-			MotionFx.land(main, at, 4.0)
-			fx._shake_near_scaled(at, 1.0)
+			MotionFx.land(main, at, 5.0)
+			fx._shake_near_scaled(at, 1.5)
 			fx._flash_light(at + Vector3(0, 2, 0), GOLD, 12.0, 26.0, 0.6)
+			fx._flash_light(at + Vector3(0, 8, 0), Color.WHITE, 20.0, 40.0, 0.25)   # the impact flash
 			Fx.burst(main, at + Vector3(0, 1, 0), Vector3.UP, GOLD, 40, 10.0, 0.07)
+			Fx.burst(main, at + Vector3(0, 0.6, 0), Vector3.UP, Color("6b5a44"), 50, 14.0, 0.14)   # debris
+			fx._bolt(at + Vector3(randf_range(-5, 5), 0, randf_range(-5, 5)))
 			fx._smoke(at, 10, 5.0, 2.0, 0.6)
 			_sound("slam", at, 8.0)
 			_sound("thunder", at, 6.0)

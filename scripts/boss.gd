@@ -76,8 +76,8 @@ const HEAD_Y := 4.7
 const WALK := 6.0
 const GALLOP := 19.0
 const RUSH_V := 24.0
-const LEAP_H := 14.0
-const LEAP_AIR := 84
+const LEAP_H := 34.0             # v0.12.0: super high (was 14 m)
+const LEAP_AIR := 135            # 2.25 s in the air (was 1.4 s)
 const LEAP_HP := [0.8, 0.55, 0.3]
 const LEAP_MAX := 5
 const LEAP_GAP := 1500           # ticks between the starts of two sequences
@@ -914,27 +914,67 @@ func _start_leap(living: Array) -> void:
 	fx.append(["boss_leap_wind", [pos, leap_to, 90 + LEAP_AIR]])
 
 
-## Where he lands: far across the arena (16 m or more if it can), never within 6 m of a player, about 10 m from them.
-func _leap_spot(living: Array) -> Vector3:
+## Where he lands (v0.12.0): the point of the arena furthest from every living player. Candidates are a grid
+## (`LEAP_GRID` m) over the arena's disc less `LEAP_MARGIN`, minus anything within `RADIUS + 1` of a pillar or trunk
+## (`WorldLayout.boxes()`); each scores its distance to the NEAREST living player, and the highest score wins
+## (maximin). Ties (within 1 cm) go to the candidate nearer the arena's centre, then the first in grid order, so it is
+## deterministic. With nobody alive: the centre.
+const LEAP_GRID := 1.5
+const LEAP_MARGIN := 3.0
+
+
+static func leap_candidates() -> Array:
 	var c := arena_c()
+	var r := WorldLayout.ARENA_R - LEAP_MARGIN
+	var out := []
+	var n := int(r / LEAP_GRID)
+	for i in range(-n, n + 1):
+		for j in range(-n, n + 1):
+			var q := c + Vector3(i * LEAP_GRID, 0, j * LEAP_GRID)
+			if Vector2(q.x - c.x, q.z - c.z).length() > r:
+				continue
+			var blocked := false
+			for b: WorldLayout.Box in WorldLayout.boxes():
+				var nx := clampf(q.x, b.cx - b.hx, b.cx + b.hx)
+				var nz := clampf(q.z, b.cz - b.hz, b.cz + b.hz)
+				if Vector2(q.x - nx, q.z - nz).length() < RADIUS + 1.0:
+					blocked = true
+					break
+			if not blocked:
+				out.append(q)
+	return out
+
+
+## The smallest flat distance from q to any of the points.
+static func min_dist(q: Vector3, pts: Array) -> float:
+	var m := INF
+	for p: Vector3 in pts:
+		m = minf(m, Vector2(p.x - q.x, p.z - q.z).length())
+	return m
+
+
+static func maximin_spot(pts: Array) -> Vector3:
+	var c := arena_c()
+	if pts.is_empty():
+		return c
 	var best := c
 	var best_s := -INF
-	for i in 24:
-		var a := rng.randf() * TAU
-		var r := rng.randf_range(2.0, WorldLayout.ARENA_R - 3.0)
-		var q := c + Vector3(cos(a) * r, 0, sin(a) * r)
-		var s := minf(_flat(q - pos).length(), 28.0)
-		if _flat(q - pos).length() < 14.0:
-			s -= 20.0
-		for p in living:
-			var dp := _flat((p[1] as Vector3) - q).length()
-			if dp < 6.0:
-				s -= 30.0
-			s -= absf(dp - 10.0) * 0.4
-		if s > best_s:
-			best_s = s
+	var best_c := INF
+	for q: Vector3 in leap_candidates():
+		var s := min_dist(q, pts)
+		var dc := Vector2(q.x - c.x, q.z - c.z).length()
+		if s > best_s + 0.01 or (absf(s - best_s) <= 0.01 and dc < best_c):
+			best_s = maxf(s, best_s)
+			best_c = dc
 			best = q
 	return best
+
+
+func _leap_spot(living: Array) -> Vector3:
+	var pts := []
+	for p in living:
+		pts.append(p[1] as Vector3)
+	return maximin_spot(pts)
 
 
 # ================================================================ targeting

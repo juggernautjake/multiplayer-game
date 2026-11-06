@@ -66,10 +66,10 @@ static func roar(kind := 0) -> AudioStreamWAV:
 ## and a click), "scrape" (a hoof raking gravel), "crackle" (sparse electric snaps), "charge" (a rising electric
 ## whine under crackle: the Storm Leap's charge-up), "whoosh" (air rushing past), "zap" (a static hit: a falling
 ## buzz), "slam" (a deep ground boom), "chirp" (an orb launching: a rising zip), "stun" (a static stun's long buzz),
-## "pant" (three heavy breaths), "eat" (crunching an apple).
+## "pant" (three heavy breaths), "eat" (crunching an apple), "buzz" (a Static orb).
 static func fx(kind: String) -> AudioStreamWAV:
 	var dur: float = {"snort": 0.45, "hoof": 0.35, "scrape": 0.5, "crackle": 1.0, "charge": 1.6, "whoosh": 0.7,
-		"zap": 0.25, "slam": 1.4, "chirp": 0.18, "stun": 0.9, "pant": 1.4, "eat": 0.35}.get(kind, 0.5)
+		"zap": 0.25, "slam": 1.4, "chirp": 0.18, "stun": 0.9, "pant": 1.4, "eat": 0.35, "buzz": 0.6}.get(kind, 0.5)
 	var n := int(RATE * dur)
 	var d := PackedFloat32Array()
 	d.resize(n)
@@ -120,6 +120,10 @@ static func fx(kind: String) -> AudioStreamWAV:
 			"pant":
 				var b := fposmod(t, 0.46) / 0.46
 				v = (lp - lp2) * 1.8 * sin(b * PI) * (0.7 if b < 0.5 else 0.45)
+			"buzz":   # v0.12.0 a Static orb: an angry electric buzz, wobbling, crackling
+				ph += (95.0 + 12.0 * sin(t * TAU * 7.0)) / RATE
+				var saw := 2.0 * fposmod(ph, 1.0) - 1.0
+				v = saw * 0.32 * sin(u * PI) * (0.6 + 0.4 * sin(t * TAU * 31.0)) + (noise if rng.randf() < 0.04 else 0.0) * 0.6
 			"eat":
 				var bite := fposmod(t, 0.12)
 				v = (noise - lp) * exp(-bite * 40.0) * 0.9
