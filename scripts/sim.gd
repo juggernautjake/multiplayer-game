@@ -330,6 +330,16 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 				s.swing_n = (s.swing_n + 1) % 256
 				ev = Ev.CAST
 			return ev
+		if sp.get("channel", false):   # v0.12.0 Heal Aura: held; `atk` stays up while it channels (no mana back)
+			if attack and s.atk_cd == 0 and s.mana >= int(sp.drain):
+				s.mana -= int(sp.drain)
+				if s.atk == 0:
+					s.swing_n = (s.swing_n + 1) % 256
+					ev = Ev.CAST
+				s.atk = 2
+			elif s.atk == 1:   # let go or out of mana: it ends
+				s.atk_cd = int(sp.cooldown)
+			return ev
 		var ready: bool = s.recharge[s.spell] == 0 if w.get("uses", "mana") == "recharge" else s.mana >= int(sp.cost) * 5
 		if attack and s.atk == 0 and s.atk_cd == 0 and ready:
 			s.mana -= int(sp.cost) * 5
@@ -377,6 +387,11 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 				s.rocks -= 1
 			ev = Ev.SHOT
 	return ev
+
+
+## v0.12.0: is this player channelling the Heal Aura right now?
+static func channeling(s: PlayerState) -> bool:
+	return s.atk > 0 and s.dead == 0 and Weapons.is_magic(s.weapon) and bool(Weapons.spell(s.weapon, s.spell).get("channel", false))
 
 
 ## The spells that change the caster (worked out here so the client predicts them exactly): the shield bubble, and

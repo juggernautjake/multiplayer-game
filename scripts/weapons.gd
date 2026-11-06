@@ -59,6 +59,11 @@ const DATA := [
 		{ "name": "Meteor", "level": 3, "cost": 45, "windup": 22, "cast": 40, "cooldown": 60, "range": 35.0, "delay": 60,
 		  "radius": 5.0, "max_damage": 40, "min_damage": 10, "knock": 9.0,
 		  "burn_radius": 3.0, "burn_ticks": 180, "burn_every": 30, "burn_damage": 4 },
+		# level 3 too (v0.12.0, Jacob): a channel. Hold to raise the staff: `drain` fifths of mana a tick (12 mana a
+		# second), and every `every` ticks the caster and every ally within `radius` m is healed `heal` (8 a second);
+		# it stops when the button is let go, the mana runs out, or everyone in range is already full (Net)
+		{ "name": "Heal Aura", "level": 3, "cost": 0, "windup": 0, "cast": 0, "cooldown": 20, "channel": true,
+		  "drain": 1, "radius": 7.0, "every": 30, "heal": 4 },
 		# level 4, the ultimate (12 kills): a storm gathers over where you aim and rains lightning for `duration` ticks,
 		# a bolt every `every` ticks, each seeking an enemy under the cloud (or striking at random within `area`)
 		{ "name": "Arcane Storm", "level": 4, "cost": 80, "windup": 30, "cast": 50, "cooldown": 120, "range": 35.0,

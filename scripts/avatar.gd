@@ -622,7 +622,7 @@ func _update_prop(delta: float) -> void:
 		side = float(pose.reach) * 0.18 * (-1.0 if use_left != mirror_view else 1.0)
 		if float(pose.crouch) > 0.12:
 			_v_sq -= 0.3   # a slam jolts him down
-	if w == Weapons.STAFF and state.shield > 0:
+	if w == Weapons.STAFF and (state.shield > 0 or Sim.channeling(state)):
 		hx = _anchor.x + (-3.0 if use_left != mirror_view else 3.0)
 		hy = _anchor.y - 40.0
 		lift = 0.05 * sin(Time.get_ticks_msec() * 0.03)

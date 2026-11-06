@@ -373,3 +373,11 @@ challengers per tier with a lightning warning ring under them: they dash out mor
 at higher tiers (~12% / 37% / 70%), none when the charge isn't coming at them; archers aim at the target's current
 position (no lead) and their spread shrinks / draw rate rises with tier.
 
+## heal_test.gd
+
+`<godot> --headless --path . --script tools/heal_test.gd` (v0.12.0, offline, prints harmless RPC errors): the staff's
+Heal Aura is a second level-3 spell beside Meteor and not in challengers' kits; held for ~1 s it heals the caster and
+an ally 3 m off by 12 each (pulses at 0, 0.5 and 1 s), never a challenger 4 m off or a player 12 m off, and costs 12
+mana; letting go stops it (no more healing, mana comes back); with everyone in reach full it stops while still held;
+with 8 mana it stops when the mana runs out (~40 ticks).
+

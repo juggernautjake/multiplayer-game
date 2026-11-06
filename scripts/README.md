@@ -1018,4 +1018,17 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   73% after ~24 / 15 / 8 ticks; charges 12% / 37% / 70%. `dodges` counts them. Archers and slingers (v0.11.0)
   verified unchanged: no lead (`_lead(..., 0.0)`), `SHOT_ERR` 0.1/0.075/0.055, `SHOT_START` 0.02/0.028/0.036,
   `SHOT_HOLD` 32/24/16. Test: `tools/dodge_test.gd`.
+- Heal Aura (v0.12.0, Jacob; the staff's second level-3 spell, after Meteor; the staff is now Lightning, Fireball,
+  Shield, Frost Nova (L2), Meteor (L3), Heal Aura (L3), Arcane Storm (L4)). `channel: true`, `drain` 1 fifth a tick
+  (12 mana a second), `radius` 7, `every` 30, `heal` 4 (8 a second). `Sim._combat`: held with the mana for a tick, it
+  keeps `atk` at 2 (so no mana comes back and the pose holds; the first tick is `Ev.CAST` and a new `swing_n`); let go
+  or dry, `atk` runs out and `atk_cd` = its cooldown (20). `Sim.channeling(s)`. `Net._server_heal_auras` (each tick
+  after the spells): `heal_aura_targets` = the caster and living allies (players the caster can't hurt; never
+  challengers) within 7 m, flat; the first tick and every 30 after (`ServerPlayer.heal_t0`, `heal_last`) each hurt one
+  gains up to 4 (event `heal_pulse` [caster, pos, radius, [[id, gained]...]]); with nobody in reach hurt the server ends
+  the channel (`atk` 0, cooldown; event `heal_stop`) - the caster's client sees that as a small correction. Looks:
+  `CastPose` style "raise" (staff high overhead, swaying, the orb glowing; both views use the shield's raised pose);
+  `MagicFx._heal_pulse`: a green ring spreading to 7 m, gold motes over the staff, green and gold motes rising from
+  each one healed, "+N" over them, and `Synth.fx("heal")` (a soft shimmering major-triad chime) each pulse, within
+  30 m. Challenger wizards never have it (level 1 kits). Test: `tools/heal_test.gd`.
 

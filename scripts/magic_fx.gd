@@ -175,6 +175,11 @@ func _on_fx(kind: String, a: Array) -> void:
 			_spark(a[1], a[2], bool(a[3]))
 		"drain":
 			_drain(int(a[0]), a[1], a[2], int(a[3]))
+		"heal_pulse":   # v0.12.0 the staff's Heal Aura: a ring, rising motes, "+N" over everyone healed, a chime
+			_heal_pulse(int(a[0]), a[1], float(a[2]), a[3])
+		"heal_stop":
+			if avatars.has(a[0]):
+				Fx.burst(main, (avatars[a[0]] as Node3D).position + Vector3(0, 2.0, 0), Vector3.UP, Color("b8ffb0"), 10, 1.5, 0.04)
 		"drain_ally":   # v0.12.0: Life Drain on an ally: a green-gold stream from the caster into them, "+N" on them
 			_drain_ally(a[1], a[2], int(a[3]), int(a[4]))
 		"level_up":
@@ -990,6 +995,48 @@ func _npc_tell(id: int, spell: String, life: float) -> void:
 			Fx.burst(main, av.position + Vector3(0, 1.5, 0), Vector3.UP, c, 6, 1.2, 0.04)
 	for k in 3:
 		get_tree().create_timer(life * k / 3.0 + 0.01).timeout.connect(motes)
+
+
+## v0.12.0 the Heal Aura's pulse: a green-gold ring spreading over the ground to its reach, motes rising round the
+## caster and from everyone healed, "+N" over each, and a soft chime.
+var _heal_snd: AudioStream
+
+
+func _heal_pulse(id: int, at: Vector3, r: float, got: Array) -> void:
+	var c := at
+	if avatars.has(id):
+		c = (avatars[id] as Node3D).position
+	var ring := _disc(c, r, Color("9dff9a"), 0.22)
+	ring.scale = Vector3(0.2, 1, 0.2)
+	var tw := ring.create_tween().set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3(1, 1, 1), 0.45)
+	tw.tween_property(ring.material_override, "albedo_color:a", 0.0, 0.5)
+	tw.chain().tween_callback(ring.queue_free)
+	Fx.burst(main, c + Vector3(0, 2.3, 0), Vector3.UP, Color("ffe27a"), 6, 1.4, 0.04)
+	for g in got:
+		var who := int(g[0])
+		var amt := int(g[1])
+		if not avatars.has(who) or amt <= 0:
+			continue
+		var p := (avatars[who] as Node3D).position
+		Fx.burst(main, p + Vector3(0, 0.3, 0), Vector3.UP, Color("8aff8a") if who % 2 else Color("ffe27a"), 8, 2.2, 0.045)
+		var l := Label3D.new()
+		l.text = "+%d" % amt
+		l.modulate = Color("7dffa0")
+		l.font_size = 40
+		l.outline_size = 8
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		l.no_depth_test = true
+		main.add_child(l)
+		l.global_position = p + Vector3(randf_range(-0.3, 0.3), 2.4, 0)
+		var lt := l.create_tween().set_parallel(true)
+		lt.tween_property(l, "global_position:y", l.global_position.y + 0.7, 0.8)
+		lt.tween_property(l, "modulate:a", 0.0, 0.4).set_delay(0.4)
+		lt.chain().tween_callback(l.queue_free)
+	if _heal_snd == null:
+		_heal_snd = Synth.fx("heal")
+	if avatars.has(net.my_id) and (avatars[net.my_id] as Node3D).position.distance_to(c) < 30.0:
+		Synth.play(main, _heal_snd, -10.0)
 
 
 ## v0.12.0 Life Drain on an ally: a green-gold healing stream from the caster's wand into them, motes flowing along

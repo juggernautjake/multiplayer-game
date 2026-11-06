@@ -6,6 +6,7 @@
 ##            point at the target;
 ##   slam    (Frost Nova): raise it, then drive it into the ground (a crouch and a jolt);
 ##   summon  (Golem, Stone Titan): circle the tip over the ground in front, then point down hard;
+##   raise   (Heal Aura, v0.12.0): held high overhead for the whole channel;
 ##   vortex  (Gravity Well, Fog): the tip circles faster and faster, then thrusts.
 ## The wand adds a flourish (the tip traces small loops) while the spell builds. Purely visual: worked out from the
 ## player's state on every client.
@@ -13,7 +14,7 @@ class_name CastPose
 
 const STYLE := { "Fireball": "thrust", "Stun": "thrust", "Teleport": "thrust", "Lightning": "sky", "Meteor": "sky",
 	"Arcane Storm": "sky", "Frost Nova": "slam", "Golem": "summon", "Stone Titan": "summon",
-	"Gravity Well": "vortex", "Fog": "vortex", "Spark Beam": "thrust", "Life Drain": "thrust" }
+	"Gravity Well": "vortex", "Fog": "vortex", "Heal Aura": "raise", "Spark Beam": "thrust", "Life Drain": "thrust" }
 
 
 static func _ease_out(x: float) -> float:
@@ -33,6 +34,10 @@ static func _smooth(x: float) -> float:
 static func at(w: int, spell: String, into: float, windup: float, cast: float) -> Dictionary:
 	var staff := w == Weapons.STAFF
 	var style: String = STYLE.get(spell, "thrust")
+	if style == "raise":   # v0.12.0 Heal Aura: held high overhead, swaying a little, glowing, for as long as it lasts
+		var t := Time.get_ticks_msec() * 0.001
+		return { "reach": 0.1, "lift": 0.62 + 0.04 * sin(t * 3.0), "side": 0.04 * sin(t * 1.7), "aim": 0.0, "crouch": 0.0,
+			"lean": -0.06, "flare": 1.0 + 0.3 * sin(t * 6.0), "two_hand": false }
 	var a := clampf(into / maxf(windup, 1.0), 0.0, 1.0)                       # through the wind-up
 	var r := clampf((into - windup) / maxf(cast - windup, 1.0), 0.0, 1.0)     # through the release and recovery
 	var released := into >= windup

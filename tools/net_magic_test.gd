@@ -197,8 +197,8 @@ func _initialize() -> void:
 	b.state.vel = Vector3.ZERO
 	a.state.pos = Vector3(60, 0, 62)
 	a.state.weapon = Weapons.STAFF
-	a.state.spell = 5
-	net._cast(a, Sim.PlayerInput.new(5, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, 5, Vector3(60, 0, 50)), a.state.pos)
+	a.state.spell = Weapons.idx(Weapons.STAFF, "Arcane Storm")
+	net._cast(a, Sim.PlayerInput.new(5, 0, 0.0, 0.0, Weapons.STAFF, 0, 0.0, INF, a.state.spell, Vector3(60, 0, 50)), a.state.pos)
 	var strikes := 0
 	var last_hp := b.state.hp
 	for t in 330:

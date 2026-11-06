@@ -63,6 +63,8 @@ class ServerPlayer:
 	var npc := false            # v0.10.0: a Duel Stone challenger (no network peer: its NpcAI makes its inputs)
 	var ai: NpcAI
 	var air := false            # in the air last tick (landing on the Storm Altar presses it)
+	var heal_t0 := 0            # v0.12.0: the tick this heal-aura channel's pulses count from
+	var heal_last := -100       # the last tick it was channelling
 
 
 ## Something lying on the ground to pick up (server). `spawn` >= 0: one of the fixed spawns, which comes back 20 s
@@ -1467,6 +1469,49 @@ func heal_target(id: int, amount: int) -> int:
 	return 0
 
 
+## v0.12.0 the staff's Heal Aura: every `every` ticks of a channel, the caster and every ally (anyone the caster can't
+## hurt: players with PvP off; never enemies or challengers) within `radius` m gain `heal`. When nobody in range is
+## hurt, it stops (the channel ends and the staff comes down). The ticking sound and the motes: the "heal_pulse" event.
+func _server_heal_auras() -> void:
+	for p: ServerPlayer in players.values():
+		var s := p.state
+		if not Sim.channeling(s) or s.weapon != Weapons.STAFF:
+			continue
+		var sp := Weapons.spell(s.weapon, s.spell)
+		var near := heal_aura_targets(p, float(sp.radius))
+		var hurt := near.filter(func(q): return q.state.hp < Sim.MAX_HP)
+		if hurt.is_empty():
+			s.atk = 0
+			s.atk_cd = int(sp.cooldown)
+			_fx("heal_stop", [p.id, s.pos])
+			continue
+		if (server_tick - p.heal_t0) % int(sp.every) == 0 or p.heal_last < server_tick - 2:
+			if p.heal_last < server_tick - 2:
+				p.heal_t0 = server_tick
+			var got := []
+			for q in hurt:
+				var g := mini(int(sp.heal), Sim.MAX_HP - q.state.hp)
+				q.state.hp += g
+				got.append([q.id, g])
+			_fx("heal_pulse", [p.id, s.pos, float(sp.radius), got])
+		p.heal_last = server_tick
+
+
+## Who a heal aura reaches: the caster and every living ally within reach (feet to feet, flat).
+func heal_aura_targets(p: ServerPlayer, r: float) -> Array:
+	var out := []
+	for q: ServerPlayer in players.values():
+		if q.state.dead > 0:
+			continue
+		if q.id != p.id and can_hurt(p.id, q.id):
+			continue
+		if q.id != p.id and q.npc != p.npc:
+			continue
+		if Vector2(q.state.pos.x - p.state.pos.x, q.state.pos.z - p.state.pos.z).length() <= r:
+			out.append(q)
+	return out
+
+
 ## v0.12.0: who's on PvP (id -> on), for Fog's rules about enemies.
 func fog_pvp() -> Dictionary:
 	var d := {}
@@ -1727,6 +1772,7 @@ func _server_spells() -> void:
 					_blast(e[2], burn, owner, Weapons.STAFF)
 	_server_wells()
 	_server_storms()
+	_server_heal_auras()
 	fogs = Fog.prune(fogs, server_tick)
 	# golems
 	var people := []
