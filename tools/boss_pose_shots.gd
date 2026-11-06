@@ -134,16 +134,21 @@ const PLAN := [[1.6, "IDLE", 0.0, 0.0, "idle", ""], [2.4, "WALK", 4.5, 0.0, "wal
 	[1.4, "LEAP_WIND", 0.0, 0.0, "jumpwind", ""], [1.0, "LEAP", 0.0, 0.0, "jump", ""], [0.8, "LEAP_LAND", 0.0, 0.0, "land", ""],
 	[0.45, "GORE_WIND", 0.0, 0.0, "gorewind", ""], [0.4, "GORE", 0.0, 0.0, "gore", ""], [1.1, "ROAR", 0.0, 0.0, "roar", ""],
 	[0.9, "STAGGER", 0.0, 0.0, "stagger", ""], [0.8, "IDLE", 0.0, 0.0, "end", ""]]
-const DAZED_PLAN := [[7.2, "DAZED", 0.0, 0.0, "dazed", "boss_dazed"], [0.6, "IDLE", 0.0, 0.0, "end", ""]]
+const DAZED_PLAN := [[7.0, "DAZED", 0.0, 0.0, "dazed", "boss_dazed"], [1.2, "IDLE", 0.0, 0.0, "end", "boss_get_up"]]
 const STRIP_N := 8
 var plan: Array = PLAN
 var _strip: Array = []
 var _last := ""
 
 
+var _fired := ""
+
+
 func _gait_tick() -> void:
 	var dt := 1.0 / 60.0
-	_gt += dt
+	var warm := frame < 12   # v0.12.2: let the first frames render before anything is captured (no black frame)
+	if not warm:
+		_gt += dt
 	var tot := 0.0
 	var cur: Array = plan[-1]
 	var into := 0.0
@@ -170,7 +175,7 @@ func _gait_tick() -> void:
 			_save_strip(_last)
 		_last = name
 		_st = 0.0
-	else:
+	elif not warm:
 		_st += dt
 	var y := 0.0
 	var air := 60
@@ -181,26 +186,40 @@ func _gait_tick() -> void:
 	target.position = _pos + fwd * 14.0 + Vector3(4, 0, 0)
 	view._on_state(0, [st, int(_st / Config.DT), _pos.x, y, _pos.z, _yaw, 7000, 7000, 0, _yaw, [], [], PackedVector3Array(), extra])
 	view.hud.visible = false
-	if cur[5] != "" and _st == 0.0:
+	if cur[5] != "" and not warm and _fired != name:
+		_fired = name
 		view._on_fx(cur[5], [_pos, _yaw])
+	if warm:
+		cam.look_at_from_position(_pos + Vector3(-11, 3, 9), _pos + Vector3(0, 2.6, 0))
+		return
 	var side := Vector3(cos(_yaw), 0, -sin(_yaw))
 	var at := (view.root.position if view.root else _pos) + Vector3(0, 3.2, 0)
 	at.y = 3.2 + y * 0.5
 	if mode == "dazed":   # three-quarter front, a little lower
 		at.y = 2.6
-		cam.look_at_from_position(at - side * 11.0 + fwd * 9.0 + Vector3(0, 0.2, 0), at)
+		if OS.get_environment("DAZE_VIEW") == "side":   # straight from the side, for the legs
+			cam.look_at_from_position(at - side * 15.0 + Vector3(0, 0.5, 0), at)
+		else:
+			cam.look_at_from_position(at - side * 11.0 + fwd * 9.0 + Vector3(0, 0.2, 0), at)
 	else:
 		cam.look_at_from_position(at - side * 15.0 + fwd * 2.0 + Vector3(0, 0.5, 0), at)
 	var d := float(cur[0])
-	var k := int(floor(into / d * STRIP_N))
-	if k < STRIP_N and _strip.size() == k:
+	var n := DAZED_N if name == "dazed" else STRIP_N
+	var k := int(floor(into / d * n))
+	if k < n and _strip.size() == k:
 		var img := get_root().get_texture().get_image()
 		img.resize(480, 270, Image.INTERPOLATE_BILINEAR)
 		_strip.append(img)
+	if name == "dazed" and OS.get_environment("DAZE_FRAMES") != "" and int(round(_st * 60.0)) % 6 == 0:
+		get_root().get_texture().get_image().save_png(out.path_join("dz_%03d.png" % int(round(_st * 10.0))))
+
+
+const DAZED_N := 12   # v0.12.2: the daze strip has 12 frames (3 rows)
 
 
 func _save_strip(name: String) -> void:
-	var w := Image.create(1920, 540, false, _strip[0].get_format())
+	var rows := (_strip.size() + 3) / 4
+	var w := Image.create(1920, 270 * rows, false, _strip[0].get_format())
 	for i in _strip.size():
 		w.blit_rect(_strip[i], Rect2i(0, 0, 480, 270), Vector2i((i % 4) * 480, (i / 4) * 270))
 	w.save_png(out.path_join("strip_%s.png" % name))

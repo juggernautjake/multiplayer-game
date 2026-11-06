@@ -512,28 +512,12 @@ func _process(delta: float) -> void:
 			p.bob = sin(t * 9.0) * 0.07
 			p.flare = 0.7 + 0.3 * sin(t * 9.0)
 			p.jaw = 0.25
-		Boss.S.DAZED:   # v0.12.0 the stun meter filled: stagger, legs buckle, down on his knees and side, dazed, up
-			var up_at := Boss.STUN_TICKS * Config.DT - 1.4
-			var k := clampf((t - 0.25) / 0.55, 0.0, 1.0)   # buckling
-			var g := clampf((t - up_at) / 1.3, 0.0, 1.0)    # struggling up
-			var down := k * (1.0 - g * g * (3.0 - 2.0 * g))
-			var strain := sin(clampf((t - up_at) / 1.3, 0.0, 1.0) * PI)
+		Boss.S.DAZED:   # v0.12.2 the stun meter filled: the collapse, dazed on the ground, the struggle up, the shake-off
+			_daze_pose(t, p)
 			rear = 0.3 * maxf(0.0, 1.0 - t / 0.3) * minf(1.0, t / 0.1)   # the first stagger
-			p.crouch = 2.0 * down + 0.2 * strain
-			tuck = 0.75 * down
-			p.pitch = 0.12 * down
-			p.roll = 0.42 * down + sin(t * 10.0) * 0.06 * strain + sin(t * 9.0) * 0.08 * (1.0 - k)
-			p.head_dip = 0.75 * down - 0.2 * strain
-			p.head_yaw = sin(t * 1.6) * 0.35 * down
-			p.thrash = sin(t * 2.3) * 0.12 * down
-			p.brow = 0.7
-			p.lid = 0.75 * down
-			p.jaw = 0.35 * down
-			p.tongue = 0.7 * down
-			p.flare = 0.4 + 0.4 * strain
-			shake = 0.05 * (1.0 - k) + 0.02 * strain
+			shake = 0.05 * (1.0 - smoothstep(0.0, 0.5, t)) + 0.025 * _daze_strain
 			col = GOLD
-			hot = 0.15
+			hot = 0.15 + 0.8 * _daze_shake
 		Boss.S.DEATH:
 			var k := clampf(t / 1.2, 0.0, 1.0)
 			p.crouch = 1.6 * k
@@ -555,6 +539,14 @@ func _process(delta: float) -> void:
 		on["spike"] = 1.0
 	# v0.12.0: the legs walk, trot and gallop on IK-planted hooves, and the whole body carries its weight (_locomote)
 	var legs := _locomote(delta, gait, mv, speed, scrape, tuck, rear, jump)
+	if state == Boss.S.DAZED:
+		_daze_legs(legs)
+		_daze_events(delta)
+	else:
+		_daze_f = 0.0
+		_daze_h = 0.0
+		_daze_flop = 0.0
+		_daze_t0 = -1.0
 	# idle life: snorts and head shakes now and then, pawing the ground
 	if state == Boss.S.IDLE:
 		_snort_t -= delta
@@ -574,6 +566,7 @@ func _process(delta: float) -> void:
 	for k in _add:
 		pose[k] = float(pose.get(k, 0.0)) + float(_add[k])
 	model.apply(pose, legs, Time.get_ticks_msec() * 0.001, delta)
+	_impale_lift(delta)
 	# his colours, the cracks of light that open when he's enraged, a flash when hit hard
 	_crack = move_toward(_crack, 1.0 if enraged else 0.0, delta * 0.6)
 	_flash = maxf(_flash - delta * 5.0, 0.0)
@@ -658,6 +651,25 @@ var _rear_s := 0.0
 var _rear_peak := false
 var _buck_t := 99.0
 var _toss_t := 9.0             # the impale toss: someone skewered on the nose spike and flung off it
+var _impale_id := 0            # v0.12.2: who is drawn lifted on the spike, and for how long so far
+var _impale_t := 9.0
+const IMPALE_T := 0.32
+
+
+## v0.12.2: a charge or rush victim is drawn hoisted on the nose spike for a third of a second as the head heaves,
+## before the toss carries them off. Only the drawn avatar moves (Main placed it this frame; BossView runs after);
+## the server's physics of the throw are untouched.
+func _impale_lift(delta: float) -> void:
+	if _impale_t >= IMPALE_T:
+		return
+	_impale_t += delta
+	var av = fx.avatars.get(_impale_id, null) if fx != null else null
+	if av == null or not is_instance_valid(av):
+		_impale_t = IMPALE_T
+		return
+	var k := sin(clampf(_impale_t / IMPALE_T, 0.0, 1.0) * PI)
+	var tip := (model.anchors["spike"] as Node3D).global_position
+	(av as Node3D).global_position = (av as Node3D).global_position.lerp(tip + Vector3(0, -0.9, 0), 0.85 * k)
 const BUCK_N := 3              # bucks in a row
 const BUCK_T := 0.78           # seconds each
 var _buck_sun := 0.0
@@ -1451,6 +1463,9 @@ func _on_fx(kind: String, a: Array) -> void:
 			var at: Vector3 = a[1]
 			if alive and model != null:   # v0.12.0: impaled on the nose spike, then tossed off it
 				_toss_t = 0.0
+				if fx.avatars.has(int(a[0])):   # v0.12.2: lifted on the spike for a moment (drawn only)
+					_impale_id = int(a[0])
+					_impale_t = 0.0
 				var tip := (model.anchors["spike"] as Node3D).global_position
 				Fx.burst(main, tip, Vector3.UP, Color.WHITE, 16, 6.0, 0.05)
 				fx._flash_light(tip, Color("cfe4ff"), 4.0, 6.0, 0.2)
@@ -1654,11 +1669,7 @@ func _on_fx(kind: String, a: Array) -> void:
 			fx._flash_light((a[0] as Vector3) + Vector3(0, 4, 0), GOLD, 8.0, 18.0, 0.5)
 			Fx.burst(main, (a[0] as Vector3) + Vector3(0, 5, 0), Vector3.UP, GOLD, 30, 6.0, 0.06)
 			_sound("roar2", a[0], 2.0)
-			_sound("slam", a[0], 4.0, 0.6)
-			get_tree().create_timer(0.7).timeout.connect(func():
-				if alive:
-					MotionFx.land(main, a[0], 3.5)
-					fx._shake_near_scaled(a[0], 0.6))
+			# (v0.12.2: the thud, dust and shake of his chest hitting the ground come from _daze_events)
 		"boss_get_up":   # he shakes it off: a big body shake, a snort, a burst of sparks; the meter is empty
 			_snort()
 			_idle_shake = 1.6
@@ -1678,20 +1689,197 @@ func _on_fx(kind: String, a: Array) -> void:
 			fx._bolt(a[0])
 
 
-## v0.12.0 dazed: a ring of stars and sparks circling his head, little arcs crackling over him.
+## v0.12.2 THE DAZE, start to finish (Boss.STUN_TICKS = 7 s; t = seconds into it):
+##   0    - 0.35  the stagger: a jolt up, everything shaking
+##   0.3  - 0.85  the forelegs fold at the knees (kneeling, hooves tucked back) and his chest drops to the ground:
+##                at 0.85 a heavy thud, a dust ring and puffs along his chest, the camera shakes
+##   1.0  - 1.6   the hindquarters sag down after it; 1.5 - 1.95 he flops over onto one side (dust off his flank)
+##   down         the head droops right down, the nose spike in the dirt; a slow, dazed sway of the head; steam
+##                snorted from the nostrils into the dust; glowing stars and sparks circling above his head
+##   4.7  - 5.5   the struggle up, hind legs first: he rolls back upright and heaves his rump up, chest still down
+##   5.5  - 6.15  then a lurch: the forelegs unfold and he heaves his front up, overshooting a little
+##   6.2  - 7.0   the shake-off: a big full-body shake, a snort and a spark burst (the stars fly off), and at 7 s the
+##                server's boss_get_up as the meter empties
+var _daze_f := 0.0      # the forelegs' kneel (0..1)
+var _daze_h := 0.0      # the hindquarters' sag
+var _daze_flop := 0.0   # the flop onto his side (signed)
+var _daze_strain := 0.0
+var _daze_shake := 0.0
+var _daze_t0 := -1.0    # the previous frame's daze time (events fire as it passes their moments)
+var _daze_side := 1.0
+const DAZE_DOWN := 0.85
+const DAZE_FLOP := 1.85
+const DAZE_UP := 4.7
+const DAZE_LURCH := 5.5
+const DAZE_SHAKE := 6.2
+
+
+func _daze_pose(t: float, p: Dictionary) -> void:
+	var k1 := smoothstep(0.3, DAZE_DOWN, t)
+	k1 *= k1                                         # the fall speeds up: the chest hits hard
+	var k2 := smoothstep(1.0, 1.6, t)
+	var k3 := smoothstep(1.5, DAZE_FLOP, t)
+	k3 += 0.12 * sin(clampf((t - DAZE_FLOP) / 0.35, 0.0, 1.0) * PI)   # a little bounce as he lands on his side
+	var u1 := smoothstep(DAZE_UP, DAZE_LURCH, t)
+	var u2 := smoothstep(DAZE_LURCH, DAZE_SHAKE - 0.05, t)
+	_daze_f = k1 * (1.0 - u2)
+	_daze_h = k2 * (1.0 - u1)
+	_daze_flop = k3 * (1.0 - smoothstep(DAZE_UP, DAZE_UP + 0.5, t)) * _daze_side
+	_daze_strain = sin(clampf((t - DAZE_UP) / (DAZE_SHAKE - DAZE_UP), 0.0, 1.0) * PI)
+	var sh := clampf((t - DAZE_SHAKE) / (Boss.STUN_TICKS * Config.DT - DAZE_SHAKE), 0.0, 1.0)
+	_daze_shake = sin(sh * PI) if sh > 0.0 else 0.0
+	var down := maxf(_daze_f, _daze_h)
+	var lie := minf(_daze_f, 1.0) * (1.0 - u1)      # fully down and dazed (fades as he starts up)
+	# the body: the front drops by crouch + 3.85 * -pitch (the hips are the pivot), the rump by crouch
+	p.crouch = 0.9 * _daze_f + 1.3 * _daze_h + 0.15 * _daze_strain
+	p.pitch = -0.48 * _daze_f + 0.38 * _daze_h + 0.16 * sin(u2 * PI) - 0.05 * _daze_strain
+	p.surge = -0.5 * sin(u2 * PI)
+	p.roll = 0.65 * _daze_flop + sin(t * 9.0) * 0.07 * _daze_strain + sin(t * 31.0) * 0.12 * _daze_shake
+	p.hump_roll = sin(t * 27.0 + 0.6) * 0.18 * _daze_shake
+	p.twist = sin(t * 23.0) * 0.25 * _daze_shake
+	# the head: right down, the nose spike in the dirt, swaying slowly; up with the strain; whipped in the shake
+	p.head_dip = 1.25 * down - 0.55 * _daze_strain * (1.0 - _daze_h) + 0.08 * sin(t * 1.1) * lie
+	p.head_yaw = sin(t * 1.25) * 0.42 * lie + sin(t * 24.0) * 0.5 * _daze_shake
+	p.thrash = sin(t * 1.7 + 0.8) * 0.2 * lie + sin(t * 29.0) * 0.6 * _daze_shake
+	p.brow = 0.7
+	p.lid = 0.8 * lie + 0.3 * _daze_strain
+	p.jaw = 0.3 * lie + 0.35 * _daze_strain + 0.4 * _daze_shake
+	p.tongue = 0.75 * lie
+	p.flare = 0.4 + 0.5 * _daze_strain + 0.6 * _daze_shake
+	p.lash = sin(t * 0.9) * 0.3 * lie + sin(t * 20.0) * 0.8 * _daze_shake
+	p.tail_up = 0.25 * lie
+
+
+## The legs while dazed: the forelegs kneel (carpus on the ground, cannon and hoof folded back under the chest); in
+## the flop the legs on the low side splay out; the hind legs fold under the sagging rump on their planted hooves.
+func _daze_legs(legs: Array) -> void:
+	for i in 4:
+		var spec: Dictionary = legs[i]
+		var home := BossModel.foot_home(BossModel.LEGS[i])
+		var tt: Vector3 = spec.get("t", home)
+		if i < 2 and _daze_f > 0.0:
+			var kt := Vector3(home.x * 1.05, BossModel.HOOF_Y + 0.35, home.z + 1.55)
+			spec.t = tt.lerp(kt, _daze_f)
+			spec.flex = lerpf(float(spec.get("flex", 0.0)), 1.95, _daze_f)
+			spec.curl = lerpf(float(spec.get("curl", 0.0)), 1.15, _daze_f)
+			spec.erase("rel")
+		elif i >= 2 and _daze_h > 0.0:
+			var out := signf(home.x) * maxf(_daze_flop * signf(home.x), 0.0) * 1.1   # the low side splays
+			spec.t = tt + Vector3(out * _daze_h, 0, -0.5 * _daze_h)
+			spec.flex = lerpf(float(spec.get("flex", 0.0)), 0.5, _daze_h)
+			spec.erase("rel")
+
+
+## The daze's moments, as the time passes them (see the timeline above).
+func _daze_events(_delta: float) -> void:
+	var t := state_t
+	var t0 := _daze_t0
+	_daze_t0 = t
+	if t0 < 0.0:
+		_daze_side = 1.0 if randf() < 0.5 else -1.0
+		t0 = t
+	var past := func(m: float) -> bool: return t0 < m and t >= m
+	var g := Vector3(root.position.x, pos.y, root.position.z)
+	var fwd := Vector3(-sin(root.rotation.y), 0, -cos(root.rotation.y))
+	var side := Vector3(cos(root.rotation.y), 0, -sin(root.rotation.y))
+	if past.call(DAZE_DOWN):   # the chest hits the ground
+		var chest := g + fwd * 1.6
+		MotionFx.land(main, chest, 3.2)
+		_dust(chest, 14, 3.0, 5.0)
+		Fx.burst(main, chest + Vector3(0, 0.4, 0), Vector3.UP, Color("d9c7a0"), 26, 5.0, 0.07)
+		fx._shake_near_scaled(chest, 0.6)
+		_sound("slam", chest, 4.0)
+		model.breath(1.0, true)
+	if past.call(DAZE_FLOP):   # over onto his side
+		var flank := g + side * _daze_side * 2.6
+		MotionFx.land(main, flank, 2.0)
+		_dust(flank, 10, 2.4, 3.5)
+		fx._shake_near_scaled(flank, 0.3)
+		_sound("hoof", flank, 2.0)
+	if t > 2.0 and t < DAZE_UP and fmod(t, 1.15) < fmod(t0, 1.15):   # dazed snorts: steam into the dust
+		model.breath(0.6)
+		var tip := (model.anchors["spike"] as Node3D).global_position
+		MotionFx.puff(main, Vector3(tip.x, pos.y, tip.z), 2, 0.7)
+	if past.call(DAZE_UP + 0.05):   # the struggle: a grunt, the hind hooves dig in
+		_sound("snort", g, 0.0)
+		for i in [2, 3]:
+			if _feet.size() > i:
+				_hoof_fall((_feet[i] as Dictionary).w, true)
+	if past.call(DAZE_LURCH + 0.3):   # the lurch: the forefeet stamp down
+		for i in [0, 1]:
+			if _feet.size() > i:
+				_hoof_fall((_feet[i] as Dictionary).w, true)
+		fx._shake_near_scaled(g, 0.25)
+		_sound("hoof", g, 3.0)
+	if past.call(DAZE_SHAKE + 0.1):   # the shake-off: a snort, sparks and the stars flung off
+		_snort()
+		_sound("zap", g + Vector3(0, 4, 0), 2.0)
+		var hc := g + Vector3(0, 4.2, 0)
+		if _stars != null:
+			hc = _stars.global_position
+		Fx.burst(main, hc, Vector3.UP, GOLD, 44, 8.0, 0.06)
+		Fx.burst(main, g + Vector3(0, 3.5, 0), Vector3.UP, Color("fff6d0"), 30, 6.0, 0.05)
+		fx._flash_light(hc, GOLD, 5.0, 12.0, 0.3)
+		for i in 5:
+			var a := g + Vector3(randf_range(-2.5, 2.5), randf_range(2.5, 5.5), randf_range(-3, 3))
+			_arc(a, a + Vector3(randf_range(-2, 2), randf_range(0.5, 2.0), randf_range(-2, 2)), GOLD, 0.15)
+
+
+## A billowing cloud of tan dust thrown out along the ground from `at` (n puffs, spread m, pushed out `push` m).
+func _dust(at: Vector3, n: int, spread: float, push: float) -> void:
+	for i in n:
+		var puff := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = randf_range(0.5, 0.9)
+		sm.height = sm.radius * 2.0
+		sm.radial_segments = 10
+		sm.rings = 5
+		puff.mesh = sm
+		var m := StandardMaterial3D.new()
+		var g := randf_range(0.55, 0.72)
+		m.albedo_color = Color(g, g * 0.88, g * 0.7, 0.0)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		puff.material_override = m
+		puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		main.add_child(puff)
+		var a := randf() * TAU
+		var off := Vector3(cos(a), 0, sin(a))
+		puff.global_position = Vector3(at.x, pos.y, at.z) + off * randf_range(0.0, spread) + Vector3(0, randf_range(0.2, 0.7), 0)
+		var life := randf_range(1.4, 2.4)
+		var tw := puff.create_tween().set_parallel(true)
+		tw.tween_property(m, "albedo_color:a", randf_range(0.32, 0.55), 0.08)
+		tw.tween_property(puff, "global_position", puff.global_position + off * push * randf_range(0.6, 1.2) + Vector3(0, randf_range(0.8, 2.0), 0), life).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+		tw.tween_property(puff, "scale", Vector3.ONE * randf_range(2.2, 3.4), life).set_ease(Tween.EASE_OUT)
+		tw.tween_property(m, "albedo_color:a", 0.0, life * 0.75).set_delay(life * 0.25)
+		tw.chain().tween_callback(puff.queue_free)
+
+
+## v0.12.2 dazed: glowing five-point stars (camera-facing, each with a soft halo, twinkling) circling above his head,
+## with little sparks flicking off them and arcs crackling over his body; gone in the shake-off.
 func _update_daze(delta: float) -> void:
-	var on := state == Boss.S.DAZED and state_t < Boss.STUN_TICKS * Config.DT - 0.5
+	var on := state == Boss.S.DAZED and state_t > 0.5 and state_t < DAZE_SHAKE + 0.1
 	if on and _stars == null:
 		_stars = Node3D.new()
 		main.add_child(_stars)
-		for i in 6:
-			var st := MeshInstance3D.new()
-			var sm := PrismMesh.new()
-			sm.size = Vector3(0.5, 0.5, 0.14)
-			st.mesh = sm
-			st.material_override = MagicFx._glow_mat(Color("ffe46b") if i % 2 == 0 else Color("fff6d0"), 5.0)
-			var a := TAU * i / 6.0
-			st.position = Vector3(cos(a) * 1.6, sin(a * 2.0) * 0.15, sin(a) * 1.6)
+		var star_mesh := _star_mesh(0.42, 0.17)
+		var halo_mat := _halo_mat()
+		for i in 5:
+			var st := Node3D.new()
+			var core := MeshInstance3D.new()
+			core.mesh = star_mesh
+			var m := MagicFx._glow_mat(Color("ffe46b") if i % 2 == 0 else Color("fff3c0"), 6.0)
+			m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+			m.cull_mode = BaseMaterial3D.CULL_DISABLED
+			core.material_override = m
+			core.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			st.add_child(core)
+			var halo := MeshInstance3D.new()
+			var qm := QuadMesh.new()
+			qm.size = Vector2(1.5, 1.5)
+			halo.mesh = qm
+			halo.material_override = halo_mat
+			halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			st.add_child(halo)
 			_stars.add_child(st)
 	if _stars == null:
 		return
@@ -1701,15 +1889,70 @@ func _update_daze(delta: float) -> void:
 		return
 	var head: Node3D = model.anchors["eye_l"]
 	var h2: Node3D = model.anchors["eye_r"]
-	_stars.global_position = (head.global_position + h2.global_position) * 0.5 + Vector3(0, 1.3, 0)
-	_stars.rotation.y += delta * 3.2
-	for c in _stars.get_children():
-		(c as Node3D).rotation.y = -_stars.rotation.y + state_t * 4.0
-	if randf() < delta * 10.0:
-		var c0 := root.position + Vector3(randf_range(-2.5, 2.5), randf_range(1.0, 4.0), randf_range(-3, 3))
+	var grow := smoothstep(0.5, 1.2, state_t)
+	var hc := (head.global_position + h2.global_position) * 0.5
+	hc.y = maxf(hc.y + 2.0, pos.y + 5.0)   # above his head, and clear of the hump while his head is in the dirt
+	_stars.global_position = hc
+	var n := _stars.get_child_count()
+	for i in n:
+		var st := _stars.get_child(i) as Node3D
+		var a := state_t * 2.6 + TAU * i / n
+		st.position = Vector3(cos(a) * 2.1, 0.3 * sin(a * 2.0 + state_t), sin(a) * 2.1) * grow
+		st.scale = Vector3.ONE * grow * (0.85 + 0.3 * sin(state_t * 9.0 + i * 1.7))   # twinkling
+		(st.get_child(0) as Node3D).rotation.z = state_t * 2.0 + i   # a slow spin in the camera's plane
+		if randf() < delta * 2.5:   # a spark flicks off
+			Fx.burst(main, st.global_position, Vector3.UP, Color("fff3c0"), 3, 2.5, 0.025)
+	if randf() < delta * 8.0:
+		var c0 := root.position + Vector3(randf_range(-2.5, 2.5), randf_range(0.8, 3.2), randf_range(-3, 3))
 		_arc(c0, c0 + Vector3(randf_range(-1.2, 1.2), randf_range(-0.8, 0.8), randf_range(-1.2, 1.2)), GOLD, 0.1)
-	if randf() < delta * 4.0:
-		Fx.burst(main, _stars.global_position, Vector3.UP, GOLD, 4, 2.0, 0.03)
+
+
+## A flat five-point star in the XY plane (both faces), outer radius r, inner ri.
+static func _star_mesh(r: float, ri: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var pts: Array = []
+	for k in 10:
+		var a := PI * 0.5 + TAU * k / 10.0
+		var rr := r if k % 2 == 0 else ri
+		pts.append(Vector3(cos(a) * rr, sin(a) * rr, 0))
+	for k in 10:
+		var p0: Vector3 = pts[k]
+		var p1: Vector3 = pts[(k + 1) % 10]
+		st.set_normal(Vector3.BACK)
+		st.add_vertex(Vector3.ZERO)
+		st.add_vertex(p0)
+		st.add_vertex(p1)
+	return st.commit()
+
+
+static var _halo: StandardMaterial3D
+
+
+## A soft round glow, additive, always facing the camera.
+static func _halo_mat() -> StandardMaterial3D:
+	if _halo != null:
+		return _halo
+	var gr := Gradient.new()
+	gr.set_color(0, Color(1.0, 0.9, 0.45, 0.85))
+	gr.set_color(1, Color(1.0, 0.75, 0.2, 0.0))
+	var tex := GradientTexture2D.new()
+	tex.gradient = gr
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(1.0, 0.5)
+	tex.width = 64
+	tex.height = 64
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.albedo_texture = tex
+	m.albedo_color = Color(1, 1, 1, 0.8)
+	m.no_depth_test = false
+	_halo = m
+	return m
 
 
 ## A ring of air blasting out from a roar: dust kicked up along it.

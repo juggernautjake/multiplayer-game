@@ -36,11 +36,12 @@ void fragment() {
 	float packets = 0.55 + 0.45 * smoothstep(0.35, 0.95, n1(run)) + 0.25 * sin(run * 3.1);
 	float flick = 0.85 + 0.15 * n1(TIME * 31.0 + y * 0.7);
 	float ends = smoothstep(0.0, 0.03, UV.y) * smoothstep(1.0, 0.97, UV.y);
-	ALBEDO = col.rgb * energy * rad * packets * flick * fade * mix(1.0, ends, 0.6);
+	float near = mix(0.4, 1.0, smoothstep(2.0, 12.0, -VERTEX.z));   // v0.12.2: up close it does not bloom to white
+	ALBEDO = col.rgb * energy * rad * packets * flick * fade * near * mix(1.0, ends, 0.6);
 }
 """
 
-const CORE := Color("ffffff")
+const CORE := Color("e6fbff")   # v0.12.2: a touch of cyan, so the core reads as hot blue-white, not blown out
 const GLOW := Color("5fe8ff")
 const HALO := Color("2a8cff")
 
@@ -71,7 +72,7 @@ func setup(v: Node3D, m: Node3D, mfx: MagicFx) -> void:
 	fx = mfx
 	var sh := Shader.new()
 	sh.code = BEAM_SHADER
-	core = _tube(sh, CORE, 3.2, 1.2)
+	core = _tube(sh, CORE, 2.2, 1.2)
 	glow = _tube(sh, GLOW, 1.3, 1.6)
 	halo = _tube(sh, HALO, 0.4, 3.0)
 	for i in 2:
@@ -84,7 +85,7 @@ func setup(v: Node3D, m: Node3D, mfx: MagicFx) -> void:
 	orb.add_child(orb_glow)
 	orb_core = MeshInstance3D.new()
 	orb_core.mesh = _sphere(0.45)
-	orb_core.material_override = MagicFx._glow_mat(CORE, 9.0)
+	orb_core.material_override = MagicFx._glow_mat(CORE, 6.0)
 	orb.add_child(orb_core)
 	for i in 3:
 		var r := MeshInstance3D.new()
@@ -285,7 +286,7 @@ func tick(delta: float, st: int, st_t: float, base: Vector3, yaw: float, beam_a:
 	for n in [core, glow, halo]:
 		(n as Node3D).visible = true
 		((n as MeshInstance3D).material_override as ShaderMaterial).set_shader_parameter("len", blen)
-	(core.material_override as ShaderMaterial).set_shader_parameter("energy", 3.2 + 1.0 * sin(now * 31.0))
+	(core.material_override as ShaderMaterial).set_shader_parameter("energy", 2.2 + 0.6 * sin(now * 31.0))
 	var l1: OmniLight3D = lights[1]
 	var l2: OmniLight3D = lights[2]
 	l1.visible = true
