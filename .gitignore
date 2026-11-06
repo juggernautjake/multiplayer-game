@@ -10,3 +10,5 @@ Thumbs.db
 prize/
 smiguel*.png
 .claude/
+# v0.12.6: ...but assets/prize/ holds the fiesta's CC0 clip art (and "my precious"), which ship with the game
+!/assets/prize/

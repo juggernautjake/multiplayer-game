@@ -629,13 +629,13 @@ func _bot_input() -> Array:
 		return _bot_duel()
 	if bot_mode == "boss":
 		return _bot_boss()
-	if bot_mode == "prize":   # just the end screens: --bot prize [--defeat] [--no-prize-pic] --shots <dir>
+	if bot_mode == "prize":   # just the end screens: --bot prize [--defeat] [--no-prize-pic] --shots <dir> [--every N] [--ticks N]
 		bot_t += 1
 		if bot_t == 30:
 			prize.start_defeat() if _args().has("defeat") else prize.start_victory()
-		if bot_t % 30 == 0 and _args().has("shots"):
+		if bot_t % maxi(int(_args().get("every", 30)), 1) == 0 and _args().has("shots"):
 			get_viewport().get_texture().get_image().save_png(str(_args()["shots"]).path_join("prize_%04d.png" % bot_t))
-		if bot_t > 1100:
+		if bot_t > int(_args().get("ticks", 1100)):
 			get_tree().quit()
 		return [0, cam_yaw, 0.0, weapon_slot]
 	if bot_mode == "golems":
