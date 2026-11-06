@@ -671,3 +671,27 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
 - **More health:** 7000 alone, x1.7 for two, +0.7x per extra player; joining mid-fight scales it.
 - **Challenger archers and slingers are fair now:** they aim where you stand with a real spread (wider far away and
   when you run or dash), hold the full draw a moment (watch for it), shoot less often and pause to reposition.
+
+## What's new in 0.12.0
+
+- **Cloth keeps up**: robes, cloaks, hats and sashes no longer lag behind and whip back after a dash, a teleport or a
+  net correction.
+- **Golems fight for you**: they always go after Thunderhorn, challengers and their golems (whatever is hurting you
+  first, then the nearest, within 18 m of you). Other players only with PvP on and only for 12 s after they hurt you
+  or your golems. Their kills and boss damage count as yours. Challengers fight back against golems in their face.
+- **Thunderhorn's charge throws you**: both his charge and the rush launch you ~30 m. You bounce, ricochet off trunks
+  and pillars, skid and tumble (Pip spins), then get up. Challengers caught in his path get trampled too.
+- **The Storm Leap**: he bounds up to 200 m across the whole map, to the spot furthest from everyone, 75 m high and
+  3.4 s in the air. A gold light pillar and an edge-of-screen arrow mark where he lands. The landing ring and his three
+  slam waves now sweep the whole map: jump each one as it reaches you, wherever you are. Afterwards he works his way
+  back to the arena while he fights.
+- **Static** orbs are now spiky pink-violet caltrops that buzz; his plain damage balls stay smooth and blue.
+- **A new Thunderhorn**: a full bull skeleton with planted hooves, real walk, trot and gallop footfalls, rearing,
+  bucking, leaping and skidding; a heavy bovine face that roars, snorts steam, furrows its brow and watches its
+  target; two great arced horns plus a forward nose spike.
+- **Apples heal**: every tree bears apples, and any hit knocks one loose. Walk over an apple while hurt to eat it
+  (+18). There are apple trees round the arena now. Thunderhorn knows this: he fells trees, charges through them and
+  tramples apples. The trees stand again after the fight.
+- **Faster levels**: 3 kills, then 4 more, then 5 more (levels at 3, 7 and 12).
+- **The Storm Altar's button is solid**: land on top of it to summon him. It stays pressed for the fight.
+- The level-up light now follows you for a few seconds.
