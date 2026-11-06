@@ -3,8 +3,9 @@
 ## model: BossModel alone, standing / roaring / charging poses from four sides (bull_<pose>_<view>.png).
 ## gait:  a real BossView fed made-up server states: walk, trot, gallop, a turn, a skid, pawing, the stomp's rearing,
 ##        the gore, a roar; pictures every few frames (gait_<n>_<what>.png), the camera following from the side.
-## dazed: (v0.12.0) the stun meter's 7 s daze: the collapse, the dazed sway and the struggle up (strip_dazed.png, and
-##        a 3/4 front close-up strip strip_dazed_front.png).
+## dazed: (v0.12.0) the stun meter's 7 s daze: the collapse, the dazed sway and the struggle up (strip_dazed.png, 12
+##        frames from a 3/4 front view; v0.12.2: DAZE_VIEW=side films it from the side, DAZE_FRAMES=1 also saves a
+##        frame every 0.1 s as dz_<n>.png).
 extends SceneTree
 
 var out := "user://"

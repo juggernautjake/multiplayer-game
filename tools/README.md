@@ -335,6 +335,13 @@ bot (sees everything 15 ticks = 250 ms late, extrapolating motion; jumps rings o
 off and dashes from gores, tail lashes and roars, leaves warning circles and the leap marker, outruns balls, crosses
 orbs, gets out of the beam or dashes through it) against every attack, 24 trials each (half enraged), from typical
 positions; it must avoid each >= 90% while an idle player is hit by most (>= 50%). Prints the table (tells, rates).
+v0.12.2 `_golem_tests`: a golem slamming him (note_golem_hit) gets 25-60% of his attention with a player standing
+by (the fairness cap); a far golem that isn't hurting him is ignored; one standing between him and a player draws
+him; each damaging attack (charge, rush, gore, stomp ring, map-wide wave, horn beam, ball lightning, static ball,
+homing orbs, tail lash, static field, leap landing) hurts a golem in its reach, the charge and rush throw it, a Stone
+Titan takes less; called lightning puts a circle under the golem he fights and the server's bolt hurts it; a thrown
+golem flies and lands; through the real server loop he kills a golem fighting him in under 30 s, and nobody gets
+level credit.
 
 
 ## cloth_test.gd
@@ -351,7 +358,9 @@ Thunderhorn's horn beam start to finish through a real BossView fed made-up stat
 orb, the beam sweeping there and back, the collapse), at dusk with posts and a player-sized dummy; 13 stills from five
 angles (`beam_<n>_<what>.png`) and a printout of how far the orb sits from the nose spike's tip. `clip` instead dollies
 the camera for a movie: add `--write-movie beam.avi --fixed-fps 30` before `-s` (then e.g. `ffmpeg -i beam.avi -c:v
-libx264 -crf 22 -pix_fmt yuv420p beam.mp4`). `boss_pose_shots.gd ... dazed` (with `--fixed-fps 60`): the daze strip.
+libx264 -crf 22 -pix_fmt yuv420p beam.mp4`). `boss_pose_shots.gd ... dazed` (with `--fixed-fps 60`): the daze strip (v0.12.2: 12 frames from a three-quarter
+front view after a few warm-up frames; `DAZE_VIEW=side` films it from the side; `DAZE_FRAMES=1` also saves a frame every
+0.1 s as `dz_<n>.png`).
 
 ## fog_test.gd
 

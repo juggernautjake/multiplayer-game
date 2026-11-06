@@ -273,11 +273,18 @@ His weaknesses (and resistances):
 - **Fireballs** set him burning.
 - **Frost Nova** slows him a lot (but not his charge or the rush).
 - **Stuns** fill his **stun meter** (the gold bar under his health bar): 7 wand Stuns close together and he is
-  **dazed for 7 seconds** (he collapses, then gets up). It interrupts anything, and it is the only way to stop a
-  charge or the rush. The meter holds a while after each Stun, then drains.
+  **dazed for 7 seconds** (his forelegs fold and his chest hits the dirt, he flops onto his side with stars circling
+  his head, then struggles up hind legs first and shakes it off). It interrupts anything, and it is the only way to
+  stop a charge or the rush. The meter holds a while after each Stun, then drains.
 - **Lightning** does only a quarter of its damage: he's made of it. A gravity well can't move him.
 - He can't be hurt while he comes down.
 - The wand's **Fog** doesn't bother him at all.
+
+**Golems against him (0.12.2).** Golems (your wand golems and Stone Titan, and challengers' golems too) are real
+targets for him: he turns on a golem that's hurting him or standing between him and you, but never gives golems more
+than a fair share of his attention, so they can't soak him while you hit him for free. Every attack that can hurt you
+hurts a golem in its reach (Stone Titans take a bit over half); his charge and rush throw them. He can kill them, and
+nobody gets level credit for a golem he kills.
 
 ### Winning and losing
 
@@ -513,7 +520,7 @@ These need no window and exit with code 0 when everything passes.
 | `<godot> --headless --path . -s tools/fruit_test.gd` | Fruit physics in `Ecology`: fallen fruit comes to rest, walking into it kicks it, a melee blow sends it flying, it never ends up inside a pillar, trunk or dummy, and its path has no jumps. |
 | `<godot> --headless --path . -s tools/eco_test.gd` | Runs the yard for 20 simulated minutes and checks that fruit falls, worms move in, birds come and trees can be hit. Prints `ECO OK` or `ECO FAIL`. |
 | `<godot> --headless --path . -s tools/invite_test.gd` | Invite codes: encoding then decoding gives back the address and port. |
-| `<godot> --headless --path . -s tools/boss_test.gd` | v0.11.0: Static (a stack a hit, holds, drains, 7 s stun at 6, 5 enraged, shield blocks, synced), homing orbs (count by players, even split, dodgeable), 2-5 Storm Leaps a fight 25 s apart, jumping the landing ring, the rush (side-dash dodges; otherwise thrown, knocked down, up again), fair targeting. |
+| `<godot> --headless --path . -s tools/boss_test.gd` | v0.11.0: Static (a stack a hit, holds, drains, 7 s stun at 6, 5 enraged, shield blocks, synced), homing orbs (count by players, even split, dodgeable), 2-5 Storm Leaps a fight 25 s apart, jumping the landing ring, the rush (side-dash dodges; otherwise thrown, knocked down, up again), fair targeting; v0.12.2 golems as his targets (a golem hurting him draws him, capped), every damaging attack hurting a golem, the charge and rush throwing them, a golem killed in good time with no level credit. |
 | `<godot> --headless --path . -s tools/npc_test.gd` | v0.10.0: who the Duel Stone summons before and after the first level-up, one challenger at a time, challengers hurt and are hurt whatever PvP says, kills on them level the staff, a swordsman closes in and an archer leads its shots, Thunderhorn's health with two players, what each spell does to him, victory, and defeat then restart (alone and with two players, levels kept). |
 | `<godot> --headless --path . -s tools/fog_test.gd` | The wand's Fog (who sees what, opposing overlaps, challengers and golems confused, Thunderhorn unaffected), Spark Beam, Life Drain (and healing allies), Earth Spikes gone. |
 | `<godot> --headless --path . -s tools/wizard_test.gd` | Challenger wizards: level-1 kits, mana and resting, spell choice, aim error, wind-up tells. |
@@ -780,3 +787,14 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
   Attack that, Regroup), middle mouse to send them at what's under the crosshair. Markers in your colour show everyone
   the order. See [Golem orders](#magic-the-staff-and-the-wand).
 - Golems now really fight Thunderhorn (they used to hang back: his id read as a golem's).
+- **Thunderhorn fights golems back**: golems are proper targets for him (by the damage they do him, how close they
+  are, whether they stand between him and a player, with a cap so they never take all his attention), and every one
+  of his damaging attacks hurts golems in reach: charge and rush (which throw them), gore, stomp rings and the
+  map-wide waves, the horn beam, called lightning, ball lightning, homing orbs, tail lash, static field and the leap's
+  landing. Stone Titans take 60%. A golem he kills still gives nobody level credit.
+- **A better daze**: when the stun meter fills, his forelegs fold at the knees and his chest slams into the dirt (a
+  dust cloud and a thud), his rump sags and he flops onto his side, head down with the nose spike in the ground,
+  swaying and snorting steam, glowing stars circling above him; then he heaves up hind legs first, lurches to his feet
+  and shakes it off in a burst of sparks as the meter empties.
+- His charge lifts its victim on the nose spike for a moment before the toss, and the horn beam's core no longer
+  blooms to pure white up close.
