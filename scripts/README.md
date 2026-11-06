@@ -659,3 +659,29 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   projectile and hit messages, input buffers starting at 3, the connection readout (`quality_line`, `loss_pct`,
   `check_tailscale_path`). See [docs/networking.md](../docs/networking.md).
 - **main.gd:** the HUD's connection line; the `show` and `golems` bots; `--every` for the magic bot.
+
+## v0.8.1
+
+- **wizard_garb.gd** (rewritten; the 3D figure only): the robe is a stack of rings (`f.rings`: centre, basis, radii);
+  the top `pinned` ones ride the body (round the neck, the shoulders, the chest, the waist), the rest are heavy cloth
+  hanging to the floor. `_hang` keeps each segment its length (it used to let segments stretch, so the 0.8.0 robe
+  bunched up like a skirt) and within ~60 degrees of hanging straight; `_push_from_leg` keeps cloth in front of a
+  striding leg, never behind it; `_push_inward` keeps it inside the forearms and hands. Drawn with thickness: a darker
+  lining `THICK` inside, joined at the hem. The wizard's cloak is an open sheet pinned round the back of the shoulders,
+  lighter (it swings more), with a back face; a rope belt at the waist ring; the hat is a soft felt cone of 6 points
+  with a crooked tip (see-through on your own head: `own`); the wand's hood is a deep cowl framing the face.
+- **figure_avatar.gd:** `SHOULDER` / `SHOULDER_REST` (the joint at the end of the collarbone), the `trap_*` parts,
+  `arm_fk` (an arm posed from swing, elbow bend and abduction, with its elbow pole), `_pole_l`, the archery stance
+  (`ARROW_RUN`, and `aim_pitch`, set by Main for your own player), the robe's rings and colliders in `_dress`, the face
+  shadowed in the hood, `orb_position()`.
+- **avatar.gd (Pip):** no 3D garb or 3D staff any more. `garb_textures` swaps to the garb sheets; `_update_prop` draws
+  the carried weapon as a sprite at his hand (`assets/pip/garb/pip-hands.json`, `assets/pip/carry`), hidden in the
+  frames that already show it, moved through the casting gestures and raised overhead for the shield;
+  `orb_position()` for the shield.
+- **magic_fx.gd:** the shield's shader (screen-space refraction, fresnel rim, shimmer, honeycomb, energy flowing from
+  the orb, hit ripples sized by `hit_s`), `_orb_emit` (the glow, light and sparks at the orb), `_shield_hit` with the
+  hit's strength.
+- **net.gd:** `shield_center`, `_shield_bounce`, `proj_bounce`, `Proj.immune` / `bounces`; `shutdown()` and the bind
+  retry in `host()`.
+- **weapons.gd:** `SHIELD_RADIUS` 1.5, `SHIELD_CENTER_Y` 1.1, `SHIELD_BOUNCE`.
+- **main.gd:** `_leave_game`, `_on_proj_bounce`, the `archery` bot, `--orbit`, `--carry`, `--leave-at`.

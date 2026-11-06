@@ -9,8 +9,8 @@
 ##              rolling up, a white-hot flash, a shock ring, burning debris thrown in arcs, sparks, a smoke column
 ##              (sometimes a mushroom), drifting embers, a flickering light and a ragged scorch with burn streaks;
 ##   casting:   a rune circle in the spell's colour turns under the caster as the spell builds, and flares as it goes off;
-##   shield:    a see-through bubble with a bright rim and drifting bands; wherever something strikes it, a bright spot
-##              flares and a ring of light runs out across the bubble from that point;
+##   shield:    a see-through force field pouring out of the staff's orb (see BUBBLE_SHADER); wherever something strikes
+##              it, a spot flares and a ring of shimmering light runs out across the dome from that point, sized by the hit;
 ##   stun:      a violet bolt from the wand that bursts in a crackling violet ring where it lands; everyone caught
 ##              gets a ring of spinning stars over their head;
 ##   teleport:  where you left, a column of violet light collapses inward with motes sucked into it; where you arrive,
@@ -35,32 +35,48 @@
 class_name MagicFx
 extends Node3D
 
+## The shield (v0.8.1): a see-through force field. It bends what's behind it a little (sampling the screen behind it,
+## offset by the surface's slope), glows at the rim (fresnel), shimmers with drifting bands and a faint honeycomb, and
+## energy pours out across it from the staff's orb (`emit`: the orb's direction from the centre), where it is
+## brightest. Each hit sends a ring of light out across the dome from the exact point it struck, as big as the hit.
 const BUBBLE_SHADER := """
 shader_type spatial;
-render_mode unshaded, blend_add, cull_disabled, depth_draw_never, shadows_disabled;
-uniform vec4 tint : source_color = vec4(0.35, 0.75, 1.0, 1.0);
+render_mode unshaded, cull_back, depth_draw_never, shadows_disabled;
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
+uniform vec4 tint : source_color = vec4(0.45, 0.8, 1.0, 1.0);
 uniform vec3 hits[6];
 uniform float hit_t[6];
+uniform float hit_s[6];
 uniform float fade = 1.0;
+uniform vec3 emit = vec3(0.0, 1.0, 0.0);
 varying vec3 lpos;
 void vertex() { lpos = normalize(VERTEX); }
 void fragment() {
-	float fres = pow(1.0 - abs(dot(normalize(NORMAL), normalize(VIEW))), 2.6);
-	float a = 0.05 + fres * 0.6;
-	a += (0.5 + 0.5 * sin(lpos.y * 16.0 + TIME * 2.2)) * 0.035;
-	a += (0.5 + 0.5 * sin((lpos.x + lpos.z) * 11.0 - TIME * 1.5)) * 0.025;
+	float fres = pow(1.0 - abs(dot(normalize(NORMAL), normalize(VIEW))), 3.0);
+	float sh = (0.5 + 0.5 * sin(lpos.y * 18.0 + TIME * 2.4)) * (0.5 + 0.5 * sin((lpos.x - lpos.z) * 14.0 - TIME * 1.7));
+	vec2 hv = vec2(atan(lpos.z, lpos.x) * 7.0, lpos.y * 10.0 + TIME * 0.15);
+	vec2 hf = abs(fract(hv + vec2(0.5 * floor(hv.y), 0.0)) - 0.5);
+	float hex = smoothstep(0.42, 0.5, max(hf.x, hf.y));
+	float ea = acos(clamp(dot(lpos, normalize(emit)), -1.0, 1.0));
+	float flow = pow(0.5 + 0.5 * sin(ea * 11.0 - TIME * 7.0), 6.0) * exp(-ea * 0.8);
+	float src = exp(-pow(ea / 0.22, 2.0));
 	float glow = 0.0;
 	for (int i = 0; i < 6; i++) {
 		float t = hit_t[i];
 		if (t < 1.1) {
+			float s = hit_s[i];
 			float ang = acos(clamp(dot(lpos, hits[i]), -1.0, 1.0));
-			float ring = exp(-pow((ang - t * 2.9) / 0.17, 2.0)) * (1.0 - t / 1.1);
-			float spot = exp(-pow(ang / 0.28, 2.0)) * max(0.0, 1.0 - t * 2.5);
-			glow += ring * 1.3 + spot * 2.0;
+			float ring = exp(-pow((ang - t * 2.9) / (0.1 + 0.07 * s), 2.0)) * (1.0 - t / 1.1) * s;
+			float spot = exp(-pow(ang / (0.18 + 0.12 * s), 2.0)) * max(0.0, 1.0 - t * 2.5) * s;
+			float shimmer = (0.5 + 0.5 * sin(ang * 40.0 - t * 30.0)) * exp(-pow((ang - t * 2.9) / 0.35, 2.0)) * (1.0 - t / 1.1) * 0.5 * s;
+			glow += ring * 1.2 + spot * 1.8 + shimmer;
 		}
 	}
-	ALBEDO = tint.rgb * (1.0 + glow * 2.2);
-	ALPHA = clamp((a + glow) * fade, 0.0, 1.0);
+	float edge = fres * 0.9 + sh * 0.05 + hex * 0.1 * (0.35 + fres) + flow * 0.3 + src * 1.3 + glow;
+	vec2 off = NORMAL.xy * (0.01 + 0.025 * fres);
+	vec3 bg = texture(screen_tex, SCREEN_UV + off).rgb;
+	ALBEDO = mix(bg, tint.rgb, 0.07) + tint.rgb * edge * 1.5;
+	ALPHA = clamp(fade, 0.0, 1.0);
 }
 """
 
@@ -107,7 +123,7 @@ func _on_fx(kind: String, a: Array) -> void:
 				var av: Node3D = avatars[a[0]]
 				Fx.burst(main, av.position + Vector3(0, 1.0, 0), Vector3.UP, Color("8fd8ff"), 22, 3.0, 0.05)
 		"shield_hit":
-			_shield_hit(int(a[0]), a[1])
+			_shield_hit(int(a[0]), a[1], float(a[2]) if a.size() > 2 else 8.0)
 		"stun_beam":
 			_stun_beam(a[1], a[2], int(a[3]) != 0)
 		"teleport":
@@ -169,15 +185,20 @@ func update(delta: float, states: Dictionary) -> void:
 				if not b.get("shattered", false):
 					Fx.burst(main, (b.node as Node3D).global_position, Vector3.UP, Color("8fd8ff"), 18, 3.5, 0.05)
 				(b.node as Node3D).queue_free()
+				for n in b.get("extra", []):
+					(n as Node).queue_free()
 				bubbles.erase(id)
 			else:
-				(b.node as Node3D).global_position = (avatars[id] as Node3D).position + Vector3(0, 0.95, 0)
+				var bc := (avatars[id] as Node3D).position + Vector3(0, Weapons.SHIELD_CENTER_Y, 0)
+				(b.node as Node3D).global_position = bc
+				_orb_emit(b, avatars[id], bc, delta)
 				var low := float(st.mana) / float(Sim.MANA_FULL)
 				var flicker := 1.0 if low > 0.25 else (0.5 + 0.5 * absf(sin(Time.get_ticks_msec() * 0.02)))
 				var mat: ShaderMaterial = b.mat
 				mat.set_shader_parameter("fade", flicker)
 				var dirs := PackedVector3Array()
 				var ts := PackedFloat32Array()
+				var ss := PackedFloat32Array()
 				for h in b.hits:
 					h[1] += delta
 				b.hits = b.hits.filter(func(h): return h[1] < 1.1)
@@ -185,11 +206,14 @@ func update(delta: float, states: Dictionary) -> void:
 					if i < b.hits.size():
 						dirs.append(b.hits[i][0])
 						ts.append(b.hits[i][1])
+						ss.append(float(b.hits[i][2]) if (b.hits[i] as Array).size() > 2 else 1.0)
 					else:
 						dirs.append(Vector3.UP)
 						ts.append(9.0)
+						ss.append(0.0)
 				mat.set_shader_parameter("hits", dirs)
 				mat.set_shader_parameter("hit_t", ts)
+				mat.set_shader_parameter("hit_s", ss)
 		# stars over a stunned head
 		var stunned := st != null and st.stun > 0 and st.dead == 0 and avatars.has(id)
 		if stunned and not stuns.has(id):
@@ -211,6 +235,8 @@ func update(delta: float, states: Dictionary) -> void:
 	_cast_glow(delta, states)
 	for id in bubbles.keys():
 		if not states.has(id):
+			for n in bubbles[id].get("extra", []):
+				(n as Node).queue_free()
 			(bubbles[id].node as Node3D).queue_free()
 			bubbles.erase(id)
 	if _vault_door:
@@ -717,19 +743,72 @@ func _make_bubble() -> Dictionary:
 	main.add_child(mi)
 	mi.scale = Vector3.ONE * 0.2
 	mi.create_tween().tween_property(mi, "scale", Vector3.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	return { "node": mi, "mat": mat, "hits": [] }
+	# the orb it pours out of: a hot glow, a light, and sparks streaming out over the dome
+	var glow := MeshInstance3D.new()
+	var gs := SphereMesh.new()
+	gs.radius = 0.16
+	gs.height = 0.32
+	glow.mesh = gs
+	var gm := _glow_mat(Color("bfeaff"), 8.0, 0.75)
+	gm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	glow.material_override = gm
+	glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.add_child(glow)
+	var light := OmniLight3D.new()
+	light.light_color = Color("8fd8ff")
+	light.light_energy = 2.5
+	light.omni_range = 4.0
+	main.add_child(light)
+	var sparks := CPUParticles3D.new()
+	sparks.amount = 40
+	sparks.lifetime = 0.9
+	sparks.local_coords = false
+	sparks.direction = Vector3.UP
+	sparks.spread = 75.0
+	sparks.initial_velocity_min = 1.0
+	sparks.initial_velocity_max = 2.2
+	sparks.gravity = Vector3(0, -2.5, 0)
+	var sm2 := SphereMesh.new()
+	sm2.radius = 0.025
+	sm2.height = 0.05
+	sparks.mesh = sm2
+	sparks.material_override = _glow_mat(Color("dff4ff"), 5.0)
+	main.add_child(sparks)
+	return { "node": mi, "mat": mat, "hits": [], "extra": [glow, light, sparks], "glow": glow, "light": light, "sparks": sparks }
 
 
-func _shield_hit(id: int, at: Vector3) -> void:
+## The bubble pours out of the staff's orb: put the glow, its light and the sparks there, tell the shader where the
+## orb is (so the energy flows out across the dome from that point), and keep the sparks sliding over the surface.
+func _orb_emit(b: Dictionary, av: Node3D, c: Vector3, delta: float) -> void:
+	var orb := c + Vector3(0, Weapons.SHIELD_RADIUS, 0)
+	if av.has_method("orb_position"):
+		var op = av.orb_position()
+		if op != null:
+			orb = op
+	var dir := (orb - c).normalized() if orb.distance_to(c) > 1e-3 else Vector3.UP
+	(b.mat as ShaderMaterial).set_shader_parameter("emit", dir)
+	var pulse := 1.0 + 0.15 * sin(Time.get_ticks_msec() * 0.012)
+	(b.glow as Node3D).global_position = orb
+	(b.glow as Node3D).scale = Vector3.ONE * pulse
+	(b.light as Node3D).global_position = orb
+	(b.light as OmniLight3D).light_energy = 2.0 + 0.8 * sin(Time.get_ticks_msec() * 0.02)
+	(b.sparks as CPUParticles3D).global_position = orb
+	(b.sparks as CPUParticles3D).direction = dir
+
+
+func _shield_hit(id: int, at: Vector3, strength := 8.0) -> void:
+	var k := clampf(strength / 10.0, 0.4, 2.2)   # how big the hit was: the ripple and the flash scale with it
+	var c := at
 	if bubbles.has(id):
 		var b: Dictionary = bubbles[id]
-		var c := (b.node as Node3D).global_position
+		c = (b.node as Node3D).global_position
 		var d := (at - c)
-		b.hits.push_front([d.normalized() if d.length() > 1e-3 else Vector3.UP, 0.0])
+		b.hits.push_front([d.normalized() if d.length() > 1e-3 else Vector3.UP, 0.0, k])
 		if b.hits.size() > 6:
 			b.hits.resize(6)
-	Fx.burst(main, at, (at - (avatars[id].position + Vector3(0, 0.95, 0)) if avatars.has(id) else Vector3.UP), Color("aee6ff"), 12, 4.0, 0.04)
-	_flash_light(at, Color("8fd8ff"), 2.0, 4.0, 0.2)
+	var out := (at - c).normalized() if at.distance_to(c) > 1e-3 else Vector3.UP
+	Fx.burst(main, at, out, Color("cdeeff"), int(8 + 8 * k), 3.0 + 2.0 * k, 0.035)
+	_flash_light(at, Color("8fd8ff"), 1.5 + 1.5 * k, 2.5 + 2.0 * k, 0.18)
 
 
 func _stun_beam(from: Vector3, to: Vector3, hit: bool) -> void:
@@ -933,6 +1012,8 @@ func _shatter(id: int, at: Vector3) -> void:
 	if bubbles.has(id):
 		bubbles[id].shattered = true
 		(bubbles[id].node as Node3D).visible = false
+		for n in bubbles[id].get("extra", []):
+			(n as Node3D).visible = false
 	for i in 40:   # glowing glass shards flying out and falling
 		var shard := MeshInstance3D.new()
 		var pm := PrismMesh.new()

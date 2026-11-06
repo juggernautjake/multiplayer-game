@@ -77,6 +77,7 @@ func _ready() -> void:
 	net.projectile_ended.connect(_on_proj_end)
 	net.hit.connect(_on_hit)
 	net.local_shot.connect(_on_local_shot)
+	net.projectile_bounced.connect(_on_proj_bounce)
 	net.item_added.connect(_on_item_added)
 	net.item_removed.connect(_on_item_removed)
 	net.style_changed.connect(_on_style)
@@ -346,6 +347,8 @@ func _process(_delta: float) -> void:
 			av.grounded = net.predicted.grounded
 			av.dashing = net.predicted.dash_ticks > 0
 			av.state = net.predicted
+			if "aim_pitch" in av:
+				av.aim_pitch = aim_pitch
 			av.model.visible = view == View.THIRD
 		else:
 			var d := net.remote_draw(id, frac)
@@ -414,6 +417,10 @@ func _process(_delta: float) -> void:
 			hud.text += "\n\n" + host_info
 
 	frames += 1
+	if _args().has("leave-at") and frames == int(_args()["leave-at"]):   # testing: press "Leave game"
+		print("[leave] leaving at frame %d" % frames)
+		_leave_game()
+		return
 	if shot_path != "" and frames == shot_frame:
 		get_viewport().get_texture().get_image().save_png(shot_path)
 		print("screenshot saved: ", shot_path)
@@ -531,6 +538,8 @@ func _bot_input() -> Array:
 		return _bot_show()
 	if bot_mode == "golems":
 		return _bot_golems()
+	if bot_mode == "archery":
+		return _bot_archery()
 	bot_t += 1
 	cam_yaw = wrapf(bot_t * 0.01, -PI, PI)
 	var b: int = Sim.Btn.FORWARD
@@ -610,8 +619,24 @@ func _bot_show() -> Array:
 	var me := net.predicted.pos
 	var owned := net.predicted.owned
 	var magic := Weapons.STAFF if (owned >> Weapons.STAFF) & 1 else Weapons.WAND
+	if _args().has("carry") and t >= 60:   # every weapon in turn, walking and standing, the camera circling
+		var ws := [Weapons.SWORD, Weapons.CLUB, Weapons.BOW, Weapons.SLING, Weapons.STAFF, Weapons.WAND]
+		var k := (t - 60) / 120
+		if k >= ws.size():
+			get_tree().quit()
+			return [0, cam_yaw, 0.0, weapon_slot]
+		weapon_slot = ws[k]
+		cam_yaw = (t - 60) * 0.03
+		cam_dist = 6.0
+		var walk := (t / 40) % 2 == 0
+		_shot_show(t)
+		return [Sim.Btn.FORWARD if walk else 0, cam_yaw + PI, 0.0, weapon_slot]
 	if t < 60:
 		cam_yaw = 0.0
+	elif t < 180 and _args().has("orbit"):   # standing still while the camera goes all the way round (front, side, back)
+		cam_yaw = (t - 60) / 120.0 * TAU
+		face = 0.0
+		return [0, cam_yaw, 0.0, weapon_slot, face, face, spell, me + Vector3(0, 1, -8)] if _shot_show(t) else [0, cam_yaw, 0.0, weapon_slot]
 	elif t < 180:                       # run toward the camera, sprinting
 		b |= Sim.Btn.BACK | Sim.Btn.SPRINT
 	elif t < 290:                       # strafe right then left, facing away (the camera on the side)
@@ -681,6 +706,40 @@ func _bot_golems() -> Array:
 		get_tree().quit()
 	spell_sel[weapon_slot] = spell
 	return [b, cam_yaw, 0.0, weapon_slot, atan2(-(aim - me).x, -(aim - me).z), atan2(-(aim - me).x, -(aim - me).z), spell, aim]
+
+
+func _shot_show(t: int) -> bool:
+	var shots := str(_args().get("shots", ""))
+	if shots != "" and t % 6 == 0:
+		get_viewport().get_texture().get_image().save_png(shots.path_join("show_%03d.png" % t))
+	return true
+
+
+## Archery check (--host --give-all --bot archery --shots <dir> [--style figure] [--sling]): stands still facing one
+## way and draws, holds and looses the bow (or the slingshot) again and again, aiming level, up and down, while the
+## camera looks from behind, the side, the front and above; pictures at half draw, full draw, the release and rest.
+func _bot_archery() -> Array:
+	bot_t += 1
+	if net.predicted == null:
+		return [0, cam_yaw, 0.0, weapon_slot]
+	weapon_slot = Weapons.SLING if _args().has("sling") else Weapons.BOW
+	var cycle := bot_t / 150
+	var t := bot_t % 150
+	var views := [[0.0, -0.25], [PI * 0.5, -0.2], [PI, -0.2], [PI * 1.5, -0.2], [PI * 0.75, -1.1]]
+	var pitches := [0.0, 0.45, -0.35]
+	if cycle >= views.size() * pitches.size():
+		get_tree().quit()
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var v: Array = views[cycle % views.size()]
+	var pitch: float = pitches[(cycle / views.size()) % pitches.size()]
+	cam_yaw = float(v[0])
+	cam_pitch = float(v[1])
+	aim_pitch = pitch
+	var b := Sim.Btn.ATTACK if t >= 20 and t < 80 else 0
+	var shots := str(_args().get("shots", ""))
+	if shots != "" and t in [40, 78, 86, 140]:
+		get_viewport().get_texture().get_image().save_png(shots.path_join("arch_%02d_%s_%d.png" % [cycle, ["half", "full", "release", "rest"][[40, 78, 86, 140].find(t)], int(pitch * 100)]))
+	return [b, cam_yaw, pitch, weapon_slot, 0.0, 0.0]
 
 
 ## Close-quarters test bot (--bot close [--shots <dir>]): picks up every weapon, then for each one walks into the
@@ -948,7 +1007,7 @@ func _build_pause_menu(layer: CanvasLayer) -> void:
 	box.add_child(pause_char)
 	var leave := Button.new()
 	leave.text = "Leave game"
-	leave.pressed.connect(func(): get_tree().reload_current_scene())
+	leave.pressed.connect(_leave_game)
 	box.add_child(leave)
 
 
@@ -1110,13 +1169,22 @@ func _field(box: VBoxContainer, label: String, value: String) -> LineEdit:
 	return e
 
 
+## Leave the game: close the connection first (so its port is free to host on again), then rebuild the world and go
+## back to the menu.
+func _leave_game() -> void:
+	net.shutdown()
+	get_tree().reload_current_scene()
+
+
 func _start_host() -> void:
 	net.style = "figure" if char_pick.selected == 1 else "pip"
 	var port := int(port_edit.text)
 	var err := net.host(port, name_edit.text)
 	if err != OK:
 		status_label.text = "Could not host on port %d: %s" % [port, error_string(err)]
+		print(status_label.text)
 		return
+	print("[host] hosting on UDP %d" % port)
 	_print_addresses(port)
 	_enter_game()
 
@@ -1258,6 +1326,16 @@ func _on_proj_spawn(id: int, owner: int, kind: int, tick0: int, pos0: Vector3, v
 	n.node.visible = false
 	add_child(n.node)
 	projs[id] = n
+
+
+## A shot bounced off a shield: from now on it follows the server's new path (on the same clock as everyone else's).
+func _on_proj_bounce(id: int, tick0: int, pos0: Vector3, vel0: Vector3) -> void:
+	if projs.has(id):
+		var e: Dictionary = projs[id]
+		e.tick0 = tick0
+		e.pos0 = pos0
+		e.vel0 = vel0
+		e.local_t0 = -1
 
 
 func _on_proj_end(id: int, tick: int, pos: Vector3, stuck: bool) -> void:

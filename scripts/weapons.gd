@@ -87,7 +87,12 @@ const MAX_MANA := 100
 const LEVEL_KILLS := [0, 3, 8, 18]
 const MAX_LEVEL := 4
 const MANA_EVERY := 5      # ticks per point of mana back (12 a second), not while casting
-const SHIELD_RADIUS := 1.25
+## v0.8.1: the bubble is centred SHIELD_CENTER_Y above the feet and big enough to hold the whole caster, the raised
+## staff (its orb sits at the top of the bubble), the hat and the robe. The server tests hits against this same sphere.
+const SHIELD_RADIUS := 1.5
+const SHIELD_CENTER_Y := 1.1
+## What's left of a projectile's speed after it bounces off a shield.
+const SHIELD_BOUNCE := 0.6
 ## Holding the shield up against hits costs mana (Jacob 2026-11-04): per point of damage it soaks, 1.5 mana for
 ## weapons (melee, arrows, stones, golems) and 2 for spells; a stun costs a flat 25. When the mana can't pay for a hit,
 ## the shield shatters: the rest of the hit goes through and it can't be raised again for SHIELD_BROKEN ticks.

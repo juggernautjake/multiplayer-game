@@ -155,3 +155,12 @@ rented machine in a data center:
 - `scripts/golem_view.gd`: `_interp` (golems on the players' clock).
 - `scripts/config.gd`: tick rate, snapshot rate, redundancy.
 - `tools/netcode_model.py`: a Python model of the movement netcode over bad connections.
+
+## 0.8.1
+
+- **Leaving a game now closes its connection** (`Net.shutdown()`): "Leave game" used to rebuild the world without
+  closing it, so its UDP port stayed taken and hosting again failed with "port 7777 is being used". Hosting also
+  retries the port for about a second if the system is still releasing it. `tools/rehost_test.gd` hosts, leaves and
+  hosts again on the same port, has a guest leave and rejoin, and goes host -> leave -> join -> leave -> host.
+- **Shots bounce off shields** on the server; the new path goes to everyone (`proj_bounce`, channel 6) and each
+  client's copy of the shot follows it.

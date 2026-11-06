@@ -85,3 +85,11 @@ them by hand.
 Recoloured copies of both sheets made by `tools/make_outfits.py`: `-1` blue, `-2` green, `-3` crimson (guests, in the
 order they join), and `-4` grey and `-5` dark violet-black: the robes of the wizard garb, used while Pip carries the
 staff (grey) or the wand (dark).
+
+## garb/ and carry/ (v0.8.1)
+
+Made by `tools/make_garb_sheets.py`: `garb/pip-spritesheet-wizard.png` and `-shadow.png` (and the same for
+pip-weapons): every frame with the wizard's robe, hat and cloak, or the dark hooded robe, painted on;
+`garb/pip-hands.json`: where his hands are in every frame; `carry/<weapon>.png` (and `-m`, mirrored): the weapons he
+carries, with `carry/carry.json` (the pixel each is held by, the staff's and wand's orb). Outfits 4 and 5 in
+`outfits/` (0.8.0's recoloured robes) are no longer used.

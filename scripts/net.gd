@@ -20,6 +20,7 @@ signal status(text: String)
 signal projectile_spawned(id: int, owner: int, kind: int, tick0: int, pos0: Vector3, vel0: Vector3, g: float)
 signal projectile_ended(id: int, tick: int, pos: Vector3, stuck: bool)
 signal hit(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool, attacker: int)
+signal projectile_bounced(id: int, tick0: int, pos0: Vector3, vel0: Vector3)
 signal local_shot(kind: int, pos0: Vector3, vel0: Vector3, g: float)
 signal item_added(id: int, kind: int, pos: Vector3, count: int)
 signal style_changed(style: String)
@@ -85,6 +86,8 @@ class Proj:
 	var g := 0.0
 	var damage := 0
 	var last := Vector3.ZERO
+	var immune := 0             # a shield's holder it bounced off: it can't hurt them (or bounce off them) again
+	var bounces := 0
 
 ## How everyone is drawn, chosen by the host for the whole game: "pip" (sprite) or "figure" (3D test character).
 var style := "pip"
@@ -144,9 +147,17 @@ func _ready() -> void:
 
 # ================================================================ starting up
 func host(port: int, player_name: String, with_player := true) -> Error:
+	shutdown()   # anything left from an earlier game in this session lets go of its port first
 	peer = ENetMultiplayerPeer.new()
 	var err := peer.create_server(port, Config.MAX_PLAYERS)
+	var tries := 0
+	while err != OK and tries < 5:   # the OS may need a moment to release a port that was just closed
+		tries += 1
+		OS.delay_msec(200)
+		peer = ENetMultiplayerPeer.new()
+		err = peer.create_server(port, Config.MAX_PLAYERS)
 	if err != OK:
+		peer = null
 		return err
 	peer.host.compress(ENetConnection.COMPRESS_NONE)  # tiny packets: compression only adds latency
 	multiplayer.multiplayer_peer = peer
@@ -180,6 +191,7 @@ func host(port: int, player_name: String, with_player := true) -> Error:
 
 
 func join(address: String, port: int, player_name: String) -> Error:
+	shutdown()
 	peer = ENetMultiplayerPeer.new()
 	var err := peer.create_client(address, port)
 	if err != OK:
@@ -190,9 +202,47 @@ func join(address: String, port: int, player_name: String) -> Error:
 	return OK
 
 
+## Leave the game completely (v0.8.1): close the connection so its UDP port is free again (hosting again in the same
+## session used to fail with "port 7777 is being used", because leaving only reloaded the scene and the old
+## connection stayed open), and forget the whole world this side was running: players, items, shots, spells, golems.
+## Safe to call any time; Main calls it on "Leave game", and it runs when Net leaves the scene tree.
+func shutdown() -> void:
+	if peer:
+		peer.close()
+		peer = null
+	if is_inside_tree() and multiplayer.multiplayer_peer != null and not (multiplayer.multiplayer_peer is OfflineMultiplayerPeer):
+		multiplayer.multiplayer_peer.close()
+		multiplayer.multiplayer_peer = null
+	players.clear()
+	roster.clear()
+	snapshots.clear()
+	pending.clear()
+	sent_recent.clear()
+	items.clear()
+	respawns.clear()
+	projectiles.clear()
+	pending_spells.clear()
+	wells.clear()
+	storms.clear()
+	golems = Golems.new()
+	ecology = null
+	predicted = null
+	my_id = 0
+	latest_tick = -1
+	server_tick = 0
+	is_host_player = false
+	_sim_out.clear()
+	_sim_in.clear()
+
+
+func _exit_tree() -> void:
+	shutdown()
+
+
 func _reset() -> void:
 	if peer:
 		peer.close()
+		peer = null
 	multiplayer.multiplayer_peer = null
 	players.clear()
 	roster.clear()
@@ -375,6 +425,12 @@ func item_remove(id: int, taker: int) -> void:
 @rpc("authority", "call_remote", "reliable", 6)
 func proj_spawn(id: int, owner: int, kind: int, tick0: int, pos0: Vector3, vel0: Vector3, g: float) -> void:
 	projectile_spawned.emit(id, owner, kind, tick0, pos0, vel0, g)
+
+
+## A projectile bounced off a shield: it carries on from here on a new path.
+@rpc("authority", "call_remote", "reliable", 6)
+func proj_bounce(id: int, tick0: int, pos0: Vector3, vel0: Vector3) -> void:
+	projectile_bounced.emit(id, tick0, pos0, vel0)
 
 
 @rpc("authority", "call_remote", "reliable", 6)
@@ -632,15 +688,11 @@ func _server_projectiles() -> void:
 		var done := false
 		for k in range(1, 5):
 			var pt := prev.lerp(cur, k / 4.0)
-			var shielded := _shield_at(pt, pr.owner)
-			if shielded > 0:   # a shield bubble stops it at its surface
-				if pr.kind == 2:
-					_burst(pr, pt)
-				else:   # the bubble takes the hit (for mana) and the arrow / stone drops
-					_damage(shielded, pr.damage, pr.owner, cur - prev, 1.5)
-					_end_proj(pr, pt, false)
-				done = true
-				break
+			var shielded := _shield_at(pt, pr.owner, pr.immune)
+			if shielded > 0:   # it bounces off the bubble (the holder pays mana for it), unless that shatters it
+				if _shield_bounce(pr, players[shielded], pt, prev, cur):
+					done = true
+					break
 			var gh := _golem_at(pt, pr.owner)
 			if gh > 0:
 				if pr.kind == 2:
@@ -651,7 +703,7 @@ func _server_projectiles() -> void:
 				done = true
 				break
 			for q: ServerPlayer in players.values():
-				if q.id == pr.owner or q.state.dead > 0 or not can_hurt(pr.owner, q.id):
+				if q.id == pr.owner or q.id == pr.immune or q.state.dead > 0 or not can_hurt(pr.owner, q.id):
 					continue
 				var qp := q.state.pos
 				if Vector2(pt.x - qp.x, pt.z - qp.z).length() < 0.5 and pt.y > qp.y - 0.1 and pt.y < qp.y + 1.9:
@@ -718,11 +770,46 @@ func _burst(pr: Proj, pos: Vector3) -> void:
 
 
 ## The player whose shield bubble the point is inside (not the shot's own), or 0.
-func _shield_at(pt: Vector3, owner: int) -> int:
+func _shield_at(pt: Vector3, owner: int, immune := 0) -> int:
 	for q: ServerPlayer in players.values():
-		if q.id != owner and q.state.shield > 0 and q.state.dead == 0 and can_hurt(owner, q.id) and pt.distance_to(q.state.pos + Vector3(0, 0.95, 0)) < Weapons.SHIELD_RADIUS:
+		if q.id != owner and q.id != immune and q.state.shield > 0 and q.state.dead == 0 and can_hurt(owner, q.id) and pt.distance_to(shield_center(q.state)) < Weapons.SHIELD_RADIUS:
 			return q.id
 	return 0
+
+
+static func shield_center(s: Sim.PlayerState) -> Vector3:
+	return s.pos + Vector3(0, Weapons.SHIELD_CENTER_Y, 0)
+
+
+## A projectile meets a shield (v0.8.1): the holder pays mana for the hit as before (a fireball at the spell rate).
+## If that shatters the shield, the projectile goes on through (returns false). Otherwise it bounces: its velocity is
+## mirrored about the bubble's surface at the point it struck, losing some speed, and it starts again just outside;
+## it can't hurt the holder or bounce off them again. A fireball that has already bounced once bursts here instead,
+## just outside the bubble, never inside it.
+func _shield_bounce(pr: Proj, q: ServerPlayer, pt: Vector3, prev: Vector3, cur: Vector3) -> bool:
+	var c := shield_center(q.state)
+	var n := (pt - c).normalized() if pt.distance_to(c) > 1e-3 else (prev - c).normalized()
+	var outside := c + n * (Weapons.SHIELD_RADIUS + 0.06)
+	var rate := Weapons.SHIELD_MANA_SPELL if pr.kind == 2 else Weapons.SHIELD_MANA_WEAPON
+	var dmg := pr.damage if pr.damage > 0 else 12   # a fireball carries no damage of its own (its burst does)
+	var left := _shield_soak(q, int(ceil(dmg * rate * 5.0)), outside, dmg)
+	if left > 0:
+		return false   # it shattered: the projectile carries on through
+	if pr.kind == 2 and pr.bounces >= 1:
+		_burst(pr, outside)
+		return true
+	var v := Weapons.proj_vel(pr.vel0, pr.g, server_tick - pr.tick0)
+	var r := (v - n * 2.0 * v.dot(n)) * Weapons.SHIELD_BOUNCE
+	pr.pos0 = outside
+	pr.vel0 = r
+	pr.tick0 = server_tick
+	pr.last = outside
+	pr.immune = q.id
+	pr.bounces += 1
+	proj_bounce.rpc(pr.id, pr.tick0, pr.pos0, pr.vel0)
+	if is_host_player:
+		proj_bounce(pr.id, pr.tick0, pr.pos0, pr.vel0)
+	return true
 
 
 ## The golem (not the shooter's) a point is inside, or 0.
@@ -850,13 +937,13 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 			hit_fx(target, amount, pos, dir, killed, from)
 		return
 	if target > 0 and players.has(target) and players[target].state.shield > 0:   # the bubble takes it, for mana
-		var c: Vector3 = players[target].state.pos + Vector3(0, 0.95, 0)
+		var c: Vector3 = shield_center(players[target].state)
 		var back := -Vector3(dir.x, 0, dir.z)
 		if back.length() < 1e-4:
 			back = Vector3(0, 1, 0)
-		var at := c + back.normalized() * Weapons.SHIELD_RADIUS
+		var at := c + back.normalized() * Weapons.SHIELD_RADIUS + Vector3(0, -0.2, 0)   # where a blow meets it
 		var rate := Weapons.SHIELD_MANA_SPELL if dmg_src >= 0 else Weapons.SHIELD_MANA_WEAPON
-		var left := _shield_soak(players[target], int(ceil(amount * rate * 5.0)), at)
+		var left := _shield_soak(players[target], int(ceil(amount * rate * 5.0)), at, amount)
 		if left <= 0:
 			return
 		amount = maxi(int(ceil(float(left) / (rate * 5.0))), 1)   # it shattered: the rest gets through
@@ -1225,7 +1312,7 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 			for q: ServerPlayer in players.values():   # every enemy in the burst is held (a shield soaks it for mana)
 				if q.id == p.id or q.state.dead > 0 or not can_hurt(p.id, q.id) or _dist_to_body(end, q.state.pos) > r:
 					continue
-				if q.state.shield > 0 and _shield_soak(q, Weapons.SHIELD_MANA_STUN * 5, end) <= 0:
+				if q.state.shield > 0 and _shield_soak(q, Weapons.SHIELD_MANA_STUN * 5, end, 12) <= 0:
 					continue
 				q.state.stun = int(sp.duration)
 				q.state.charge = 0
@@ -1449,17 +1536,17 @@ func _magic_kill(p: ServerPlayer, w: int) -> void:
 
 ## A hit on a held shield, costing `cost` (fifths of a mana point). Paid in full: a ripple, returns 0. Not enough
 ## mana: the shield shatters, the mana is gone, it can't be raised for a moment; returns what the mana couldn't pay.
-func _shield_soak(q: ServerPlayer, cost: int, at: Vector3) -> int:
+func _shield_soak(q: ServerPlayer, cost: int, at: Vector3, strength := 8) -> int:
 	var s := q.state
 	if s.mana >= cost:
 		s.mana -= cost
-		_fx("shield_hit", [q.id, at])
+		_fx("shield_hit", [q.id, at, strength])   # a ripple from that point, as big as the hit
 		return 0
 	var left := cost - s.mana
 	s.mana = 0
 	s.shield = 0
 	s.atk_cd = maxi(s.atk_cd, Weapons.SHIELD_BROKEN)
-	_fx("shield_shatter", [q.id, s.pos + Vector3(0, 0.95, 0), at])
+	_fx("shield_shatter", [q.id, shield_center(s), at])
 	return left
 
 

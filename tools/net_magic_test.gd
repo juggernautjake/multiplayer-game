@@ -50,6 +50,54 @@ func _initialize() -> void:
 	check(b.state.atk_cd >= Weapons.SHIELD_BROKEN, "it can't be raised again for 2 s")
 	b.state.hp = Sim.MAX_HP
 
+	# v0.8.1: projectiles bounce off a shield and can't hurt its holder afterwards
+	for kind in [0, 2]:   # an arrow, then a fireball
+		b.state.pos = Vector3(60, 0, 60)
+		b.state.shield = 2
+		b.state.mana = 500
+		b.state.atk_cd = 0
+		var pr := Net.Proj.new()
+		pr.id = 900 + kind
+		pr.owner = 1
+		pr.kind = kind
+		pr.tick0 = net.server_tick
+		pr.pos0 = Vector3(60, 1.2, 66)
+		pr.vel0 = Vector3(0, 0, -40)
+		pr.g = 0.0
+		pr.damage = 9 if kind == 0 else 0
+		pr.last = pr.pos0
+		net.projectiles[pr.id] = pr
+		var bounced := false
+		var hp0 := b.state.hp
+		for t in 40:
+			net.server_tick += 1
+			b.state.shield = 2   # held
+			net._server_projectiles()
+			if net.projectiles.has(pr.id) and pr.bounces > 0:
+				bounced = true
+		check(bounced and pr.vel0.z > 0.0, "%s bounces off the shield (flying back at %.1f m/s)" % ["an arrow" if kind == 0 else "a fireball", pr.vel0.z])
+		check(b.state.hp == hp0 and b.state.mana < 500, "it doesn't hurt the holder, who pays mana for it (%d left)" % (b.state.mana / 5))
+		check(pr.vel0.length() < 40.0 * Weapons.SHIELD_BOUNCE + 0.5, "and it loses some speed")
+		net.projectiles.erase(pr.id)
+	# a fireball that has already bounced bursts on the next shield, outside it
+	var fb := Net.Proj.new()
+	fb.id = 950
+	fb.owner = 1
+	fb.kind = 2
+	fb.tick0 = net.server_tick
+	fb.pos0 = Vector3(60, 1.2, 66)
+	fb.vel0 = Vector3(0, 0, -40)
+	fb.bounces = 1
+	fb.last = fb.pos0
+	net.projectiles[fb.id] = fb
+	for t in 30:
+		net.server_tick += 1
+		b.state.shield = 2
+		net._server_projectiles()
+	check(not net.projectiles.has(fb.id) and b.state.hp == Sim.MAX_HP, "a fireball that already bounced bursts on the shield, outside it (the holder unhurt)")
+	b.state.shield = 0
+	b.state.pos = Vector3.ZERO
+
 	# kills level the weapons up
 	for i in 3:
 		b.state.hp = 5

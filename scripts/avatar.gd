@@ -55,7 +55,7 @@ var _ghost_t := 0.0
 var _step_d := 0.0             # metres since the last footfall puff
 var _fall_v := 0.0             # how fast he was falling just before landing
 var _shot_seen := -1
-var _garb: WizardGarb
+var _carry: Sprite3D          # the weapon he carries (assets/pip/carry), held at his hand in every frame
 var _garb_kind := 0
 var _outfit := 0
 var _cam: Camera3D
@@ -84,6 +84,14 @@ var _name := ""
 
 
 ## Pip's sheets recoloured for an outfit (tools/make_outfits.py): 0 the original (the host), 1 blue, 2 green, 3 crimson.
+## v0.8.1: outfit "wizard" / "shadow" are the garb sheets (tools/make_garb_sheets.py): the robe, hat, cloak or hood
+## drawn into every frame.
+static func garb_textures(look: String) -> Array:
+	if not _outfit_tex.has(look):
+		_outfit_tex[look] = [load("res://assets/pip/garb/pip-spritesheet-%s.png" % look), load("res://assets/pip/garb/pip-weapons-%s.png" % look)]
+	return _outfit_tex[look]
+
+
 static func outfit_textures(outfit: int) -> Array:
 	if outfit <= 0:
 		return _textures
@@ -149,8 +157,15 @@ func _init(player_name: String, color: Color, show_name: bool, outfit := 0) -> v
 	hp_bar.position.y = 2.12
 	hp_bar.visible = show_name
 	add_child(hp_bar)
-	_garb = WizardGarb.new()
-	add_child(_garb)
+	_carry = Sprite3D.new()   # the weapon he carries, in his hand in every frame
+	_carry.pixel_size = PIXEL
+	_carry.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	_carry.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	_carry.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	_carry.shaded = false
+	_carry.double_sided = true
+	_carry.visible = false
+	model.add_child(_carry)
 	_show()
 
 
@@ -356,48 +371,97 @@ func _show(cam: Camera3D = null) -> void:
 	sprite.flip_h = MIRROR.has(dir) and by_dir.has(MIRROR[dir])
 
 
-## The staff or wand in Pip's hand (his sheets have no frames for them): a small 3D model at his side, turned with
-## him, swung up and forward while he casts, its orb flaring.
-var _prop: Node3D
-var _prop_w := -1
+## v0.8.1: the weapon he has out is in his hand in every frame (not only while he attacks), drawn in his own pixel
+## style (assets/pip/carry, made by tools/make_garb_sheets.py) and held at his hand: where his hands are in every frame
+## of every animation is in assets/pip/garb/pip-hands.json. The sword hangs at his side, the club too, the bow is held
+## upright, the slingshot in his fist, the staff upright like a walking staff (it bobs with his steps, rises with
+## each spell's gesture, and goes up over his head for the shield), the wand pointing down. The attack frames have the
+## weapon drawn in already, so it's hidden during those.
+static var _hands := {}
+static var _carry_meta := {}
+static var _carry_tex := {}
+const CARRY := { Weapons.SWORD: "sword", Weapons.CLUB: "club", Weapons.BOW: "bow", Weapons.SLING: "sling",
+	Weapons.STAFF: "staff", Weapons.WAND: "wand" }
+const DRAWN_IN := ["c_swing", "c_back", "c_smash", "wc_swing", "wc_back", "rc_swing", "ac_swing", "s_swing", "s_back",
+	"s_smash", "ws_swing", "ws_back", "rs_swing", "as_swing", "bowDraw", "bowShot", "slingDraw", "slingShot"]
+var _carry_w := -1
+var _carry_px := Vector2.ZERO        # the weapon's grip in its sprite (pixels)
+var _carry_mirror := false
+
+
+static func _load_carry() -> void:
+	if not _hands.is_empty():
+		return
+	var f := FileAccess.open("res://assets/pip/garb/pip-hands.json", FileAccess.READ)
+	_hands = JSON.parse_string(f.get_as_text())
+	var g := FileAccess.open("res://assets/pip/carry/carry.json", FileAccess.READ)
+	_carry_meta = JSON.parse_string(g.get_as_text())
+	for nm in _carry_meta.keys():
+		_carry_tex[nm] = [load("res://assets/pip/carry/%s.png" % nm), load("res://assets/pip/carry/%s-m.png" % nm)]
 
 
 func _update_prop(delta: float) -> void:
+	_load_carry()
 	var w := state.weapon if state != null and state.dead == 0 else -1
-	if w != _prop_w:
-		if _prop:
-			_prop.queue_free()
-			_prop = null
-		_prop_w = w
-		if w == Weapons.STAFF or w == Weapons.WAND:
-			_prop = WeaponModels.for_weapon(w)
-			model.add_child(_prop)
-	if _prop == null:
+	var nm: String = CARRY.get(w, "")
+	if nm == "" or _anim in DRAWN_IN or not model.visible:
+		_carry.visible = false
 		return
-	var right := Vector3(cos(yaw), 0, -sin(yaw))
-	var fwd := Vector3(-sin(yaw), 0, -cos(yaw))
-	var staff := w == Weapons.STAFF
-	var pose := { "reach": 0.0, "lift": 0.0, "side": 0.0, "aim": 0.15 if staff else 1.35, "crouch": 0.0, "flare": 0.0 }
-	if state.atk > 0:
+	var cam := _cam
+	var dir := _dir_for(cam)
+	var cell_dir: String = MIRROR.get(dir, dir)
+	var a := _clip(dir)
+	var key := "%d:%d" % [a.row, mini(_frame, a.frames - 1)]
+	var sheet := "pip-spritesheet" if int(a.sheet) == 0 else "pip-weapons"
+	var hv: Array = (_hands.get(sheet, {}) as Dictionary).get(key, [-1, -1, -1, -1])
+	# which hand: the one on screen-left facing us (S, SE), the one on the right otherwise
+	var use_left := cell_dir in ["S", "SE"]
+	var hx := float(hv[0] if use_left else hv[2])
+	var hy := float(hv[1] if use_left else hv[3])
+	if hx < 0.0:
+		hx = _anchor.x + (-8.0 if use_left else 8.0)
+		hy = _anchor.y - 14.0
+	var mirror_view := sprite.flip_h
+	if mirror_view:
+		hx = _cell.x - 1 - hx
+	# the weapon points outward from the hand: away from the body on screen
+	var mirror_img := use_left != mirror_view
+	var m: Dictionary = _carry_meta[nm]
+	var grip := Vector2(float(m.grip[0]), float(m.grip[1]))
+	var size := Vector2(float(m.size[0]), float(m.size[1]))
+	if mirror_img:
+		grip.x = size.x - 1 - grip.x
+	_carry.texture = _carry_tex[nm][1 if mirror_img else 0]
+	_carry.offset = Vector2(size.x / 2.0 - grip.x - 0.5, grip.y - size.y / 2.0 + 0.5)
+	_carry_px = grip
+	_carry_mirror = mirror_img
+	var right := Vector3(1, 0, 0)
+	var toward := Vector3(0, 0, 1)
+	if cam:
+		right = cam.global_transform.basis.x
+		right.y = 0.0
+		right = right.normalized() if right.length() > 0.01 else Vector3(1, 0, 0)
+		toward = cam.global_transform.basis.z
+		toward.y = 0.0
+		toward = toward.normalized() if toward.length() > 0.01 else Vector3(0, 0, 1)
+	var lift := 0.0
+	var side := 0.0
+	# the staff and wand move through each spell's gesture; the staff goes up over his head for the shield
+	if (w == Weapons.STAFF or w == Weapons.WAND) and state.atk > 0:
 		var sp := Weapons.spell(w, state.spell)
-		pose = CastPose.at(w, str(sp.name), float(int(sp.cast) - state.atk), float(sp.windup), float(sp.cast))
-	var up := 0.0
-	if state.shield > 0:   # holding the shield up: the staff raised high over his head, quivering under the strain
-		up = 0.75 + 0.015 * sin(Time.get_ticks_msec() * 0.03)
-		pose.aim = 0.05
-	# walking: the staff swings and bobs with his steps; the wand sways
-	var speed := Vector2(_vel.x, _vel.z).length()
-	var gait := sin(Time.get_ticks_msec() * 0.001 * clampf(speed, 0.0, 10.0) * 1.4) * clampf(speed / 6.0, 0.0, 1.0)
-	var reach := float(pose.reach)
-	_prop.position = right * (0.34 - 0.18 * up + float(pose.side)) + fwd * (0.08 + 0.36 * reach + 0.05 * gait) \
-		+ Vector3(0, (0.95 if staff else 0.85) + float(pose.lift) - float(pose.crouch) + up + 0.02 * absf(gait), 0)
-	var tilt := float(pose.aim) + 0.08 * gait - (0.08 * up)
-	_prop.basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -tilt) * Basis(Vector3.UP, float(pose.side) * 4.0)
-	var orb := _prop.get_node_or_null("Orb") as MeshInstance3D
-	if orb:
-		orb.scale = Vector3.ONE * (1.0 + 0.8 * float(pose.flare) + 0.08 * sin(Time.get_ticks_msec() * 0.006))
-	if float(pose.crouch) > 0.12 and state.atk > 0:
-		_v_sq -= 0.3   # a slam jolts him down
+		var pose := CastPose.at(w, str(sp.name), float(int(sp.cast) - state.atk), float(sp.windup), float(sp.cast))
+		lift = float(pose.lift) * 0.7 - float(pose.crouch)
+		side = float(pose.reach) * 0.18 * (-1.0 if use_left != mirror_view else 1.0)
+		if float(pose.crouch) > 0.12:
+			_v_sq -= 0.3   # a slam jolts him down
+	if w == Weapons.STAFF and state.shield > 0:
+		hx = _anchor.x + (-3.0 if use_left != mirror_view else 3.0)
+		hy = _anchor.y - 40.0
+		lift = 0.05 * sin(Time.get_ticks_msec() * 0.03)
+	var px := (hx - _anchor.x) * PIXEL * sprite.scale.x
+	var py := (_anchor.y - hy) * PIXEL * sprite.scale.y
+	_carry.position = sprite.position + right * (px + side) + Vector3(0, py + lift, 0) + toward * 0.03
+	_carry.visible = true
 
 
 ## The procedural layer over the drawn frames: squash and stretch, the forward jolt on blows and the kick back on
@@ -504,40 +568,33 @@ static func _mean_x(im: Image, x0: int, y0: int, ya: int, yb: int) -> float:
 	return sum / n if n > 0 else _anchor.x
 
 
-func _dress(delta: float, cam: Camera3D) -> void:
+func _dress(_delta: float, cam: Camera3D) -> void:
 	var k := WizardGarb.kind_for(state)
 	if k != _garb_kind:
 		_garb_kind = k
-		_garb.set_kind(k)
-		# the robe's colours on his sprite too (tools/make_outfits.py: 4 the grey robe, 5 the dark one)
-		_tex = outfit_textures(5 if k == WizardGarb.Kind.SHADOW else (4 if k != WizardGarb.Kind.NONE else _outfit))
+		# v0.8.1: the garb is drawn into his sheets (no 3D cloth on Pip): the staff's look wins when he has both
+		if k == WizardGarb.Kind.NONE:
+			_tex = outfit_textures(_outfit)
+		else:
+			_tex = garb_textures("shadow" if k == WizardGarb.Kind.SHADOW else "wizard")
 		_show(cam)
-	if k == WizardGarb.Kind.NONE:
-		return
-	var dead := state != null and state.dead > 0
-	var a := _clip(_dir_for(cam))
-	var info := _cell_info(a.sheet, a.row, mini(_frame, a.frames - 1))
+
+
+## Where the staff's (or wand's) orb is now (for the shield pouring out of it); null without one.
+func orb_position():
+	if _carry == null or not _carry.visible or not (_carry_w in [Weapons.STAFF, Weapons.WAND]) and not (state != null and state.weapon in [Weapons.STAFF, Weapons.WAND]):
+		return null
+	var nm: String = CARRY.get(state.weapon if state != null else -1, "")
+	if nm == "" or not (_carry_meta.get(nm, {}) as Dictionary).has("orb"):
+		return null
+	var m: Dictionary = _carry_meta[nm]
+	var orb := Vector2(float(m.orb[0]), float(m.orb[1]))
+	if _carry_mirror:
+		orb.x = float(m.size[0]) - 1 - orb.x
 	var right := Vector3(1, 0, 0)
-	if cam:
-		right = cam.global_transform.basis.x
+	if _cam:
+		right = _cam.global_transform.basis.x
 		right.y = 0.0
-		right = right.normalized() if right.length() > 0.01 else Vector3(1, 0, 0)
-	var flip := -1.0 if sprite.flip_h else 1.0
-	var base := global_position + sprite.position
-	var sy := sprite.scale.y
-	var sx := sprite.scale.x
-	var px := func(x: float, y: float) -> Vector3:
-		return base + right * ((x - _anchor.x) * PIXEL * flip * sx) + Vector3(0, (_anchor.y - y) * PIXEL * sy, 0)
-	var face := Vector3(-sin(yaw), 0, -cos(yaw))
-	var top := float(info[0])
-	var head_c: Vector3 = px.call(float(info[1]), top + 10.0)
-	var neck: Vector3 = px.call(float(info[3]), float(info[2]))
-	var ground := WorldLayout.ground_height(position.x, position.z, position.y)
-	_garb.update(delta, {
-		"hip": neck + Vector3(0, -0.02, 0), "basis": Basis(Vector3.UP, yaw) * Basis.from_scale(Vector3(1.0, 1.0, 0.82)),
-		"top_r": 0.36 * sx, "hem_r": 0.5 * sx, "len": maxf(neck.y - ground - 0.08, 0.3), "colliders": [],
-		"ground": ground, "vel": _vel,
-		"head_top": px.call(float(info[1]), top + 4.0), "head_c": head_c, "head_r": 0.44, "up": Vector3.UP, "face": face,
-		"neck": neck + Vector3(0, 0.05, 0), "hat_h": 0.78, "hat_r": 0.33, "brim_r": 0.56,
-		"visible": model.visible and not dead })
+		right = right.normalized()
+	return _carry.global_position + right * (orb.x - _carry_px.x) * PIXEL + Vector3(0, (_carry_px.y - orb.y) * PIXEL, 0)
 

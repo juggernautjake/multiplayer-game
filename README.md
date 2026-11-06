@@ -111,11 +111,23 @@ Kills with the staff or wand (with **PvP** on: P) level that weapon up: after 3,
 is always strongest at the centre and falls off toward the edge; you never hurt yourself. Players only hurt each other
 when both have PvP on; dummies and golems can always be hit.
 
-**Wizard garb (0.8.0).** Whoever carries the staff wears a long grey robe and a tall pointed hat; whoever carries the
-wand wears a dark hooded robe; with both, the grey robe and hat with the dark hood dropped round the neck. The robe
-is real cloth (it trails, flares when you run, whips on a dash and swings when you stop), the hat's tip bobs and lags,
-the hood's tail swings. It's worked out on every PC from what you carry, so it costs no network traffic, and it goes
-when the item goes.
+**Wizard garb (0.8.1).** Whoever carries the staff dresses as a wandering wizard: a long, worn grey robe from the
+shoulders to the floor, a grey cloak down the back, a loose rope belt and a tall, wide-brimmed, soft pointed hat with
+a crooked tip. Whoever carries the wand wears one heavy, dark, floor-length robe with a deep hood that shadows the
+face. With both, the wizard's look wins. On the 3D figure the robe is simulated cloth with thickness and a weighted
+hem: the top rides the shoulders and chest, the rest hangs in long folds, lags on turns, swings on stops and billows a
+little on a dash; striding legs push it out in front and the arms keep it inside them, so nothing pokes through. Pip
+wears it painted into his sprite sheets, frame by frame (`tools/make_garb_sheets.py`). Your own hat is see-through
+on the 3D figure so it never hides the crosshair. It's worked out on every PC from what you carry: no network traffic.
+
+**The shield (0.8.1).** The bubble pours out of the staff's raised orb and covers you head to foot. It's a
+see-through force field (it bends what's behind it a little, with a glowing rim and a shimmer), and arrows, stones and
+fireballs **bounce off it**: the holder pays mana as before, and a bounced shot can't hurt them; a fireball bounces
+once, then bursts on its next contact, never inside. Every hit sends a ripple across the dome from where it struck,
+as big as the hit. Out of mana, it still shatters and lets the rest through.
+
+**Pip carries his weapon (0.8.1).** The sword, club, bow, slingshot, staff or wand is in his hand in every frame,
+following his hand (the attack frames already show it).
 
 **How it looks (0.8.0).** Every spell has its own casting gesture (a pull-back and thrust for the fireball, the staff
 raised to the sky for lightning, driven into the ground for the frost nova, the wand circling over the ground to
@@ -366,6 +378,9 @@ The bot modes (all in `scripts/main.gd`, functions `_bot_input`, `_bot_fight` an
 | `--bot aim` | Like fight, but only with the bow and slingshot, aiming like a person: it steers the camera so the crosshair sits on the dummy's chest, then draws and lets go. Alternates 10 m and 22 m every 12 s. Tests that shots land where the crosshair is. |
 | `--bot show` | Showcase (host with `--give-staff`, `--give-wand` or `--give-all`; add `--style figure` for the 3D figure): runs toward the camera, strafes, backpedals, dashes, jumps, swings the sword and casts with the staff or wand while the camera circles, saving a picture every 6 ticks with `--shots <folder>`. For checking animation, the wizard garb and effects by eye. |
 | `--bot golems` | Golem showcase (`--host --give-all --max-level`): summons a golem at the dummies, then the stone titan, and watches from the side; `--shots <folder>`. |
+| `--bot show --orbit` / `--bot show --carry` | The showcase standing still while the camera goes all the way round (front, side, back) / with every weapon in turn, walking and standing. |
+| `--bot archery [--sling]` | Draws, holds and looses the bow (or slingshot) aiming level, up and down, seen from behind, the side, the front and above; pictures at half draw, full draw, the release and rest. |
+| `--leave-at <frame>` | Presses "Leave game" at that frame (the game then starts again with the same options: with `--host` it hosts again). |
 | `--bot magic` | Casts every staff and wand spell at the middle dummy (`--plan2`, `--plan3` for the level 3 and 4 spells, `--every` to save a picture every 6 ticks with `--shots`). |
 | `--bot close` | Close-quarters test. After picking everything up, for each weapon it walks right into the middle dummy and then into the nearest tall pillar (7 s each), keeps the crosshair on the target, and attacks (clicks, then holds; bows draw and release). Every 6 ticks it logs how far the body is turned from the target and from the camera; at the end it prints the worst angle per weapon and quits. Add `--shots <folder>` to save screenshots at three moments of each phase. |
 
@@ -473,3 +488,18 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
 5. **Interest management**: only send each client what's near them, for big worlds.
 6. **Steam**: GodotSteam for lobbies, friends invites, relay networking, achievements, and the Steam build.
 7. **Art pipeline**: characters, animation (synced by state, not by bone), environment assets.
+
+## What's new in 0.8.1
+
+- **Arms and shoulders (3D figure):** the shoulder joints sit at the ends of the collarbones (they were above the
+  torso, like epaulettes), with a deltoid and a sloping trapezius; slightly longer arms (hands to about mid-thigh);
+  elbows point back, not out; the free arms swing from the shoulder opposite the legs (about 15 degrees walking, 30
+  running, the elbows bending toward 90 degrees at a run), swing less when strafing, trail back on a dash and lift
+  only a little in the air.
+- **Archery (3D figure):** a real stance: side-on, the head looking along the arrow, the arrow at the side of the jaw,
+  the bow canted, so the string and arrow never pass through the head or neck; it tilts with your aim.
+- **Robes, hat, hood, cloak:** see "Wizard garb" above.
+- **Shield:** see "The shield" above.
+- **Pip carries his weapon** at all times.
+- **Leaving and hosting again** in the same session works: leaving used to keep the old connection open, so hosting
+  again failed with "port 7777 is being used" (`Net.shutdown`, `tools/rehost_test.gd`).

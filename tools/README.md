@@ -245,11 +245,26 @@ then shattering and letting the rest through; kills levelling the staff and wand
 area; a meteor and its burning ground; a gravity well dragging someone in and bursting; an arcane storm's bolts; your
 own blasts never hurting you; the staff being one of a kind.
 
+## make_garb_sheets.py
+
+`python tools/make_garb_sheets.py`: paints the wizard garb onto Pip's sheets frame by frame (`assets/pip/garb/`:
+`<sheet>-wizard.png`, `<sheet>-shadow.png`), records where his hands are in every frame (`garb/pip-hands.json`), and
+draws the weapons he carries (`assets/pip/carry/`, with `carry.json`: each sprite's grip and the staff's and wand's
+orb). The robe is one solid garment from his shoulders to the floor, shaped from his torso and legs in that frame and
+widening to the hem, painted over his clothes in three tones with folds beside his legs; sleeves down his arms to the
+hands; the wizard's cloak as darker side panels (the whole back from behind), a rope belt and a soft pointed hat; the
+dark robe's hood a rounded cowl with his face in its shadow. Run it after changing the sheets.
+
+## rehost_test.gd
+
+`Godot --headless --path . --script tools/rehost_test.gd`: host on UDP 7777 (7797 if another program has it), leave,
+host again; a guest joins, leaves and joins again; host -> leave -> join -> leave -> host. The host and the guest live
+in their own branches of the tree with their own multiplayer.
+
 ## garb_check.gd
 
-`Godot --headless --path . --script tools/garb_check.gd`: hangs a wizard robe (WizardGarb) from a still body for 2 s,
-then runs with it at 10 m/s, printing the height of each row. A quick check that the cloth hangs to the ground and
-trails without flying up.
+`Godot --headless --path . --script tools/garb_check.gd`: hangs a robe (WizardGarb) from a still body for 2 s, then
+runs with it at 10 m/s, printing the height of each row of the back strand: it should step evenly down to the floor.
 
 ## make_outfits.py
 
