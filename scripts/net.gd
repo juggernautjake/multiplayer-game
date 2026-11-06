@@ -75,6 +75,20 @@ class ServerPlayer:
 	var god := false            # v0.12.6 (dev console): takes no damage
 	var dev := false            # v0.12.6: spawned from the dev console (beating it doesn't raise duel tiers)
 	var gather_t := 0           # v0.12.7: the tick it can gather ammo with E again
+	# v0.12.7 spell mastery: points earned by each spell (Weapons.MASTERY_SLOTS; the levels are in state.mastery)
+	var mxp: Array = []
+	var mxp_dirty := false      # points changed since the roster last went out
+	var stun_by := 0            # who last stunned this one with the wand's Stun (their side's hits on it count for it)
+	var stun_until := 0         # until when (a later stun from something else doesn't count for them)
+	var regen_until := 0        # Heal Aura III's afterglow: +1 health every 20 ticks until then
+	var regen_by := 0           # whose aura it was (the health counts for their mastery)
+	var charm_until := 0        # Stun III: a charmed NPC fights for charm_by until this tick (then back to its old side)
+	var charm_by := 0
+	var charm_old := []         # [side, owner, color, name] to put back
+
+	func _init() -> void:
+		mxp.resize(Weapons.MASTERY_SLOTS)
+		mxp.fill(0.0)
 
 
 ## Something lying on the ground to pick up (server). `spawn` >= 0: one of the fixed spawns, which comes back 20 s
@@ -107,6 +121,8 @@ class Proj:
 	var last := Vector3.ZERO
 	var immune := 0             # a shield's holder it bounced off: it can't hurt them (or bounce off them) again
 	var bounces := 0
+	var lv := 1                 # v0.12.7: a fireball's mastery level (its blast)
+	var reflected := false      # v0.12.7: turned back by a mastery-III shield (what it does counts for that Shield)
 
 ## How everyone is drawn, chosen by the host for the whole game: "pip" (sprite) or "figure" (3D test character).
 var style := "pip"
@@ -218,6 +234,9 @@ func host(port: int, player_name: String, with_player := true) -> Error:
 			players[1].arms = [top, top, top, top, top]
 			players[1].state.staff_lvl = Weapons.MAX_LEVEL
 			players[1].state.wand_lvl = Weapons.MAX_LEVEL
+		var ml := OS.get_cmdline_user_args().find("--mastery")   # v0.12.7 testing: every spell at this mastery (1-3)
+		if ml >= 0 and ml + 1 < OS.get_cmdline_user_args().size():
+			set_mastery(players[1], -1, int(OS.get_cmdline_user_args()[ml + 1]))
 		predicted = players[1].state.copy()
 		prev_pos = predicted.pos
 		cur_pos = predicted.pos
@@ -269,6 +288,7 @@ func _pack_progress(p: ServerPlayer) -> Dictionary:
 	return { "name": p.name, "owned": s.owned, "arrows": s.arrows, "rocks": s.rocks, "staff_lvl": s.staff_lvl,
 		"wand_lvl": s.wand_lvl, "kills": p.kills.duplicate(), "arms": p.arms.duplicate(), "duel_wins": p.duel_wins,
 		"pvp": p.pvp, "weapon": s.weapon, "pos": [s.pos.x, s.pos.y, s.pos.z], "hp": s.hp,
+		"mxp": p.mxp.duplicate(), "mastery": s.mastery,   # spell mastery: the points and the levels
 		"t": int(Time.get_unix_time_from_system()) }
 
 
@@ -320,6 +340,10 @@ func _restore_progress(p: ServerPlayer) -> bool:
 	for i in mini(ar.size(), p.arms.size()):
 		p.arms[i] = int(ar[i])
 	p.duel_wins = int(d.get("duel_wins", 0))
+	var mx: Array = d.get("mxp", [])
+	for i in mini(mx.size(), p.mxp.size()):
+		p.mxp[i] = float(mx[i])
+	s.mastery = int(d.get("mastery", 0))
 	p.pvp = bool(d.get("pvp", false))
 	var w := int(d.get("weapon", 0))
 	s.weapon = w if (owned >> w) & 1 else Weapons.FISTS
@@ -481,7 +505,9 @@ func roster_update(list: Array) -> void:
 			"kills": e[6] if e.size() > 6 else [0, 0], "kind": int(e[7]) if e.size() > 7 else 0,   # kind: 0 player, 1 challenger, 2 minion
 			"arms": e[8] if e.size() > 8 else [0, 0, 0, 0, 0],   # v0.12.5: kills with fists, club, sword, bow, slingshot
 			"side": int(e[9]) if e.size() > 9 else 0, "size": float(e[10]) if e.size() > 10 else 1.0,   # v0.12.6
-			"god": bool(e[11]) if e.size() > 11 else false }
+			"god": bool(e[11]) if e.size() > 11 else false,
+			"mxp": e[12] if e.size() > 12 else [],   # v0.12.7: spell mastery points (Weapons.MASTERY_SLOTS)
+			"charmed": bool(e[13]) if e.size() > 13 else false }   # v0.12.7: a unit charmed by a mastery-III stun
 	roster_changed.emit(roster)
 
 
@@ -759,8 +785,12 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 func _server_send_roster() -> void:
 	var list := []
 	for p: ServerPlayer in players.values():
+		var pts := []   # v0.12.7: mastery points (whole numbers) for the hotbar's progress bars
+		for x in p.mxp:
+			pts.append(int(x))
 		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp, p.kills, 2 if p.minion else (1 if p.npc else 0), p.arms,
-			side_of(p), p.size, p.god])
+			side_of(p), p.size, p.god, pts, p.charm_until > server_tick])
+		p.mxp_dirty = false
 	roster_update.rpc(list)
 	if is_host_player:
 		roster_update(list)
@@ -879,6 +909,7 @@ func _server_step_player(p: ServerPlayer) -> void:
 			p.state.rocks = old.rocks
 			p.state.staff_lvl = old.staff_lvl
 			p.state.wand_lvl = old.wand_lvl
+			p.state.mastery = old.mastery   # v0.12.7: spell mastery is kept too
 		p.was_dead = p.state.dead > 0
 		var interact := inp.buttons & Sim.Btn.INTERACT != 0
 		if interact and not p.interact_prev and p.state.dead == 0 and not frozen:
@@ -976,6 +1007,7 @@ func _server_projectiles() -> void:
 	for id in projectiles.keys():
 		var pr: Proj = projectiles[id]
 		hit_weapon = pr.weapon if Weapons.is_arm(pr.weapon) else -1   # v0.12.5: its knock-outs level the bow / slingshot
+		xp_spell = "Shield" if pr.reflected else ""
 		var n := server_tick - pr.tick0
 		var cur := Weapons.proj_pos(pr.pos0, pr.vel0, pr.g, n)
 		var prev := pr.last
@@ -1053,6 +1085,7 @@ func _server_projectiles() -> void:
 			else:
 				_end_proj(pr, cur, false)
 	hit_weapon = -1
+	xp_spell = ""
 
 
 func _in_box(pt: Vector3) -> bool:
@@ -1069,9 +1102,18 @@ func _burst(pr: Proj, pos: Vector3) -> void:
 	proj_end.rpc(pr.id, server_tick, pos, false)
 	if is_host_player:
 		proj_end(pr.id, server_tick, pos, false)
-	var sp := Weapons.spell_named(Weapons.STAFF, "Fireball")
-	_fx("explode", [pos, float(sp.radius)])
+	var sp := Weapons.spell_named_lv(Weapons.STAFF, "Fireball", pr.lv)   # v0.12.7: its caster's mastery
+	_fx("explode", [pos, float(sp.radius), pr.lv])
 	_blast(pos, sp, pr.owner, Weapons.STAFF)
+	# v0.12.7 mastery III: it bursts into fire bomblets that scatter and pop a moment later (each a small blast)
+	for k in int(sp.get("bomblets", 0)):
+		var a := TAU * (float(k) + randf_range(-0.2, 0.2)) / float(sp.bomblets)
+		var d := randf_range(2.5, 4.0)
+		var at := Vector3(pos.x + cos(a) * d, 0, pos.z + sin(a) * d)
+		at.y = WorldLayout.ground_height(at.x, at.z, pos.y + 1.0)
+		var t := 22 + k * 5 + randi_range(0, 6)
+		pending_spells.append([server_tick + t, "bomblet", at, pr.owner, pr.lv])
+		_fx("bomblet", [pos, at, t])
 
 
 ## The player whose shield bubble the point is inside (not the shot's own), or 0.
@@ -1100,11 +1142,28 @@ func _shield_bounce(pr: Proj, q: ServerPlayer, pt: Vector3, prev: Vector3, cur: 
 	var left := _shield_soak(q, int(ceil(dmg * rate * 5.0)), outside, dmg)
 	if left > 0:
 		return false   # it shattered: the projectile carries on through
+	mastery_add(q.id, "Shield", 4.0)   # v0.12.7: a shot turned away
 	if pr.kind == 2 and pr.bounces >= 1:
 		_burst(pr, outside)
 		return true
 	var v := Weapons.proj_vel(pr.vel0, pr.g, server_tick - pr.tick0)
 	var r := (v - n * 2.0 * v.dot(n)) * Weapons.SHIELD_BOUNCE
+	# v0.12.7 Shield mastery III: it flies straight back at whoever shot it, at full speed, and is the holder's now (it
+	# can hurt its shooter by the usual rules; an arrow's knock-out doesn't level anyone's bow)
+	var reflect := bool(Weapons.spell_named_lv(Weapons.STAFF, "Shield", Weapons.mastery_named(q.state.mastery, Weapons.STAFF, "Shield")).get("reflect", false))
+	if reflect:
+		var speed := maxf(v.length(), pr.vel0.length())
+		var back := v.normalized() * -1.0 if v.length() > 0.01 else n
+		var shooter = _target_feet(pr.owner) if pr.owner != 0 else null
+		if shooter != null:
+			var aim: Vector3 = (shooter as Vector3) + Vector3(0, 1.1, 0) - outside
+			var t := aim.length() / maxf(speed, 1.0)   # lift it for gravity over the flight
+			back = (aim + Vector3(0, 0.5 * pr.g * t * t, 0)).normalized()
+		r = back * speed
+		pr.owner = q.id
+		pr.weapon = -1
+		pr.reflected = true
+		_fx("reflect", [q.id, outside])
 	pr.pos0 = outside
 	pr.vel0 = r
 	pr.tick0 = server_tick
@@ -1274,6 +1333,7 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 			return
 		var took := boss.hurt(amount, from, dmg_spell)
 		last_dealt = took
+		_mastery_credit(target, from, took)   # v0.12.7
 		pos = boss.pos + Vector3(0, 2.4, 0)
 		hit_fx.rpc(target, took, pos, dir, boss.hp == 0, from)
 		if is_host_player:
@@ -1284,8 +1344,11 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		if not golems.list.has(gid) or golems.list[gid].owner == from:
 			return
 		var ghp: int = golems.list[gid].hp
+		var gown: int = golems.list[gid].owner
 		killed = golems.hurt(gid, amount, from, dir)
 		last_dealt = mini(amount, ghp)
+		if gown != from and (not players.has(gown) or can_hurt(from, gown)):   # v0.12.7: an enemy's golem (what it lost)
+			_mastery_credit(target, from, ghp - golems.list[gid].hp if golems.list.has(gid) else 0)
 		pos = golems.list[gid].pos + Vector3(0, 0.9, 0)
 		hit_fx.rpc(target, amount, pos, dir, killed, from)
 		if is_host_player:
@@ -1338,6 +1401,7 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 				_arm_kill(players[from], hit_weapon)
 		Sim.quantize(q.state)
 		pos = q.state.pos + Vector3(0, 1.3, 0)
+		_mastery_credit(target, from, last_dealt)   # v0.12.7 (not dummies: they can't be farmed)
 	hit_fx.rpc(target, amount, pos, dir, killed, from)
 	if is_host_player:
 		hit_fx(target, amount, pos, dir, killed, from)
@@ -1605,13 +1669,14 @@ func check_tailscale_path(addr: String) -> void:
 ## the simulation; here: lightning, fireballs, golems, stuns, and the effects everyone sees.
 func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 	var s := p.state
-	var sp := Weapons.spell(s.weapon, s.spell)
+	var sp := Weapons.spell_at(s.weapon, s.spell, s.mastery)   # v0.12.7: at the caster's mastery of it
+	var lv := int(sp.get("lv", 1))
 	var hand := s.pos + Vector3(0, 1.45, 0) + Vector3(-sin(s.yaw), 0, -cos(s.yaw)) * 0.45
 	match str(sp.name):
 		"Lightning":
 			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
-			pending_spells.append([server_tick + int(sp.delay), "lightning", at, p.id])
-			_fx("lightning_warn", [at, int(sp.delay), p.id])
+			pending_spells.append([server_tick + int(sp.delay), "lightning", at, p.id, lv])
+			_fx("lightning_warn", [at, int(sp.delay), p.id, lv])
 		"Fireball":
 			var to := inp.aim_point - hand
 			if to.length() < 1.0:
@@ -1626,44 +1691,76 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 			pr.vel0 = to.normalized() * float(sp.speed)
 			pr.g = float(sp.gravity)
 			pr.last = pr.pos0
+			pr.lv = lv
 			projectiles[pr.id] = pr
 			proj_spawn.rpc(pr.id, pr.owner, pr.kind, pr.tick0, pr.pos0, pr.vel0, pr.g)
 			if is_host_player:
 				proj_spawn(pr.id, pr.owner, pr.kind, pr.tick0, pr.pos0, pr.vel0, pr.g)
-			_fx("cast", [p.id, "fire"])
+			_fx("cast", [p.id, "fire", lv])
 		"Shield":
-			_fx("shield_up", [p.id])
+			_fx("shield_up", [p.id, lv])
 		"Golem":
 			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
 			at.y = 0.0
-			var g := golems.spawn(p.id, at, s.yaw, server_tick)
-			_fx("golem_rise", [g.id, at])
+			var g := golems.spawn(p.id, at, s.yaw, server_tick, false, sp)
+			_fx("golem_rise", [g.id, at, lv])
 		"Teleport":
-			_fx("teleport", [p.id, before, s.pos])
+			_fx("teleport", [p.id, before, s.pos, lv])
+			mastery_add(p.id, "Teleport", before.distance_to(s.pos))   # v0.12.7: metres travelled
+			if float(sp.get("arrive_r", 0.0)) > 0.0:
+				_arrival_burst(p, s.pos, sp)
 		"Meteor":
 			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
-			pending_spells.append([server_tick + int(sp.delay), "meteor", at, p.id])
-			_fx("meteor_warn", [at, int(sp.delay), float(sp.radius)])
+			# v0.12.7 mastery: II and III call more rocks: the aimed one, then the rest round it (left and right at II,
+			# an X at III), each a little later, each side_k as hard
+			var n := int(sp.get("meteors", 1))
+			var fwd := Vector3(-sin(s.yaw), 0, -cos(s.yaw))
+			for k in n:
+				var where := at
+				var dmg_k := 1.0
+				if k > 0:
+					var a := atan2(fwd.x, fwd.z) + TAU * float(k - 1) / float(n - 1) + (PI / 4.0 if n == 5 else PI / 2.0)
+					var off := Vector3(sin(a), 0, cos(a)) * float(sp.get("spread", 4.5))
+					where = Vector3(at.x + off.x, 0, at.z + off.z)
+					where.y = WorldLayout.ground_height(where.x, where.z, at.y + 1.0)
+					dmg_k = float(sp.get("side_k", 0.7))
+				var delay := int(sp.delay) + k * 9
+				pending_spells.append([server_tick + delay, "meteor", where, p.id, lv, dmg_k])
+				_fx("meteor_warn", [where, delay, float(sp.radius), lv])
 		"Arcane Storm":
 			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
-			storms.append([server_tick + int(sp.duration), at, p.id, server_tick + 10])
-			_fx("storm", [at, int(sp.duration), float(sp.area)])
+			storms.append([server_tick + int(sp.duration), at, p.id, server_tick + 10, lv])
+			_fx("storm", [at, int(sp.duration), float(sp.area), lv])
 		"Stone Titan":
 			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
 			at.y = 0.0
-			var g := golems.spawn(p.id, at, s.yaw, server_tick, true)
-			_fx("titan_rise", [g.id, at])
+			var g := golems.spawn(p.id, at, s.yaw, server_tick, true, sp)
+			_fx("titan_rise", [g.id, at, lv])
 		"Gravity Well":
 			var at := _aim_ground(s.pos, inp.aim_point, float(sp.range), s.yaw)
-			wells.append([server_tick + int(sp.duration), at + Vector3(0, 1.0, 0), p.id])
-			_fx("well", [at + Vector3(0, 1.0, 0), int(sp.duration), float(sp.pull_radius)])
+			# [tick it bursts, centre, caster, mastery, bursts left before the last]
+			wells.append([server_tick + int(sp.duration), at + Vector3(0, 1.0, 0), p.id, lv, int(sp.get("bursts", 1)) - 1])
+			_fx("well", [at + Vector3(0, 1.0, 0), int(sp.duration), float(sp.pull_radius), lv])
 		"Frost Nova":
-			_fx("frost_nova", [p.id, s.pos, float(sp.radius)])
+			_fx("frost_nova", [p.id, s.pos, float(sp.radius), lv])
 			_blast(s.pos + Vector3(0, 0.5, 0), sp, p.id, Weapons.STAFF)
+			var fr := float(sp.get("freeze_r", 0.0))
 			for q: ServerPlayer in players.values():   # everyone caught in it is slowed (not through a shield)
 				if q.id != p.id and q.state.dead == 0 and q.state.shield == 0 and can_hurt(p.id, q.id) \
 						and _dist_to_body(s.pos + Vector3(0, 0.5, 0), q.state.pos) <= float(sp.radius):
 					q.state.slow = int(sp.slow)
+					mastery_add(p.id, "Frost Nova", 2.0 * float(sp.slow) * Config.DT)   # v0.12.7: 2 a second of slow
+					# v0.12.7 mastery III: frozen solid close in (a short stun, an ice block)
+					if fr > 0.0 and _dist_to_body(s.pos + Vector3(0, 0.5, 0), q.state.pos) <= fr:
+						q.state.stun = maxi(q.state.stun, int(sp.freeze))
+						q.state.charge = 0
+						_fx("freeze", [q.id, q.state.pos, int(sp.freeze)])
+			if fr > 0.0:
+				for g: Golems.G in golems.list.values():
+					if g.owner != p.id and g.state != Golems.State.DIE and _dist_to_body(s.pos + Vector3(0, 0.5, 0), g.pos) <= fr \
+							and (not players.has(g.owner) or can_hurt(p.id, g.owner)):
+						golems.stun(g.id, int(sp.freeze))
+						_fx("freeze", [-1000 - g.id, g.pos, int(sp.freeze)])
 			if boss != null and _dist_to_body(s.pos + Vector3(0, 0.5, 0), boss_surface(s.pos)) <= float(sp.radius):
 				boss.frosted()
 		"Stun":
@@ -1681,25 +1778,47 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 				q.state.stun = int(sp.duration)
 				q.state.charge = 0
 				caught += 1
+				# v0.12.7 mastery: a point a second held; their hits on it count for this Stun while it lasts
+				q.stun_by = p.id
+				q.stun_until = server_tick + int(sp.duration)
+				mastery_add(p.id, "Stun", float(sp.duration) * Config.DT)
+				if int(sp.get("charm", 0)) > 0 and q.npc:   # III: an NPC it holds fights for the caster after
+					_charm(q, p, server_tick + int(sp.duration) + int(sp.charm))
 			for g: Golems.G in golems.list.values():
 				if g.owner != p.id and _dist_to_body(end, g.pos) <= r:
 					golems.stun(g.id, int(sp.duration))
 					caught += 1
+					if not players.has(g.owner) or can_hurt(p.id, g.owner):
+						golem_stun[g.id] = [p.id, server_tick + int(sp.duration)]
+						mastery_add(p.id, "Stun", float(sp.duration) * Config.DT)
 			if boss != null and _dist_to_body(end, boss_surface(end)) <= r:
 				boss.stunned(server_tick)   # it only staggers him (shorter each time)
 				caught += 1
-			_fx("stun_beam", [p.id, hand, end, caught])
-			_fx("stun_burst", [end, r])
+				mastery_add(p.id, "Stun", 2.0)
+			_fx("stun_beam", [p.id, hand, end, caught, lv])
+			_fx("stun_burst", [end, r, lv])
 		"Spark Beam":   # v0.12.0: an instant zap along the aim
-			var tgt := _beam_target(p, hand, inp.aim_point, float(sp.range))
-			var hit_id: int = tgt[0]
-			if hit_id != 0:
-				dmg_src = Weapons.WAND
-				dmg_spell = "Spark Beam"
-				_damage(hit_id, int(sp.damage), p.id, (tgt[1] as Vector3) - hand, float(sp.knock))
-				dmg_src = -1
-				dmg_spell = ""
-			_fx("spark", [p.id, hand, tgt[1], hit_id != 0])
+			# v0.12.7 mastery: pierces `pierce` more behind the first; III arcs on to one more nearby
+			var hits := _beam_targets(p, hand, inp.aim_point, float(sp.range), 1 + int(sp.get("pierce", 0)))
+			var end: Vector3 = hits[-1][1] if not hits.is_empty() else _beam_target(p, hand, inp.aim_point, float(sp.range))[1]
+			dmg_src = Weapons.WAND
+			dmg_spell = "Spark Beam"
+			var struck := {}
+			for h in hits:
+				struck[int(h[0])] = true
+				xp_k = 1.5 if hand.distance_to(h[1]) > 15.0 else 1.0
+				_damage(int(h[0]), int(sp.damage), p.id, (h[1] as Vector3) - hand, float(sp.knock))
+			xp_k = 1.0
+			var arc_to := []
+			if float(sp.get("arc_r", 0.0)) > 0.0 and not hits.is_empty():
+				var t2 := _nearest_enemy(p.id, end, float(sp.arc_r), struck)
+				if t2 != 0:
+					var at2: Vector3 = _target_feet(t2) + Vector3(0, 1.1, 0)
+					_damage(t2, maxi(int(round(float(sp.damage) * float(sp.arc_k))), 1), p.id, at2 - end, float(sp.knock))
+					arc_to = [at2]
+			dmg_src = -1
+			dmg_spell = ""
+			_fx("spark", [p.id, hand, end, not hits.is_empty(), lv, hits.map(func(h): return h[1]), arc_to])
 		"Life Drain":   # v0.12.0: hurt the first enemy along the aim; some of what it took comes back as health
 			var tgt := _beam_target(p, hand, inp.aim_point, float(sp.range))
 			var hit_id: int = tgt[0]
@@ -1707,18 +1826,29 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 			var ally := _ally_on_beam(p, hand, inp.aim_point, hand.distance_to(tgt[1]))
 			if ally.size() > 0:   # an ally in the way first: heal them instead, hurt nobody, nothing for the caster
 				var got := heal_target(int(ally[0]), int(sp.ally_heal))
-				_fx("drain_ally", [p.id, hand, ally[1], got, int(ally[0])])
+				_fx("drain_ally", [p.id, hand, ally[1], got, int(ally[0]), lv])
+				mastery_add(p.id, "Life Drain", float(got))   # v0.12.7: health given counts
 			elif hit_id != 0:
 				dmg_src = Weapons.WAND
 				dmg_spell = "Life Drain"
 				_damage(hit_id, int(sp.damage), p.id, (tgt[1] as Vector3) - hand, float(sp.knock))
+				heal = drain_heal(last_dealt, float(sp.drain))
+				# v0.12.7 mastery III: the stream jumps on to a second enemy near the first, drained too
+				var jump_at = null
+				if float(sp.get("jump_r", 0.0)) > 0.0:
+					var t2 := _nearest_enemy(p.id, tgt[1], float(sp.jump_r), { hit_id: true })
+					if t2 != 0:
+						jump_at = _target_feet(t2) + Vector3(0, 1.1, 0)
+						_damage(t2, maxi(int(round(float(sp.damage) * float(sp.jump_k))), 1), p.id, (jump_at as Vector3) - tgt[1], float(sp.knock))
+						heal += drain_heal(last_dealt, float(sp.drain))
 				dmg_src = -1
 				dmg_spell = ""
-				heal = drain_heal(last_dealt, float(sp.drain))
 				if s.dead == 0 and heal > 0:
 					s.hp = mini(s.hp + heal, Sim.MAX_HP)
+				if jump_at != null:
+					_fx("drain", [p.id, tgt[1], jump_at, 0, lv])
 			if ally.is_empty():
-				_fx("drain", [p.id, hand, tgt[1], heal])
+				_fx("drain", [p.id, hand, tgt[1], heal, lv])
 		"Fog":   # v0.12.0: a cloud round the caster (see Fog)
 			var f := Fog.make(next_fog, s.pos, p.id, server_tick, sp)
 			next_fog += 1
@@ -1784,9 +1914,10 @@ func _server_heal_auras() -> void:
 		var s := p.state
 		if not Sim.channeling(s) or s.weapon != Weapons.STAFF:
 			continue
-		var sp := Weapons.spell(s.weapon, s.spell)
+		var sp := Weapons.spell_at(s.weapon, s.spell, s.mastery)   # v0.12.7: faster and wider at II / III
 		var near := heal_aura_targets(p, float(sp.radius))
-		var hurt := near.filter(func(q): return q.state.hp < Sim.MAX_HP)
+		var cleanse := bool(sp.get("cleanse", false))
+		var hurt := near.filter(func(q): return q.state.hp < Sim.MAX_HP or (cleanse and (q.state.stun > 0 or q.state.slow > 0 or q.state.zap > 0)))
 		if hurt.is_empty():
 			s.atk = 0
 			s.atk_cd = int(sp.cooldown)
@@ -1800,7 +1931,14 @@ func _server_heal_auras() -> void:
 				var g := mini(int(sp.heal), Sim.MAX_HP - q.state.hp)
 				q.state.hp += g
 				got.append([q.id, g])
-			_fx("heal_pulse", [p.id, s.pos, float(sp.radius), got])
+				mastery_add(p.id, "Heal Aura", float(g))   # v0.12.7: health restored
+				if cleanse:   # v0.12.7 mastery III: stuns, slows and Static washed away, and an afterglow
+					q.state.stun = 0
+					q.state.slow = 0
+					q.state.zap = 0
+					q.regen_until = server_tick + int(sp.get("regen", 0))
+					q.regen_by = p.id
+			_fx("heal_pulse", [p.id, s.pos, float(sp.radius), got, int(sp.get("lv", 1))])
 		p.heal_last = server_tick
 
 
@@ -1851,6 +1989,72 @@ func _beam_target(p: ServerPlayer, from: Vector3, aim: Vector3, reach: float) ->
 			best_t = t
 			best = Boss.ID
 	return [best, from + dir * best_t]
+
+
+## v0.12.7 Spark Beam mastery (piercing): up to `n` enemies along the line from the wand toward the crosshair, nearest
+## first, by the same rules as _beam_target (players the caster may fight, other summoners' golems, dummies,
+## Thunderhorn; a wall stops it). -> [[id as _damage takes it, where the beam meets them], ...].
+func _beam_targets(p: ServerPlayer, from: Vector3, aim: Vector3, reach: float, n: int) -> Array:
+	var dir := aim - from
+	if dir.length() < 0.5:
+		dir = Vector3(-sin(p.state.yaw), 0, -cos(p.state.yaw))
+	dir = dir.normalized()
+	var wall := minf(WorldLayout.ray_hit(from, dir, reach), reach)
+	var found := []
+	for q: ServerPlayer in players.values():
+		if q.id != p.id and q.state.dead == 0 and can_hurt(p.id, q.id):
+			found.append([q.id, _ray_cyl(from, dir, q.state.pos, 0.6, 1.9)])
+	for g: Golems.G in golems.list.values():
+		if g.owner != p.id and g.state != Golems.State.DIE:
+			found.append([-1000 - g.id, _ray_cyl(from, dir, g.pos, 0.45, 1.3)])
+	for i in WorldLayout.DUMMIES.size():
+		found.append([-(i + 1), _ray_cyl(from, dir, WorldLayout.DUMMIES[i], 0.35, 1.9)])
+	if boss != null and boss.state != Boss.S.DEATH:
+		found.append([Boss.ID, _ray_cyl(from, dir, boss.pos, Boss.RADIUS, Boss.HEIGHT)])
+	found = found.filter(func(e): return float(e[1]) < wall)
+	found.sort_custom(func(a, b): return float(a[1]) < float(b[1]))
+	var out := []
+	for e in found.slice(0, n):
+		out.append([int(e[0]), from + dir * float(e[1])])
+	return out
+
+
+## v0.12.7: the nearest enemy of `caster` (a player or NPC it may hurt, another summoner's golem, Thunderhorn; not a
+## dummy) within `r` of `at`, not in `skip`; 0 if none. For arcs and jumps.
+func _nearest_enemy(caster: int, at: Vector3, r: float, skip: Dictionary) -> int:
+	var best := 0
+	var best_d := r
+	for t in _chain_candidates(caster):
+		if skip.has(t) or (t < 0 and t > -1000):
+			continue
+		var f = _target_feet(t)
+		if f == null:
+			continue
+		var d := _dist_to_body(at, f)
+		if d < best_d:
+			best_d = d
+			best = t
+	return best
+
+
+## v0.12.7 Teleport mastery II / III: a burst where the caster arrives: arrive_dmg to every enemy within arrive_r
+## (players and NPCs the caster may hurt, other summoners' golems, Thunderhorn), thrown outward.
+func _arrival_burst(p: ServerPlayer, at: Vector3, sp: Dictionary) -> void:
+	var r := float(sp.arrive_r)
+	_fx("tp_blast", [at, r, int(sp.get("lv", 2))])
+	dmg_src = Weapons.WAND
+	dmg_spell = "Teleport"
+	for q: ServerPlayer in players.values():
+		if q.id != p.id and q.state.dead == 0 and can_hurt(p.id, q.id) and _dist_to_body(at + Vector3(0, 0.9, 0), q.state.pos) <= r:
+			_damage(q.id, int(sp.arrive_dmg), p.id, q.state.pos - at, float(sp.arrive_knock))
+	for g: Golems.G in golems.list.values().duplicate():
+		if g.owner != p.id and g.state != Golems.State.DIE and Vector2(g.pos.x - at.x, g.pos.z - at.z).length() <= r \
+				and (not players.has(g.owner) or can_hurt(p.id, g.owner)):
+			_damage(-1000 - g.id, int(sp.arrive_dmg), p.id, g.pos - at, 0.0)
+	if boss != null and _dist_to_body(at + Vector3(0, 0.9, 0), boss_surface(at)) <= r:
+		_damage(Boss.ID, int(sp.arrive_dmg), p.id, boss.pos - at, 0.0)
+	dmg_src = -1
+	dmg_spell = ""
 
 
 ## A point on the ground (or a pillar top) under where the crosshair is, no further than `reach` from `from`.
@@ -1968,12 +2172,17 @@ func _blast(center: Vector3, sp: Dictionary, owner: int, src := Weapons.STAFF) -
 ## Chain lightning (v0.8.2): one jump. e = [tick, "chain", where, caster, from (the one it's jumping from), the damage
 ## it hit them with, everyone hit by this cast, jumps so far]. It jumps to the nearest enemy of the caster not yet hit,
 ## within chain_range of `from` (body to body), for half the damage; a shield soaks it and the branch ends there.
+## v0.12.7: e may carry more: [8] the caster's Lightning mastery (II / III chain further, more often, losing less),
+## [9] the most jumps (an Arcane Storm III bolt: 1), [10] the spell it counts as. Jumps earn mastery double.
 func _chain_jump(e: Array, owner: int) -> void:
-	var sp := Weapons.spell_named(Weapons.STAFF, "Lightning")
+	var lv := int(e[8]) if e.size() > 8 else 1
+	var sp := Weapons.spell_named_lv(Weapons.STAFF, "Lightning", lv)
 	var from = _target_feet(int(e[4]))
-	var dmg := maxi(int(round(float(e[5]) / 2.0)), 1)
+	var dmg := maxi(int(round(float(e[5]) * float(sp.get("chain_keep", 0.5)))), 1)
 	var jumps := int(e[7]) + 1
-	if from == null or dmg < 2 or jumps > int(sp.chain_max):
+	var most := int(e[9]) if e.size() > 9 else int(sp.chain_max)
+	var spell_name := str(e[10]) if e.size() > 10 else "Lightning"
+	if from == null or dmg < 2 or jumps > most:
 		return
 	var seen: Dictionary = e[6]
 	var best := 0
@@ -1993,14 +2202,16 @@ func _chain_jump(e: Array, owner: int) -> void:
 	seen[best] = true
 	var to: Vector3 = _target_feet(best)
 	var shielded := _shield_up(best)
-	_fx("chain", [from + Vector3(0, 1.1, 0), to + Vector3(0, 1.1, 0), dmg, int(sp.max_damage)])
+	_fx("chain", [from + Vector3(0, 1.1, 0), to + Vector3(0, 1.1, 0), dmg, int(sp.max_damage), lv])
 	dmg_src = Weapons.STAFF
-	dmg_spell = "Lightning"
+	dmg_spell = spell_name
+	xp_k = 2.0 if spell_name == "Lightning" else 1.0
 	_damage(best, dmg, owner, to - from, 2.0)
+	xp_k = 1.0
 	dmg_src = -1
 	dmg_spell = ""
 	if not shielded:
-		pending_spells.append([server_tick + int(sp.chain_every), "chain", to, e[3], best, dmg, seen, jumps])
+		pending_spells.append([server_tick + int(sp.chain_every), "chain", to, e[3], best, dmg, seen, jumps, lv, most, spell_name])
 
 
 ## Who chain lightning may jump to: the same rules as everything else: players the caster may hurt (PvP), other
@@ -2050,15 +2261,32 @@ func _server_spells() -> void:
 			var owner: int = e[3] if players.has(e[3]) else 0
 			match str(e[1]):
 				"lightning":
-					_fx("lightning", [e[2]])
-					var lsp := Weapons.spell_named(Weapons.STAFF, "Lightning")
+					var llv := int(e[4]) if e.size() > 4 else 1   # v0.12.7: the caster's mastery when it was cast
+					_fx("lightning", [e[2], llv])
+					var lsp := Weapons.spell_named_lv(Weapons.STAFF, "Lightning", llv)
 					var struck := _blast(e[2], lsp, owner, Weapons.STAFF)
 					var seen := {}   # everyone hit by this cast (each at most once)
 					for t in struck:
 						seen[t] = true
+					# v0.12.7 mastery III: the bolt forks to the nearest enemy outside the strike (fork_k of the damage),
+					# which chains on like the rest
+					if float(lsp.get("fork", 0.0)) > 0.0 and owner != 0:
+						var ft := _nearest_enemy(owner, e[2], float(lsp.fork), seen)
+						if ft != 0:
+							seen[ft] = true
+							var fto: Vector3 = _target_feet(ft)
+							var fd := int(round(float(lsp.max_damage) * float(lsp.fork_k)))
+							_fx("fork", [e[2], fto, llv])
+							dmg_src = Weapons.STAFF
+							dmg_spell = "Lightning"
+							_damage(ft, fd, owner, fto - e[2], float(lsp.knock) * 0.6)
+							dmg_src = -1
+							dmg_spell = ""
+							if not _shield_up(ft):
+								pending_spells.append([server_tick + int(lsp.chain_every), "chain", fto, e[3], ft, fd, seen, 0, llv])
 					for t in struck:   # each one struck starts a chain at half the damage
 						if not _shield_up(t):
-							pending_spells.append([server_tick + int(lsp.chain_every), "chain", e[2], e[3], t, int(lsp.max_damage), seen, 0])
+							pending_spells.append([server_tick + int(lsp.chain_every), "chain", e[2], e[3], t, int(lsp.max_damage), seen, 0, llv])
 				"chain":
 					_chain_jump(e, owner)
 				"boss_strike":   # Thunderhorn's called lightning
@@ -2069,40 +2297,71 @@ func _server_spells() -> void:
 					for g: Golems.G in golems.list.values():   # v0.12.2: golems too (titans tougher)
 						if g.state != Golems.State.DIE and Vector2(g.pos.x - e[2].x, g.pos.z - e[2].z).length() <= 2.5:
 							_damage(-1000 - g.id, 11 if g.titan else 18, Boss.ID, g.pos - e[2], 0.0)
-				"meteor":
-					var sp := Weapons.spell_named(Weapons.STAFF, "Meteor")
-					_fx("meteor", [e[2], float(sp.radius), int(sp.burn_ticks), float(sp.burn_radius)])
+				"meteor":   # v0.12.7: [4] the caster's mastery, [5] how hard this rock hits (the extra ones: side_k)
+					var mlv := int(e[4]) if e.size() > 4 else 1
+					var sp := Weapons.spell_named_lv(Weapons.STAFF, "Meteor", mlv)
+					var k := float(e[5]) if e.size() > 5 else 1.0
+					if k < 1.0:
+						sp = sp.duplicate()
+						sp.max_damage = int(round(float(sp.max_damage) * k))
+						sp.min_damage = int(round(float(sp.min_damage) * k))
+					_fx("meteor", [e[2], float(sp.radius), int(sp.burn_ticks), float(sp.burn_radius), mlv])
 					_blast(e[2], sp, owner, Weapons.STAFF)
-					for k in int(sp.burn_ticks) / int(sp.burn_every):
-						pending_spells.append([server_tick + int(sp.burn_every) * (k + 1), "burn", e[2], e[3]])
-				"storm_bolt":
-					_fx("lightning", [e[2]])
-					_blast(e[2], Weapons.spell_named(Weapons.STAFF, "Arcane Storm"), owner, Weapons.STAFF)
+					for b in int(sp.burn_ticks) / int(sp.burn_every):
+						pending_spells.append([server_tick + int(sp.burn_every) * (b + 1), "burn", e[2], e[3], mlv])
+				"storm_bolt":   # v0.12.7: [4] the caster's mastery; at III each bolt chains once
+					var slv := int(e[4]) if e.size() > 4 else 1
+					_fx("lightning", [e[2], 0])
+					var ssp := Weapons.spell_named_lv(Weapons.STAFF, "Arcane Storm", slv)
+					var struck := _blast(e[2], ssp, owner, Weapons.STAFF)
+					if bool(ssp.get("bolt_chain", false)):
+						var seen := {}
+						for t in struck:
+							seen[t] = true
+						for t in struck:
+							if not _shield_up(t):
+								pending_spells.append([server_tick + 5, "chain", e[2], e[3], t, int(ssp.max_damage), seen, 0, 1, 1, "Arcane Storm"])
 				"burn":
-					var sp := Weapons.spell_named(Weapons.STAFF, "Meteor")
+					var sp := Weapons.spell_named_lv(Weapons.STAFF, "Meteor", int(e[4]) if e.size() > 4 else 1)
 					var burn := { "radius": sp.burn_radius, "max_damage": sp.burn_damage, "min_damage": sp.burn_damage, "knock": 0.0 }
+					xp_spell = "Meteor"   # v0.12.7: the burning ground counts for the Meteor's mastery
 					_blast(e[2], burn, owner, Weapons.STAFF)
+					xp_spell = ""
+				"bomblet":   # v0.12.7 Fireball mastery III: one of the fire bomblets pops
+					var sp := Weapons.spell_named_lv(Weapons.STAFF, "Fireball", int(e[4]) if e.size() > 4 else 3)
+					var r := float(sp.get("bomb_radius", 1.8))
+					var bomb := { "name": "Fireball", "radius": r, "max_damage": int(sp.get("bomb_damage", 8)),
+						"min_damage": maxi(int(sp.get("bomb_damage", 8)) / 3, 1), "knock": 3.0 }
+					_fx("explode", [e[2], r, 0])
+					_blast(e[2], bomb, owner, Weapons.STAFF)
 	_server_wells()
 	_server_storms()
 	_server_heal_auras()
 	fogs = Fog.prune(fogs, server_tick)
+	_server_mastery()   # v0.12.7
 	# golems
 	var people := _golem_people()
 	golems.fogs = fogs
 	golems.fog_pvp = fog_pvp() if not fogs.is_empty() else {}
 	var golem_hits: Array = [] if cutscene_on() else golems.tick(server_tick, people)   # v0.12.3: they stand still in the cutscene
+	var slammed := {}
 	for h in golem_hits:
 		var g: Golems.G = h[0]
 		var tid: int = h[1]
 		dmg_src = Weapons.WAND
+		xp_spell = "Stone Titan" if g.titan else "Golem"   # v0.12.7: a golem's damage earns its summoner's mastery
+		var knock := (Golems.TITAN_KNOCK if g.titan else Golems.KNOCK) * (1.0 + 0.3 * (g.size - 1.0))
 		if tid <= -1000:
 			_damage(tid, int(h[2]), g.owner, h[3], 0.0)
 		else:
-			_damage(tid, int(h[2]), g.owner, h[3], Golems.TITAN_KNOCK if g.titan else Golems.KNOCK)
+			_damage(tid, int(h[2]), g.owner, h[3], knock * (0.6 if h.size() > 4 and str(h[4]) != "" else 1.0))
 		if tid == Boss.ID and boss != null:   # v0.12.2: he knows which golem hit him (Boss.ID is -5000: either branch)
 			boss.note_golem_hit(g.id, last_dealt)
 		dmg_src = -1
-		_fx("golem_slam", [g.id, g.pos + Vector3(-sin(g.yaw), 0, -cos(g.yaw)) * (Golems.TITAN_REACH if g.titan else 0.7), g.titan])
+		xp_spell = ""
+		if not slammed.has(g.id):   # (one dust cloud a slam, however many it hits)
+			slammed[g.id] = true
+			_fx("golem_slam", [g.id, g.pos + Vector3(-sin(g.yaw), 0, -cos(g.yaw)) * (Golems.TITAN_REACH if g.titan else 0.7) * g.size, g.titan, g.size, g.slam > 0.0 or g.stomp > 0.0])
 	if not golems.orders_dirty.is_empty():
 		_send_golem_orders()
 	if server_tick % 3 == 0 and (not golems.list.is_empty() or _golems_were):
@@ -2204,15 +2463,208 @@ func _arm_kill(p: ServerPlayer, w: int) -> void:
 	_server_send_roster()
 
 
+# ================================================================ v0.12.7 spell mastery (server)
+var xp_spell := ""   # the spell the damage being dealt now earns mastery for, when it isn't dmg_spell (golems, burns...)
+var xp_k := 1.0      # and how much each point of it counts (chain lightning jumps: 2, long spark beams: 1.5)
+var golem_stun := {}  # golem id -> [who stunned it, until]: their side's hits on it count for that Stun
+
+
+## Which weapon carries the spell with this name (the staff, else the wand; -1 for none).
+static func spell_weapon(spell_name: String) -> int:
+	if Weapons.idx(Weapons.STAFF, spell_name) >= 0:
+		return Weapons.STAFF
+	return Weapons.WAND if Weapons.idx(Weapons.WAND, spell_name) >= 0 else -1
+
+
+## The mastery level player `id` has in the spell with this name (1 for anyone else).
+func mastery_lv(id: int, spell_name: String) -> int:
+	if not players.has(id):
+		return 1
+	var w := spell_weapon(spell_name)
+	return Weapons.mastery_named(players[id].state.mastery, w, spell_name) if w >= 0 else 1
+
+
+## Mastery points for player `id`'s spell. Reaching the spell's next step (Weapons "mastery") levels it up: the golden
+## column for everyone and "FIREBALL MASTERY II! ..." on their screen (the "mastery_up" event). NPCs earn nothing.
+func mastery_add(id: int, spell_name: String, pts: float) -> void:
+	if pts <= 0.0 or not players.has(id):
+		return
+	var p: ServerPlayer = players[id]
+	var w := spell_weapon(spell_name)
+	if p.npc or w < 0:
+		return
+	var i := Weapons.idx(w, spell_name)
+	var slot := Weapons.mastery_slot(w, i)
+	p.mxp[slot] = float(p.mxp[slot]) + pts
+	p.mxp_dirty = true
+	var lv := Weapons.mastery_for(slot, float(p.mxp[slot]))
+	if lv > Weapons.mastery_of(p.state.mastery, slot):
+		p.state.mastery = Weapons.with_mastery(p.state.mastery, slot, lv)
+		_fx("mastery_up", [p.id, w, i, lv])
+		print("%s's %s reached mastery %s" % [p.name, spell_name, Weapons.MASTERY_ROMAN[lv - 1]])
+		_server_send_roster()
+
+
+## Set player p's mastery of one spell slot (or every slot: -1) to level lv, with the points to match (dev console,
+## --mastery). Returns nothing; tells nobody (the caller shows it).
+func set_mastery(p: ServerPlayer, slot: int, lv: int) -> void:
+	lv = clampi(lv, 1, 3)
+	var slots := range(Weapons.MASTERY_SLOTS) if slot < 0 else [slot]
+	for s in slots:
+		p.state.mastery = Weapons.with_mastery(p.state.mastery, s, lv)
+		p.mxp[s] = 0.0 if lv == 1 else float(Weapons.mastery_need(s)[lv - 2])
+	p.mxp_dirty = true
+
+
+## Someone's damage really took `dealt` off `target` (a player or NPC, a golem, Thunderhorn; never a dummy). It earns:
+## the spell that dealt it (xp_spell, else dmg_spell); the Stun of whoever holds the target, if the hit is from their
+## side (a quarter); the Fog of whoever's cloud the target is blind in, if the hit is from the cloud's side (a quarter).
+func _mastery_credit(target: int, from: int, dealt: int) -> void:
+	if dealt <= 0 or from <= 0 or from == target or not players.has(from) or (target < 0 and target > -1000):
+		return
+	var spell_name := xp_spell if xp_spell != "" else dmg_spell
+	if spell_name != "":
+		mastery_add(from, spell_name, float(dealt) * xp_k)
+	var tpos = null
+	var tside := target
+	var stunner := 0
+	if target > 0 and players.has(target):
+		var q: ServerPlayer = players[target]
+		tpos = q.state.pos
+		if q.state.stun > 0 and server_tick <= q.stun_until:
+			stunner = q.stun_by
+	elif target <= -1000 and golems.list.has(-1000 - target):
+		var g: Golems.G = golems.list[-1000 - target]
+		tpos = g.pos
+		tside = g.owner
+		var gs: Array = golem_stun.get(g.id, [0, 0])
+		if g.stun > 0 and server_tick <= int(gs[1]):
+			stunner = int(gs[0])
+	elif target == Boss.ID and boss != null and boss.state == Boss.S.DAZED:
+		pass   # (his daze is the stun meter's, not one wand's)
+	if stunner > 0 and stunner != target and spell_name != "Stun" and players.has(stunner) and (stunner == from or not can_hurt(stunner, from)):
+		mastery_add(stunner, "Stun", float(dealt) * 0.25)
+	if tpos != null and spell_name != "Fog" and not fogs.is_empty():
+		var pvp := fog_pvp()
+		for f: Dictionary in fogs:
+			if Fog.covers(f, tpos, server_tick) and not Fog.friend(f, tside, pvp) and Fog.friend(f, from, pvp):
+				mastery_add(int(f.caster), "Fog", float(dealt) * 0.25)
+				break
+
+
+## Every tick (from _server_spells): fog poison and blind-time, Heal Aura III's afterglow, charms wearing off, and the
+## roster (with everyone's points) once a second while they change.
+func _server_mastery() -> void:
+	if server_tick % 30 == 0 and not fogs.is_empty():
+		_server_fog_mastery()
+	if server_tick % 20 == 0:   # Heal Aura III's afterglow
+		for q: ServerPlayer in players.values():
+			if q.regen_until > server_tick and q.state.dead == 0 and q.state.hp < Sim.MAX_HP:
+				q.state.hp += 1
+				mastery_add(q.regen_by, "Heal Aura", 1.0)
+	for q: ServerPlayer in players.values().duplicate():
+		if q.charm_until > 0 and server_tick >= q.charm_until:
+			_uncharm(q)
+	if server_tick % 60 == 0:
+		for q: ServerPlayer in players.values():
+			if q.mxp_dirty:
+				_server_send_roster()
+				break
+		for gid in golem_stun.keys():   # forget stuns that are over
+			if int(golem_stun[gid][1]) < server_tick:
+				golem_stun.erase(gid)
+
+
+## Twice a second for every fog: each enemy of its caster inside (players and NPCs it can hurt, their golems; never
+## Thunderhorn) is a half-second blinded (half a point of Fog mastery), takes the cloud's poison (mastery II / III, as
+## Fog damage) and, at III, is slowed.
+func _server_fog_mastery() -> void:
+	var pvp := fog_pvp()
+	for f: Dictionary in fogs:
+		var caster := int(f.caster)
+		if not players.has(caster) or Fog.density(f, server_tick) < 0.12:
+			continue
+		var sp := Weapons.spell_named_lv(Weapons.WAND, "Fog", int(f.get("lv", 1)))
+		var poison := int(sp.get("poison", 0))
+		var c := Fog.centre(f, server_tick)
+		for q: ServerPlayer in players.values():
+			if q.id == caster or q.state.dead > 0 or not can_hurt(caster, q.id) or Fog.friend(f, q.id, pvp) \
+					or not Fog.covers(f, q.state.pos, server_tick):
+				continue
+			mastery_add(caster, "Fog", 0.5)
+			if bool(sp.get("slow_in", false)):
+				q.state.slow = maxi(q.state.slow, 35)
+			if poison > 0:
+				_poison(q.id, maxi(poison / 2, 1), caster, q.state.pos - c)
+		for g: Golems.G in golems.list.values().duplicate():
+			if g.owner == caster or g.state == Golems.State.DIE or Fog.friend(f, g.owner, pvp) or not Fog.covers(f, g.pos, server_tick):
+				continue
+			if players.has(g.owner) and not can_hurt(caster, g.owner):
+				continue
+			mastery_add(caster, "Fog", 0.5)
+			if poison > 0:
+				_poison(-1000 - g.id, maxi(poison / 2, 1), caster, g.pos - c)
+
+
+## Fog poison: wand damage (a knock-out with it counts toward the wand's level), no knockback.
+func _poison(target: int, amount: int, caster: int, dir: Vector3) -> void:
+	dmg_src = Weapons.WAND
+	dmg_spell = "Fog"
+	_damage(target, amount, caster, dir, 0.0)
+	dmg_src = -1
+	dmg_spell = ""
+	_fx("poison", [target])
+
+
+## Stun mastery III: an NPC (challenger, minion, dev-console unit) held by the stun is charmed: until `until` it is on
+## the caster's side (it fights their enemies, follows them, never hurts them or their allies), its name tag tinted
+## pink-violet with " (charmed)"; then it goes back to how it was (_uncharm). Thunderhorn and players never are.
+func _charm(q: ServerPlayer, by: ServerPlayer, until: int) -> void:
+	if not q.npc or q.state.dead > 0:
+		return
+	if q.charm_until == 0:
+		q.charm_old = [q.side, q.ai.owner if q.ai != null else 0, q.color, q.name]
+		q.name = q.name + " (charmed)"
+		q.color = Color("e070d0")
+	q.charm_until = maxi(q.charm_until, until)
+	q.charm_by = by.id
+	q.side = side_of(by)
+	if q.ai != null:
+		q.ai.owner = by.id
+	golems.harm.erase(q.id)   # old grudges forgotten
+	_fx("charm", [q.id, by.id, until - server_tick])
+	_server_send_roster()
+
+
+func _uncharm(q: ServerPlayer) -> void:
+	q.charm_until = 0
+	q.charm_by = 0
+	if q.charm_old.size() >= 4:
+		q.side = int(q.charm_old[0])
+		if q.ai != null:
+			q.ai.owner = int(q.charm_old[1])
+		q.color = q.charm_old[2]
+		q.name = str(q.charm_old[3])
+	q.charm_old = []
+	_fx("uncharm", [q.id])
+	_server_send_roster()
+
+
 ## A hit on a held shield, costing `cost` (fifths of a mana point). Paid in full: a ripple, returns 0. Not enough
 ## mana: the shield shatters, the mana is gone, it can't be raised for a moment; returns what the mana couldn't pay.
+## v0.12.7 mastery: the holder's Shield level makes every hit cost less (its "drain"); what the bubble soaks (the hit's
+## `strength`, its damage) earns Shield mastery. What's returned is still in the full (undiscounted) cost's terms.
 func _shield_soak(q: ServerPlayer, cost: int, at: Vector3, strength := 8) -> int:
 	var s := q.state
-	if s.mana >= cost:
-		s.mana -= cost
+	var drain := float(Weapons.spell_named_lv(Weapons.STAFF, "Shield", Weapons.mastery_named(s.mastery, Weapons.STAFF, "Shield")).get("drain", 1.0))
+	var pay := int(ceil(float(cost) * drain))
+	if s.mana >= pay:
+		s.mana -= pay
 		_fx("shield_hit", [q.id, at, strength])   # a ripple from that point, as big as the hit
+		mastery_add(q.id, "Shield", float(strength))
 		return 0
-	var left := cost - s.mana
+	mastery_add(q.id, "Shield", float(strength) * float(s.mana) / float(maxi(pay, 1)))
+	var left := int(ceil(float(pay - s.mana) / maxf(drain, 0.01)))
 	s.mana = 0
 	s.shield = 0
 	s.atk_cd = maxi(s.atk_cd, Weapons.SHIELD_BROKEN)
@@ -2232,15 +2684,19 @@ func _return_unique(p: ServerPlayer) -> void:
 
 ## Gravity wells: each tick, enemies within reach are dragged toward the centre (harder the closer they are, like real
 ## gravity, up to a cap) and the caster's enemies' golems slide in too; every half second those near its heart take a
-## nibble; at the end it bursts outward.
+## nibble; at the end it bursts outward. v0.12.7 mastery: e[3] the caster's mastery (II / III pull from further, III
+## harder), e[4] the bursts still to come before the last (III: one half-way); every second it drags an enemy earns 1.
 func _server_wells() -> void:
-	var sp := Weapons.spell_named(Weapons.WAND, "Gravity Well")
 	for e in wells.duplicate():
 		var c: Vector3 = e[1]
 		var owner: int = e[2]
-		if server_tick >= e[0]:
-			wells.erase(e)
-			_fx("well_burst", [c, float(sp.radius)])
+		var sp := Weapons.spell_named_lv(Weapons.WAND, "Gravity Well", int(e[3]) if e.size() > 3 else 1)
+		if server_tick >= e[0] or (e.size() > 4 and int(e[4]) > 0 and server_tick == int(e[0]) - int(sp.duration) / 2):
+			if server_tick >= e[0]:
+				wells.erase(e)
+			else:
+				e[4] = int(e[4]) - 1
+			_fx("well_burst", [c, float(sp.radius), int(sp.get("lv", 1))])
 			_blast(c, sp, owner if players.has(owner) else 0, Weapons.WAND)
 			continue
 		for q: ServerPlayer in players.values():
@@ -2261,10 +2717,13 @@ func _server_wells() -> void:
 				q.state.vel.x = hv.x
 				q.state.vel.z = hv.y
 			Sim.quantize(q.state)
+			mastery_add(owner, "Gravity Well", Config.DT)   # v0.12.7: a point a second it drags an enemy
 			if server_tick % 30 == 0 and d.length() <= float(sp.nibble_radius):
 				dmg_src = Weapons.WAND
+				dmg_spell = "Gravity Well"
 				_damage(q.id, int(sp.nibble), owner, Vector3(-d.x, 0, -d.y), 0.0)
 				dmg_src = -1
+				dmg_spell = ""
 		for g: Golems.G in golems.list.values():
 			if g.owner != owner and g.state != Golems.State.DIE:
 				var d := Vector2(c.x - g.pos.x, c.z - g.pos.z)
@@ -2275,8 +2734,8 @@ func _server_wells() -> void:
 ## Arcane storms: every `every` ticks a bolt is called down: on an enemy under the cloud (a little off, so a moving
 ## target can dodge the warning ring) two times in three, else anywhere under it; each bolt warns, then strikes.
 func _server_storms() -> void:
-	var sp := Weapons.spell_named(Weapons.STAFF, "Arcane Storm")
 	for e in storms.duplicate():
+		var sp := Weapons.spell_named_lv(Weapons.STAFF, "Arcane Storm", int(e[4]) if e.size() > 4 else 1)   # v0.12.7
 		if server_tick >= e[0]:
 			storms.erase(e)
 			continue
@@ -2301,7 +2760,7 @@ func _server_storms() -> void:
 			var r := sqrt(randf()) * area
 			at = c + Vector3(cos(a) * r, 0, sin(a) * r)
 		at.y = WorldLayout.ground_height(at.x, at.z, c.y + 3.0)
-		pending_spells.append([server_tick + int(sp.warn), "storm_bolt", at, owner])
+		pending_spells.append([server_tick + int(sp.warn), "storm_bolt", at, owner, int(sp.get("lv", 1))])
 		_fx("lightning_warn", [at, int(sp.warn), owner])
 
 
@@ -2417,8 +2876,8 @@ func _server_npcs() -> void:
 			continue
 		q.state.arrows = 99
 		q.state.rocks = 99
-		if frozen:   # v0.12.3: challengers and minions stand still (no inputs) while the cutscene plays
-			continue
+		if frozen or q.ai == null:   # v0.12.3: challengers and minions stand still (no inputs) while the cutscene plays
+			continue                 # (v0.12.7: and a brainless test target, Main's --bot magic --foes, always does)
 		var inp := q.ai.think(self, q)
 		inp.seq = q.last_applied + 1
 		q.queue[inp.seq] = inp
@@ -2702,6 +3161,7 @@ func restart_after_defeat() -> void:
 			p.state.rocks = old.rocks
 			p.state.staff_lvl = old.staff_lvl
 			p.state.wand_lvl = old.wand_lvl
+			p.state.mastery = old.mastery   # v0.12.7
 			p.was_dead = false
 	boss_fighters = []
 	_clear_minions()

@@ -89,6 +89,8 @@ const CONTROLS := [
 	["Spells", "(staff or wand in hand; the hotbar over your health shows them all)"],
 	["", "Mouse wheel: next / previous spell     Tap R: next     Shift+R: previous     Ctrl+1-8: that spell"],
 	["", "Hold R: the spell wheel (locked spells show the level that unlocks them)"],
+	["Mastery", "Every spell levels up I -> II -> III from what it achieves (damage to enemies, health healed, metres"],
+	["", "teleported, seconds stunned...; not on dummies): bigger, stronger, new tricks. Hotbar pips and bar show it"],
 	["Golems", "Tap G: Follow me <-> Stay here     Middle mouse: attack the enemy under the crosshair, else go there"],
 	["", "Hold G: the order wheel: Follow me, Stay here, Go there, Attack that, Regroup"],
 	["Camera", "V first / third person     Ctrl + mouse wheel: camera distance"],
@@ -679,6 +681,23 @@ func _bot_magic() -> Array:
 	var dummy: Vector3 = WorldLayout.DUMMIES[1]
 	var me := net.predicted.pos
 	var stand := dummy + Vector3(0, 0, 6.0)
+	# v0.12.7 (with --mastery 1-3 for the spells' level): --foes puts two neutral units beside the dummy to hit (and
+	# god mode on us), so the arcs, jumps, charms and bursts have someone to land on
+	if bot_t == 30 and _args().has("foes") and net.players.has(net.my_id):
+		print(DevCmd.run(net, net.my_id, "god on"))
+		for k in 2:
+			var q: Net.ServerPlayer = net.spawn_npc(net.players[net.my_id], Weapons.SWORD, 0)
+			q.side = Net.Side.NEUTRAL
+			q.dev = true
+			q.state.pos = dummy + Vector3(-2.5 + 5.0 * k, 0, 1.0)
+			q.ai = null
+	if bot_t == 60 and _args().has("mastery-toast"):   # the level-up moment: the column and the toast
+		print(DevCmd.run(net, net.my_id, "mastery fireball 3"))
+	if _args().has("foes"):   # keep them standing where they were put (no brain: they just take it)
+		for q: Net.ServerPlayer in net.players.values():
+			if q.npc and q.ai == null:
+				q.state.hp = maxi(q.state.hp, 40)
+				q.state.dead = 0
 	var b := 0
 	var to := stand - me
 	cam_yaw = atan2(-(dummy - me).x, -(dummy - me).z)
@@ -2504,7 +2523,8 @@ static func decode_invite(text: String) -> Array:
 # ================================================================ combat visuals
 func _on_local_shot(kind: int, pos0: Vector3, vel0: Vector3, g: float) -> void:
 	# our own shot, drawn from this instant on our own clock
-	var e := { "node": _proj_node(kind), "kind": kind, "pos0": pos0, "vel0": vel0, "g": g, "local_t0": Engine.get_physics_frames(),
+	var lv := Weapons.mastery_named(net.predicted.mastery, Weapons.STAFF, "Fireball") if net.predicted != null else 1
+	var e := { "node": _proj_node(kind, lv), "kind": kind, "pos0": pos0, "vel0": vel0, "g": g, "local_t0": Engine.get_physics_frames(),
 		"tick0": -1, "end_tick": -1, "end_pos": Vector3.ZERO, "stuck": false }
 	add_child(e.node)
 	local_shots.append(e)
@@ -2516,7 +2536,10 @@ func _on_proj_spawn(id: int, owner: int, kind: int, tick0: int, pos0: Vector3, v
 		e.tick0 = tick0
 		projs[id] = e
 		return
-	var n := { "node": _proj_node(kind), "kind": kind, "pos0": pos0, "vel0": vel0, "g": g, "local_t0": -1,
+	var lv := 1   # v0.12.7: a fireball is drawn at its caster's Fireball mastery
+	if kind == 2 and avatars.has(owner) and avatars[owner].state != null:
+		lv = Weapons.mastery_named(avatars[owner].state.mastery, Weapons.STAFF, "Fireball")
+	var n := { "node": _proj_node(kind, lv), "kind": kind, "pos0": pos0, "vel0": vel0, "g": g, "local_t0": -1,
 		"tick0": tick0, "end_tick": -1, "end_pos": Vector3.ZERO, "stuck": false }
 	n.node.visible = false
 	add_child(n.node)
@@ -2541,9 +2564,11 @@ func _on_proj_end(id: int, tick: int, pos: Vector3, stuck: bool) -> void:
 		e.stuck = stuck
 
 
-func _proj_node(kind: int) -> MeshInstance3D:
+func _proj_node(kind: int, lv := 1) -> MeshInstance3D:
 	if kind == 2:
-		return MagicFx.fireball_node() as MeshInstance3D
+		var fb := MagicFx.fireball_node() as FireballView
+		fb.set_level(lv)   # v0.12.7: bigger, with a thicker trail (and white-hot at III) with mastery
+		return fb
 	var mi := MeshInstance3D.new()
 	var m := StandardMaterial3D.new()
 	if kind == 0:  # arrow: a thin shaft along -Z
@@ -2696,6 +2721,7 @@ func _update_combat_hud() -> void:
 	mana_fill.size.x = 296.0 * float(st.mana) / float(Sim.MANA_FULL)
 	_static_hud(st)
 	if spell_bar:   # v0.12.2: the hotbar (icons, keys, costs, recharges) replaces the old line of names
+		spell_bar.mxp = net.roster.get(net.my_id, {}).get("mxp", [])   # v0.12.7: spell mastery points
 		spell_bar.show_state(st, int(spell_sel.get(st.weapon, 0)))
 	if w.kind == "magic":
 		var lv := st.staff_lvl if st.weapon == Weapons.STAFF else st.wand_lvl

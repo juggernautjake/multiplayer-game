@@ -172,7 +172,9 @@ func _build(f: Dictionary) -> void:
 	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_texture = cloud_texture()
-	mat.albedo_color = Color(0.72, 0.75, 0.78, 0.0)
+	# v0.12.7 Fog mastery II / III: poisonous: a sickly green tinge (stronger at III)
+	var lv := int(f.get("lv", 1))
+	mat.albedo_color = [Color(0.72, 0.75, 0.78, 0.0), Color(0.62, 0.78, 0.55, 0.0), Color(0.52, 0.8, 0.4, 0.0)][clampi(lv, 1, 3) - 1]
 	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var rng := RandomNumberGenerator.new()
@@ -195,6 +197,36 @@ func _build(f: Dictionary) -> void:
 				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				root.add_child(mi)
 				puffs.append([mi, off, size, rng.randf() * TAU])
+	if lv >= 2:   # v0.12.7: little green bubbles rising out of the poisonous cloud
+		var bub := CPUParticles3D.new()
+		bub.amount = 60 * (lv - 1)
+		bub.lifetime = 2.2
+		bub.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		bub.emission_box_extents = Vector3(h * 0.9, 0.3, h * 0.9)
+		bub.direction = Vector3.UP
+		bub.spread = 10.0
+		bub.gravity = Vector3(0, 0.6, 0)
+		bub.initial_velocity_min = 0.3
+		bub.initial_velocity_max = 0.9
+		var bm := SphereMesh.new()
+		bm.radius = 0.07
+		bm.height = 0.14
+		bm.radial_segments = 6
+		bm.rings = 3
+		bub.mesh = bm
+		var g := Gradient.new()
+		g.set_color(0, Color(0.6, 1.0, 0.35, 0.0))
+		g.add_point(0.2, Color(0.6, 1.0, 0.35, 0.85))
+		g.set_color(g.get_point_count() - 1, Color(0.7, 1.0, 0.5, 0.0))
+		bub.color_ramp = g
+		var bmat := StandardMaterial3D.new()
+		bmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		bmat.vertex_color_use_as_albedo = true
+		bmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		bub.material_override = bmat
+		root.add_child(bub)
+		clouds[f.id] = { "root": root, "puffs": puffs, "mat": mat, "bub": bub }
+		return
 	clouds[f.id] = { "root": root, "puffs": puffs, "mat": mat }
 
 
@@ -235,6 +267,9 @@ func update(delta: float, avatars: Dictionary, golem_view: GolemView, cam: Camer
 			mi.position = c + Vector3(off.x * grow * appear, off.y, off.z * grow * appear) \
 				+ Vector3(sin(t * 0.4 + ph) * 0.6, sin(t * 0.3 + ph * 2.0) * 0.25, cos(t * 0.35 + ph) * 0.6)
 			mi.scale = Vector3.ONE * (0.4 + 0.6 * appear) * (1.0 + 0.3 * (1.0 - dens))
+		if cl.has("bub"):   # v0.12.7: the poison's bubbles follow the cloud, and stop as it thins
+			(cl.bub as CPUParticles3D).position = c + Vector3(0, 0.3, 0)
+			(cl.bub as CPUParticles3D).emitting = dens > 0.3
 	# who's hidden, who's outlined
 	for id in avatars.keys():
 		var av: Node3D = avatars[id]

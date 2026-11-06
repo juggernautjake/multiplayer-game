@@ -46,6 +46,8 @@ func _initialize() -> void:
 	a.pvp = true
 	b.state.owned = 0b11
 	b.arms = [4, 0, 0, 0, 0]
+	a.mxp[0] = 750.0       # spell mastery points and levels come back too
+	a.state.mastery = 0b1001
 	net.save_progress()
 	check(FileAccess.file_exists("user://progress_test.json"), "progress written to disk")
 	net.shutdown()
@@ -61,6 +63,7 @@ func _initialize() -> void:
 	check(a2.kills == [7, 3] and a2.arms == [0, 2, 9, 1, 0] and a2.duel_wins == 5, "his kills (magic and the others) and challengers beaten too")
 	check(a2.state.arrows == 17 and a2.state.rocks == 4 and a2.state.weapon == Weapons.SWORD and a2.pvp, "ammo, the weapon in hand, PvP")
 	check(a2.state.pos.distance_to(Vector3(30, 0, 12)) < 0.2, "and he's back where he was")
+	check(is_equal_approx(float(a2.mxp[0]), 750.0) and a2.state.mastery == 0b1001, "his spell mastery points and levels too")
 	check(net2.items.values().filter(func(it): return it.kind == Weapons.Item.STAFF).is_empty(), "the staff he has isn't also on the tower")
 	net2._server_add_player(2, "Bob")
 	check(net2.players[2].arms == [4, 0, 0, 0, 0] and net2.players[2].state.owned == 0b11, "Bob's back too")

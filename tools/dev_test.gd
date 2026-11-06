@@ -44,6 +44,16 @@ func _initialize() -> void:
 	check(a.state.owned == 127 and a.state.wand_lvl == 4 and Net.arm_level(a, Weapons.BOW) == 4, "maxall (me): everything")
 	run.call("take bow bob")
 	check((b.state.owned >> Weapons.BOW) & 1 == 0, "take bow bob")
+	# v0.12.7 spell mastery
+	check(b.state.mastery == Weapons.mastery_all(3), "max bob: every spell mastery III too")
+	run.call("mastery all 1 bob")
+	run.call("mastery tele 3 bob")
+	var tp_slot := Weapons.mastery_slot(Weapons.WAND, Weapons.idx(Weapons.WAND, "Teleport"))
+	check(Weapons.mastery_of(b.state.mastery, tp_slot) == 3 and Weapons.mastery_of(b.state.mastery, 0) == 1,
+		"mastery tele 3 bob: Teleport III (a partial name), the rest I")
+	run.call("mastery staff ii")
+	check(Weapons.mastery_of(a.state.mastery, 0) == 2 and Weapons.mastery_of(a.state.mastery, tp_slot) == 3, "mastery staff ii: the staff's spells II")
+	check(DevCmd.HELP.has("mastery") and str(run.call("help mastery")).contains("Teleport"), "help mastery lists every spell's metric")
 
 	# guests need cheats on; anyone can rename themselves
 	var r := str(run.call("give all", 2))

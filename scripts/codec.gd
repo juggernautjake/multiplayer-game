@@ -1,6 +1,6 @@
 ## Binary packing for the two hot messages (inputs and snapshots). Small packets, no Variant overhead:
 ## an input is 38 bytes, a player in a snapshot 83 bytes (v0.11.0: stun as 16 bits, static and knock-down added; v0.12.0: 8 wand
-## recharges).
+## recharges; v0.12.5 guard and v0.12.7 spell mastery (u32) since).
 class_name Codec
 
 
@@ -93,6 +93,7 @@ static func encode_snapshot(tick: int, ack: int, ents: Array) -> PackedByteArray
 		b.put_u8(s.zap_cd)
 		b.put_u8(s.down)
 		b.put_u8(s.guard)   # v0.12.5: blocking
+		b.put_u32(s.mastery)   # v0.12.7: spell mastery levels, 2 bits a spell
 	return b.data_array
 
 
@@ -138,5 +139,6 @@ static func decode_snapshot(data: PackedByteArray) -> Dictionary:
 		s.zap_cd = b.get_u8()
 		s.down = b.get_u8()
 		s.guard = b.get_u8()
+		s.mastery = b.get_u32()
 		ents[id] = s
 	return { "tick": tick, "ack": ack, "ents": ents }

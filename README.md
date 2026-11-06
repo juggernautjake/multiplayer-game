@@ -151,6 +151,9 @@ also fixed golems never closing in on Thunderhorn (his id read as a golem's).
 | 3 (7 kills) | | **Gravity Well** (15 s): a vortex that drags enemies within 7 m into its heart for 3 s, then bursts |
 | 4, ultimate (12 kills) | **Arcane Storm** (80): a storm cloud rains lightning for 5 s, seeking enemies under it | **Stone Titan** (60 s): one giant golem, 150 health, whose slam crushes everyone round it |
 
+**Spell mastery (0.12.7).** On top of the weapon levels, every spell levels up on its own, I -> II -> III, from what
+it achieves (see [What's new in 0.12.7](#whats-new-in-0127-spell-mastery) for each spell's metric and what II and III do).
+
 Kills with the staff or wand (with **PvP** on: P) level that weapon up: after 3, then 4 more, then 5 more (3, 7, 12). Area damage
 is always strongest at the centre and falls off toward the edge; you never hurt yourself. Players only hurt each other
 when both have PvP on; dummies and golems can always be hit.
@@ -561,6 +564,7 @@ These need no window and exit with code 0 when everything passes.
 | `<godot> --headless --path . -s tools/heal_test.gd` | The staff's Heal Aura. |
 | `<godot> --headless --path . -s tools/order_test.gd` | v0.12.2 golem orders: Follow distance, Stay radius, Go there, the ordered target hit first, attack orders ending (target down, out of reach 5 s), Regroup, PvP off blocking orders against players, golems fighting Thunderhorn, and the server refusing / syncing orders. |
 | `<godot> --headless --path . -s tools/cutscene_test.gd` | v0.12.3 the Duel Stone's corruption: once per fight below 60%, waits for a leap or a daze, exactly six minions, everyone invulnerable and frozen during it and free after, the stone corrupted, his death fells the minions, a restart cleanses the stone and arms it again. |
+| `<godot> --headless --path . -s tools/mastery_test.gd` | v0.12.7 spell mastery: points from what each spell achieves (not dummies, not NPCs), levels at the thresholds, each level's numbers, the teleport's reach predicted in Sim, the arrival burst, Shield III turning an arrow into its shooter, Stun III charming an NPC and letting it go, fog poison on enemies only, 1 / 3 / 5 meteors, bigger golems, Lightning III's fork, Frost Nova III's freeze, Spark Beam / Life Drain III, the codec, respawn and restart, the dev console. |
 | `<godot> --headless --path . -s tools/rehost_test.gd [-- --port 7811]` | Leaving and hosting / joining again in one session (UDP 7777 unless `--port` says otherwise). |
 
 ### Visual checks (need a window)
@@ -597,7 +601,7 @@ The bot modes (all in `scripts/main.gd`, functions `_bot_input`, `_bot_fight` an
 | `--bot show --orbit` / `--bot show --carry` | The showcase standing still while the camera goes all the way round (front, side, back) / with every weapon in turn, walking and standing. |
 | `--bot archery [--sling]` | Draws, holds and looses the bow (or slingshot) aiming level, up and down, seen from behind, the side, the front and above; pictures at half draw, full draw, the release and rest. |
 | `--leave-at <frame>` | Presses "Leave game" at that frame (the game then starts again with the same options: with `--host` it hosts again). |
-| `--bot magic` | Casts every staff and wand spell at the middle dummy (`--plan2`, `--plan3` for the level 3 and 4 spells, `--every` to save a picture every 6 ticks with `--shots`). |
+| `--bot magic` | Casts every staff and wand spell at the middle dummy (`--plan2`, `--plan3` for the level 3 and 4 spells, `--every` to save a picture every 6 ticks with `--shots`). v0.12.7: `--mastery 1-3` (any host) sets every spell's mastery; `--foes` stands two brainless units beside the dummy to land on (god mode on you). |
 | `--bot duel` | (`--host --give-all --shots <folder>`) Walks to the Duel Stone and presses E, then meets a challenger of every kind (sword, club, bow, slingshot, then after a level-up staff and wand) for 7 s each, with pictures through each fight. |
 | `--bot boss --leap` | (v0.11.0, `--host --give-all --shots <folder>`) Static stacks on you, then a Storm Leap at once; a picture every 10 ticks for 25 s. |
 | `--bot boss --cutscene` | (v0.12.3, `--host --give-all`) As `--bot boss`, but drops him under 60% right after his entrance so the Duel Stone's corruption plays at once, lets the minions come for 10 s (`--kill-after <ticks>`), then kills him (the minions collapse into smoke). `--every N --shots <folder>` saves pictures, `--until T` quits. Record it with `--write-movie cut.avi --fixed-fps 30 --quit-after 1150` before `--`. |
@@ -922,3 +926,40 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
   number); a weapon picked that you no longer have falls back to what's in hand.
 - **The Smiguel ending goes wild** (see "The fiesta"): screen warps, party lights, meme moments, the One Ring with
   Sméagol's eyes tracking it, and the chancla.
+- **Spell mastery**: below.
+
+## Spell mastery (0.12.8)
+
+Every spell of the staff and the wand now levels up **on its own**, I -> II -> III, from what it **achieves** (not
+from how often you cast it), separately from the weapon levels (kills still unlock spells as before). Practice dummies
+earn nothing (so it can't be farmed); challengers, minions, dev-console units, enemy golems, Thunderhorn and players
+(with PvP) all count. Challenger wizards stay at mastery I. A level-up gets the golden column and a toast:
+"FIREBALL MASTERY II! Bigger blast, +20% damage". The spell hotbar shows I / II / III pips on every slot, a thin bar
+toward the next level (gold when maxed) and the level after the picked spell's name; golems carry their mastery after
+their name. Everything also looks different at each level (bigger, brighter, new colour accents and sub-effects).
+
+| Spell | Earned by (points for II / III) | II | III |
+|---|---|---|---|
+| **Lightning** | damage to enemies, chain jumps double (600 / 1800) | 35 damage (+25%), chains 8 m, 7 jumps, each jump keeps 60% | 42 (+50%), chains 10 m, 9 jumps (65%); the bolt **forks** to the nearest enemy outside the strike (70%), a fatter blue-white bolt |
+| **Fireball** | damage to enemies (600 / 1800) | a bigger orb, blast 4.25 m, 29 damage (+20%), thicker trail | blast 5.1 m, 34 (+40%), a white-hot core; it bursts into **3 fire bomblets** that scatter and pop (8 each) |
+| **Shield** | damage the bubble soaks, +4 for every shot it turns away (250 / 750) | raising it costs 5 mana (half); hits drain 30% less | hits drain 50% less, and arrows, stones and fireballs are **reflected** straight back at whoever shot them, at full speed (they can hurt their shooter); a golden sheen |
+| **Frost Nova** | damage, + 2 for every second of slow on an enemy (350 / 1050) | 7.5 m (+25%), 21 damage, slows 3 s | 24 damage; enemies within 3.5 m are **frozen solid** for 1 s (an ice block), ice spikes erupt |
+| **Meteor** | damage to enemies, the burning ground too (600 / 1800) | **3 meteors** (the aimed one + left and right, 4.5 m out, a moment later, 70% each) | **5 meteors** in an X, wider (4.5 m) and longer (4 s) fires |
+| **Heal Aura** | health restored (yours and allies'; overheal doesn't count) (300 / 900) | 10 a second, 9 m | 12 a second, 10 m; **cleanses** stuns, slows and Static, and leaves a 3 s regen afterglow |
+| **Arcane Storm** | damage to enemies (500 / 1500) | lasts 7 s, a bolt every quarter second | a wider cloud (9.5 m), and every bolt **chains** once |
+| **Spark Beam** | damage to enemies, x1.5 beyond 15 m (500 / 1500) | 9 damage, **pierces** 1 enemy | 11, pierces 2, and **arcs** to one more enemy within 5 m (60%) |
+| **Golem** | damage your golems deal (500 / 1500) | golems 1.3x the size (and reach), +40% health, punches +35% | 1.6x, +80% health, +70% punches, and a **ground-slam** that hits every foe within 2.2 m of the fist |
+| **Teleport** | metres travelled, + the burst's damage (250 / 750) | 25 m (from 18); a **burst** where you arrive: 8 to enemies within 2.5 m, thrown back | 32 m; a big **shockwave**: 16 within 4 m, thrown hard, a ring and a flash |
+| **Stun** | seconds of stun on enemies, + a quarter of the damage your side deals them while stunned (120 / 360) | holds 4 s, 3 m burst | holds 5 s; a challenger, minion or dev-console unit it holds is **charmed** for 6 s after: it fights for you (your side), never you or your allies, with a pink-violet swirl and "(charmed)" on its name. Players just get the longer stun; Thunderhorn's stun meter is as before |
+| **Fog** | enemy-seconds blinded in it, + a quarter of the damage your side deals enemies inside, + the poison (250 / 750) | **poison**: 2 damage a second to enemies inside (a green tinge, bubbles) | 30 x 30 m, 4 poison a second, enemies inside slowed. Allies are never poisoned; Thunderhorn doesn't care |
+| **Life Drain** | damage drained + health given to allies (400 / 1200) | 23 damage, drains 55%, heals allies 16 | 27, drains 60%, **jumps** to a second enemy within 6 m (60%, drained too), heals allies 22 |
+| **Gravity Well** | damage, + 1 for every second it drags an enemy (400 / 1200) | pulls from 9.5 m, a 4 m burst | pulls harder, a 4.5 m burst, and **bursts twice** (half-way and at the end) |
+| **Stone Titan** | damage your titan deals (600 / 1800) | 1.2x, +35% health, slams +25% | 1.35x, +70% health, +50%, and every slam sends a **stomp shockwave** (10 to foes within 6 m) |
+
+How it works: the numbers are all in `scripts/weapons.gd` (each spell's `"mastery"`, `"by"`, `"m2"`, `"m3"`;
+`Weapons.spell_lv` / `spell_at` merge them). The points live on the server (`Net.ServerPlayer.mxp`, sent in the
+roster for the hotbar); the levels are packed 2 bits a spell into `Sim.PlayerState.mastery` (in every snapshot, so the
+teleport's reach and the shield's cost are predicted like everything else) and kept across knock-outs and restarts.
+Dev console: `mastery <spell|staff|wand|all> <1-3> [target]` (names may be partial: `mastery fire 3`), `max` sets
+every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_test.gd`; pictures:
+`--bot magic --give-all --max-level --mastery 3 --foes --every --shots <dir>` (`--plan2`, `--plan3`).
