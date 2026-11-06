@@ -438,15 +438,19 @@ func _golem_tests(net: Net) -> void:
 	check(peak > 1.0 and g.pos.y == 0.0 and _flat_d(g.pos, gp0) > 3.0, "a thrown golem flies (%.1f m up, %.1f m off) and lands" % [peak, _flat_d(g.pos, gp0)])
 	g.stun = 0
 	var dead_at := -1
+	var noted := 0.0
 	for i in 60 * 40:
 		pl.state.hp = Sim.MAX_HP   # keep the player in the fight
 		pl.state.dead = 0
 		net._server_tick()
+		if net.boss != null:
+			noted = maxf(noted, float(net.boss.gthreat.get(-1000 - g.id, 0.0)))
 		if not net.golems.list.has(g.id) or net.golems.list[g.id].state == Golems.State.DIE:
 			dead_at = i
 			break
 		if net.boss == null:
 			break
+	check(noted > 0.0, "the golem's slams on him count as its threat (%.0f)" % noted)
 	check(dead_at >= 0 and dead_at < 60 * 30, "he kills a golem that fights him in %.1f s" % (dead_at / 60.0))
 	check(pl.kills == kills0 and pl.state.wand_lvl == wl and pl.state.staff_lvl == sl, "and nobody gets level credit for it")
 	net.boss = null

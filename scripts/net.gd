@@ -1854,8 +1854,8 @@ func _server_spells() -> void:
 			_damage(tid, int(h[2]), g.owner, h[3], 0.0)
 		else:
 			_damage(tid, int(h[2]), g.owner, h[3], Golems.TITAN_KNOCK if g.titan else Golems.KNOCK)
-			if tid == Boss.ID and boss != null:   # v0.12.2: he knows which golem hit him
-				boss.note_golem_hit(g.id, last_dealt)
+		if tid == Boss.ID and boss != null:   # v0.12.2: he knows which golem hit him (Boss.ID is -5000: either branch)
+			boss.note_golem_hit(g.id, last_dealt)
 		dmg_src = -1
 		_fx("golem_slam", [g.id, g.pos + Vector3(-sin(g.yaw), 0, -cos(g.yaw)) * (Golems.TITAN_REACH if g.titan else 0.7), g.titan])
 	if not golems.orders_dirty.is_empty():
