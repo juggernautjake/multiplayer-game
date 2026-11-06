@@ -286,3 +286,12 @@ trousers, scarf and hair moved to new colours (blue and gold, green and red, cri
 The host plays outfit 0 (the original); guests get 1, 2, 3 in the order they join. Outfits 4 (grey) and 5 (dark
 violet-black) are the wizard garb's robes (scripts/wizard_garb.gd): Pip's sheets switch to them while he carries the
 staff or the wand.
+
+## npc_test.gd
+
+`Godot --headless --path . --script tools/npc_test.gd` (v0.10.0, offline, prints harmless RPC errors): the Duel
+Stone's pool before and after the first level-up, one challenger at a time, challengers and players hurt each other
+whatever PvP says, a challenger kill levels the staff and a fallen challenger leaves, a swordsman closes in and fights,
+an archer leads its shots onto a moving target, Thunderhorn's 1.7x health with two players, each spell's effect on him
+(lightning 1/4, meteor and earth spikes x1.5, earth spikes stop a charge, fireball burns, frost slows, stuns shorten,
+gravity wells can't move him), victory, and defeat then restart alone and with two players (levels kept).

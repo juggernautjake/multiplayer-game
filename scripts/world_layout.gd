@@ -23,6 +23,13 @@ const TOWER_R := 4.6          # the steps' distance from the column's centre
 ## The hidden vault: a low stone block far from the spawn, its trapdoor on the far side (you have to walk round to see
 ## it). E at the door opens it; the magic wand sits on a shelf inside.
 const VAULT_C := Vector2(54.0, 38.0)
+## v0.10.0: the Duel Stone (E: a challenger steps out to fight you) and the Storm Altar (a giant round button in the
+## ground; jump onto it at level 3 to call Thunderhorn), with open ground round them for the fights.
+const DUEL_C := Vector2(17.0, -3.0)
+const DUEL_HALF := Vector2(0.55, 0.4)
+const DUEL_H := 1.7
+const ALTAR_C := Vector2(0.0, 42.0)
+const ARENA_R := 20.0
 const VAULT_HALF := 1.8
 const VAULT_H := 2.6
 const VAULT_DOOR := Vector3(55.8, 0.0, 38.0)   # the middle of the door, on the vault's +x face (facing away from the spawn)
@@ -78,8 +85,8 @@ static func boxes() -> Array:
 			b.cx = cos(a) * r
 			b.cz = sin(a) * r
 			var c := Vector2(b.cx, b.cz)
-			if c.distance_to(TOWER_C) < TOWER_R + 4.5 or c.distance_to(VAULT_C) < VAULT_HALF + 4.0:
-				continue   # keep the tower and the vault clear
+			if c.distance_to(TOWER_C) < TOWER_R + 4.5 or c.distance_to(VAULT_C) < VAULT_HALF + 4.0                     or c.distance_to(DUEL_C) < 9.0 or c.distance_to(ALTAR_C + Vector2(0, 10)) < ARENA_R:
+				continue   # keep the tower, the vault, the Duel Stone's ground and the boss's arena clear
 			_boxes.append(b)
 		for t in TREES:   # tree trunks are solid
 			var tb := Box.new()
@@ -106,6 +113,9 @@ static func boxes() -> Array:
 			_boxes.append(st)
 		var v := Box.new()
 		v.cx = VAULT_C.x; v.cz = VAULT_C.y; v.hx = VAULT_HALF; v.hz = VAULT_HALF; v.h = VAULT_H; v.kind = "vault"
+		var ds := Box.new()   # the Duel Stone: a standing stone you can't walk through
+		ds.cx = DUEL_C.x; ds.cz = DUEL_C.y; ds.hx = DUEL_HALF.x; ds.hz = DUEL_HALF.y; ds.h = DUEL_H; ds.kind = "duel"
+		_boxes.append(ds)
 		_boxes.append(v)
 		# three steps near the spawn, to try jumping onto things
 		for spec in [[6.0, -6.0, 1.0, 1.0, 0.9], [9.0, -9.0, 1.2, 1.2, 1.9], [12.5, -12.5, 1.4, 1.4, 3.0]]:

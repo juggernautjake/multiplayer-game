@@ -24,6 +24,7 @@ Contents:
 
 1. [Controls](#controls)
 2. [Combat](#combat)
+3. [The Duel Stone, the Storm Altar and Thunderhorn](#the-duel-stone-the-storm-altar-and-thunderhorn)
 3. [Download and play (Windows)](#download-and-play-windows)
 4. [Getting started (from the source)](#getting-started-from-the-source)
 5. [Playing with a friend](#playing-with-a-friend)
@@ -146,6 +147,87 @@ summon) with a rune circle turning under you as it builds. Fireballs churn and f
 explosions or lightning bolts look alike (bolts branch, strike several times, crawl over the ground and boom with a
 shake that fades with distance). Golems spread out round a target, leap at it from a few metres, alternate overhead
 slams and haymakers, and stand guard round you when there's nothing to fight.
+
+## The Duel Stone, the Storm Altar and Thunderhorn
+
+New in 0.10.0: things to fight that fight back, a boss, and a prize.
+
+### How to unlock everything
+
+1. **The Duel Stone** stands in open ground east of the spawn: a rough standing stone carved with glowing runes. Walk
+   up to it and press **E**: a challenger steps out to fight you. At first they come with a bow, slingshot, sword or
+   club. You get one challenger at a time; pressing E again while yours is still standing just says "Defeat your
+   challenger first".
+2. **Wizards:** once you level up your staff or your wand for the first time (level 2), the stone's runes turn violet
+   ("The Duel Stone now summons wizards!") and it summons staff and wand wizards too. A wizard is never a higher level
+   than you.
+3. **Kills on challengers count toward your levels** exactly like kills on other players (golem and titan kills still
+   never count). So the stone is the way to level up alone.
+4. **The Storm Altar** lies at the far end of the field (north of the spawn): a ring of dark stone round a huge round
+   button. It stays sunk into the ground until you reach **level 3** with the staff or the wand; then it rises, crackles
+   and a little storm turns over it ("The Storm Altar has risen!").
+5. **Jump onto the altar** (land on the button from a jump) to summon the boss, **Thunderhorn**.
+
+Challengers wear the enemy red, have a name tag ("Challenger Brutus") and a health bar, never run out of arrows or
+rocks, and can hurt you and be hurt whether PvP is on or off. Their fighting style depends on their weapon:
+swordsmen and clubbers keep a striking distance, strafe, dodge (not every time), feint, punish you while you recover
+from a swing, and back off when hurt; archers and slingers keep their distance, lead their shots at you when you move
+and back away when you get close; wizards shield, use area spells, blink away when cornered, summon golems (wand) and
+follow a stun with something heavy. They're medium difficulty by default.
+
+### Thunderhorn, the storm bull
+
+A giant bull made of dark storm cloud with lightning crackling through it like a skeleton. Clouds gather, he comes down
+in a lightning strike, slams the ground and roars. His health bar (with his status: staggered, slowed, burning,
+enraged, storm) is at the top of the screen. With two players he has 1.7x the health and attacks more often.
+
+His attacks, and how to see them coming:
+
+| Attack | The warning | What to do |
+|---|---|---|
+| **Charge** | He lowers his head and scrapes a hoof | Step sideways at the last moment; he skids to a stop after |
+| **Stomp** | He rears up on his hind legs | Get out of the rings of lightning that roll out from where he lands, or jump them |
+| **Horn beam** | His horns light up white, arcs jump between them | A beam sweeps from his horns across the ground in front of him: get behind him or far to the side, or shield |
+| **Called lightning** | He bellows at the sky | Glowing circles appear on the ground under you: keep moving |
+| **Roar** | He throws his head back | Close to him it slows you; a shield blocks it |
+| **Ball lightning** | His head dips and the air flashes | Slow glowing balls drift after you and pop: outrun them or shield |
+| **Static field** | Always on: sparks crackle over the ground round his hooves | Anyone right next to him takes a small shock twice a second: hit and step out |
+
+Below half health he is **enraged** (red eyes and lightning, faster, attacks more often); below a quarter he **calls
+the storm** over the arena (lightning falls more often).
+
+His weaknesses (and resistances):
+
+- **Earth Spikes** do half again as much damage and **stop a charge dead** (he staggers).
+- **Meteors** do half again as much damage.
+- **Fireballs** set him burning.
+- **Frost Nova** slows him a lot.
+- **Stuns** only stagger him, and shorter each time.
+- **Lightning** does only a quarter of its damage: he's made of it. A gravity well can't move him.
+- He can't be hurt while he comes down.
+
+### Winning and losing
+
+- **Win:** confetti, "CONGRATULATIONS!", then the prize. Press any key to move the words along and, at the end, to
+  close the prize.
+- **Lose:** if everyone fighting him is down at the same time (alone: if you die), he leaves and you see "Awww, you
+  didn't get the final prize! And you died! Better luck next time..." with a sad trombone. Press any key: everyone is
+  back at the spawn with full health, **keeping their weapons and levels**, and the altar is ready to try again.
+
+### The prize picture
+
+The prize is a fiesta for Smiguel el Magnifico (ported from Jacob's 4X game). His picture is **not** part of the game
+or its releases: the game looks for `smiguel_el_magnifico.png` in a folder called `prize` next to
+`MultiplayerGame.exe` (or in `prize\` in the game's user folder, `%APPDATA%\Godot\app_userdata\Multiplayer Game\prize\`).
+Without it, a drawn stand-in (a huge sombrero and a grand moustache) takes his place.
+
+### Credits
+
+Music in the prize: "Mariachi Snooze" Kevin MacLeod (incompetech.com), licensed under Creative Commons: By Attribution
+3.0, https://creativecommons.org/licenses/by/3.0/ (`assets/audio/mariachi.mp3`, see
+[assets/audio/MARIACHI_CREDITS.txt](assets/audio/MARIACHI_CREDITS.txt)). The credit is shown on the prize screen.
+Thunderhorn's roars, the thunder, the trumpet, the maracas and the sad trombone are made by the game itself
+(`scripts/synth.gd`).
 
 ## Download and play (Windows)
 
@@ -358,6 +440,7 @@ These need no window and exit with code 0 when everything passes.
 | `<godot> --headless --path . -s tools/fruit_test.gd` | Fruit physics in `Ecology`: fallen fruit comes to rest, walking into it kicks it, a melee blow sends it flying, it never ends up inside a pillar, trunk or dummy, and its path has no jumps. |
 | `<godot> --headless --path . -s tools/eco_test.gd` | Runs the yard for 20 simulated minutes and checks that fruit falls, worms move in, birds come and trees can be hit. Prints `ECO OK` or `ECO FAIL`. |
 | `<godot> --headless --path . -s tools/invite_test.gd` | Invite codes: encoding then decoding gives back the address and port. |
+| `<godot> --headless --path . -s tools/npc_test.gd` | v0.10.0: who the Duel Stone summons before and after the first level-up, one challenger at a time, challengers hurt and are hurt whatever PvP says, kills on them level the staff, a swordsman closes in and an archer leads its shots, Thunderhorn's health with two players, what each spell does to him, victory, and defeat then restart (alone and with two players, levels kept). |
 
 ### Visual checks (need a window)
 
@@ -393,6 +476,9 @@ The bot modes (all in `scripts/main.gd`, functions `_bot_input`, `_bot_fight` an
 | `--bot archery [--sling]` | Draws, holds and looses the bow (or slingshot) aiming level, up and down, seen from behind, the side, the front and above; pictures at half draw, full draw, the release and rest. |
 | `--leave-at <frame>` | Presses "Leave game" at that frame (the game then starts again with the same options: with `--host` it hosts again). |
 | `--bot magic` | Casts every staff and wand spell at the middle dummy (`--plan2`, `--plan3` for the level 3 and 4 spells, `--every` to save a picture every 6 ticks with `--shots`). |
+| `--bot duel` | (`--host --give-all --shots <folder>`) Walks to the Duel Stone and presses E, then meets a challenger of every kind (sword, club, bow, slingshot, then after a level-up staff and wand) for 7 s each, with pictures through each fight. |
+| `--bot boss [--defeat]` | (`--host --give-all --shots <folder>`) Levels up to 3 (the stone turns violet, the altar rises), jumps on the altar, watches Thunderhorn come down and fight from 10-16 m (kept alive), takes him to half and a quarter of his health, then beats him and pictures the victory and the prize. With `--defeat` it dies instead: the defeat screen, a key, the restart. |
+| `--bot prize [--defeat] [--no-prize-pic]` | Just the end screens (victory and the prize, or defeat); `--no-prize-pic` shows the drawn stand-in. |
 | `--bot close` | Close-quarters test. After picking everything up, for each weapon it walks right into the middle dummy and then into the nearest tall pillar (7 s each), keeps the crosshair on the target, and attacks (clicks, then holds; bows draw and release). Every 6 ticks it logs how far the body is turned from the target and from the camera; at the end it prints the worst angle per weapon and quits. Add `--shots <folder>` to save screenshots at three moments of each phase. |
 
 Other command-line options (after `--`):
@@ -528,3 +614,16 @@ then says "The host is on vX and you're on vY" and tells whoever is older to res
   are tubes round the arms with bell cuffs; the hooded robe for Pip redrawn (a peaked cowl framing the face).
 - **Tests:** chain lightning (28/14/7 down a line, out of range, never the caster or their golem or PvP-off players,
   shields end a branch, two in the strike both take 28); golem and titan kills never count toward levels.
+
+## What's new in 0.10.0
+
+- **The Duel Stone:** E summons a challenger to fight (bow, slingshot, sword or club; staff and wand wizards after
+  your first level-up, when its runes turn violet). Challengers have real fighting AI (spacing, strafing, dodging,
+  feints, punishing, leading shots, kiting, shields, area spells, blinks, golems, stun combos), count toward your
+  levels and fight whatever PvP says.
+- **The Storm Altar and Thunderhorn:** at level 3 the altar rises; jump on it to call down the storm bull, a boss
+  with seven telegraphed attacks, enrage and storm phases, weaknesses and resistances, three kinds of roar, a big
+  health bar, synced to everyone.
+- **The prize** for beating him (confetti, then a mariachi fiesta), and a defeat screen with a restart that keeps
+  your levels. See [The Duel Stone, the Storm Altar and Thunderhorn](#the-duel-stone-the-storm-altar-and-thunderhorn).
+- Challengers don't take up player slots.

@@ -701,3 +701,31 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
 - **Pip's carried weapon:** 12 cm toward the camera (was 3 cm) with a sorting offset, 2 px out from his middle, ahead
   of him side on.
 - **Cloth length:** the robe's and cloak's lengths come from the feet (`feet_y`), not the ground.
+
+## v0.10.0: the Duel Stone, challengers, the Storm Altar, Thunderhorn and the prize
+
+- `npc_ai.gd` (`NpcAI`): a challenger's brain. `think(net, me)` returns a `Sim.PlayerInput` that `Net._server_npcs`
+  queues like a player's input, so challengers obey exactly the same rules. Archetypes melee / ranged / staff / wand;
+  reaction delays, aim error and dodge chance per difficulty (0 easy, 1 medium by default, 2 hard); spacing, strafing,
+  dodges, feints, punishing recovery, retreating when hurt; leading shots (`_lead`, the low ballistic arc) and kiting;
+  wizards shield, cast area spells, blink, summon golems and follow stuns up.
+- `boss.gd` (`Boss`): Thunderhorn on the server (a `RefCounted` like the golems). States `S`, `tick(now, people,
+  golems)` fills `hits`, `slows`, `strikes` and `fx` for Net to apply; `hurt(amount, from, spell)` applies his
+  weaknesses (Earth Spikes, Meteor x1.5, Lightning x0.25, Fireball burns), `stunned` (diminishing staggers),
+  `frosted`; enrage below 1/2, storm below 1/4; `pack()` for clients. Target id `Boss.ID` (-5000).
+- `boss_view.gd` (`BossView`): draws him from `Net.boss_changed` and the `boss_*` events: the cloud body, the lightning
+  skeleton, horns, eyes, gait, every state's pose, the beam, stomp rings, ball lightning, the static field, sounds,
+  and the health bar with status. Also the challengers' arrive/leave puffs.
+- `arena_view.gd` (`ArenaView`): the Duel Stone (gold runes, violet after level 2) and the Storm Altar (rises at level
+  3), their toasts and prompts (`prompt_for`).
+- `prize_screen.gd` (`PrizeScreen`): victory (confetti, the words, the Smiguel fiesta ported from LoadingFiesta) and
+  defeat (sad trombone, any key -> `Net.ask_restart`). The picture is loaded at runtime only (`load_picture`:
+  `prize/` next to the exe, then `user://prize/`), with a drawn stand-in.
+- `synth.gd` (`Synth`): sounds made in code: roars (entrance, enraged, bellow, death), thunder, trumpet, maracas, sad
+  trombone.
+- `net.gd`: `ServerPlayer.npc` / `.ai`; `humans()`; `duel_pool`, `_stone_interact`, `spawn_npc`, `_server_npcs`;
+  `_server_altar`, `summon_boss`, `_server_boss`, `restart_after_defeat`, `ask_restart`; signals `toast_msg`,
+  `boss_changed`, `boss_result` ("victory", "defeat", "restart"). Challengers get no snapshots or toasts over the
+  network and don't take player slots.
+- `world_layout.gd`: `DUEL_C`, `ALTAR_C`, `ARENA_R` (pillars and trees kept clear of them).
+- `main.gd`: builds ArenaView, BossView and PrizeScreen; toasts stack; bots `duel`, `boss [--defeat]`, `prize`.

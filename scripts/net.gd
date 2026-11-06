@@ -20,6 +20,9 @@ signal status(text: String)
 signal projectile_spawned(id: int, owner: int, kind: int, tick0: int, pos0: Vector3, vel0: Vector3, g: float)
 signal projectile_ended(id: int, tick: int, pos: Vector3, stuck: bool)
 signal hit(target: int, amount: int, pos: Vector3, dir: Vector3, killed: bool, attacker: int)
+signal toast_msg(text: String)                      # v0.10.0: a message for this player's screen
+signal boss_changed(tick: int, data: Array)         # Thunderhorn's state (BossView)
+signal boss_result(kind: String)                    # "victory", "defeat" or "restart"
 signal projectile_bounced(id: int, tick0: int, pos0: Vector3, vel0: Vector3)
 signal local_shot(kind: int, pos0: Vector3, vel0: Vector3, g: float)
 signal item_added(id: int, kind: int, pos: Vector3, count: int)
@@ -57,6 +60,9 @@ class ServerPlayer:
 	var outfit := 0             # Pip's outfit: the host 0, then 1, 2, 3 by who joined
 	var pvp := false            # player-versus-player on: can hurt and be hurt by other players with it on
 	var kills := [0, 0]         # kills with the staff, with the wand (they level the weapon up)
+	var npc := false            # v0.10.0: a Duel Stone challenger (no network peer: its NpcAI makes its inputs)
+	var ai: NpcAI
+	var air := false            # in the air last tick (landing on the Storm Altar presses it)
 
 
 ## Something lying on the ground to pick up (server). `spawn` >= 0: one of the fixed spawns, which comes back 20 s
@@ -93,6 +99,13 @@ class Proj:
 var style := "pip"
 var ecology: Ecology   # server only
 var golems := Golems.new()   # server only: the wand's stone golems
+var boss: Boss                # server only: Thunderhorn, while he's here (v0.10.0)
+var boss_fighters := []       # the players in the fight (defeat: all of them down at once)
+var defeated := false         # the defeat screen is up: waiting for a key to start again
+var defeat_t := 0
+var next_npc := 1000000       # NPC ids (they're players without a network peer)
+const DUEL_REACH := 2.4
+const ALTAR_R := 2.6
 var pending_spells: Array = []   # [tick, kind, where, caster]: lightning that strikes after its warning
 var vault_open_until := 0        # tick the vault's door shuts again (0 = shut)
 var wells: Array = []             # gravity wells: [tick it bursts, centre, caster]
@@ -303,7 +316,7 @@ func hello(player_name: String, character := "pip", version := "") -> void:
 			if multiplayer.multiplayer_peer:
 				multiplayer.multiplayer_peer.disconnect_peer(id))
 		return
-	if players.has(id) or players.size() >= Config.MAX_PLAYERS:
+	if players.has(id) or humans() >= Config.MAX_PLAYERS:
 		return
 	_server_add_player(id, player_name, character)
 	welcome.rpc_id(id, server_tick)
@@ -317,7 +330,7 @@ func hello(player_name: String, character := "pip", version := "") -> void:
 	items_full.rpc_id(id, list)
 	if vault_open_until > 0:
 		spell_fx.rpc_id(id, "vault_door", [true])
-	print("+ %s joined (%d online)" % [players[id].name, players.size()])
+	print("+ %s joined (%d online)" % [players[id].name, humans()])
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -373,6 +386,8 @@ func request_pvp(on: bool) -> void:
 func can_hurt(from: int, target: int) -> bool:
 	if target < 0 or from == target or not players.has(from) or not players.has(target):
 		return true
+	if players[from].npc or players[target].npc:   # challengers: always fair game, but never each other
+		return not (players[from].npc and players[target].npc)
 	return players[from].pvp and players[target].pvp
 
 
@@ -482,9 +497,9 @@ func _server_add_player(id: int, player_name: String, character := "pip") -> voi
 	p.id = id
 	p.character = character if character in ["pip", "figure"] else "pip"
 	var clean := player_name.strip_edges().left(Config.MAX_NAME)
-	p.name = clean if clean != "" else "Player %d" % (players.size() + 1)
-	p.color = COLORS[players.size() % COLORS.size()]
-	p.slot = players.size() + 1
+	p.name = clean if clean != "" else "Player %d" % (humans() + 1)
+	p.color = COLORS[humans() % COLORS.size()]
+	p.slot = humans() + 1
 	p.outfit = (p.slot - 1) % 4
 	p.state = Sim.spawn_state(p.slot)
 	players[id] = p
@@ -517,11 +532,14 @@ func _server_receive_inputs(id: int, list: Array) -> void:
 
 func _server_tick() -> void:
 	server_tick += 1
+	_server_npcs()
 	for p: ServerPlayer in players.values():
 		_server_step_player(p)
 		p.hist.append([server_tick, p.state.pos])
 		if p.hist.size() > 90:
 			p.hist.pop_front()
+	_server_altar()
+	_server_boss()
 	_server_projectiles()
 	_server_items()
 	_server_spells()
@@ -537,6 +555,8 @@ func _server_tick() -> void:
 			ents.append([p.id, p.state])
 		for p: ServerPlayer in players.values():
 			var data := Codec.encode_snapshot(server_tick, p.last_applied, ents)
+			if p.npc:
+				continue
 			if p.id == 1 and is_host_player:
 				_client_receive_snapshot(Codec.decode_snapshot(data))
 			else:
@@ -551,7 +571,7 @@ func _server_tick() -> void:
 func _server_step_player(p: ServerPlayer) -> void:
 	var n := p.queue.size()
 	if not p.primed:
-		if n >= p.target_buf or (p.id == 1 and is_host_player and n > 0):
+		if n >= p.target_buf or (p.id == 1 and is_host_player and n > 0) or (p.npc and n > 0):
 			p.primed = true
 		else:
 			return
@@ -588,7 +608,7 @@ func _server_step_player(p: ServerPlayer) -> void:
 			_shoot(p, inp)
 		elif ev == Sim.Ev.CAST:
 			_cast(p, inp, before)
-		if p.was_dead and p.state.dead == 0:  # back on your feet: a fresh spawn, keeping what you carry
+		if p.was_dead and p.state.dead == 0 and not p.npc:  # back on your feet: a fresh spawn, keeping what you carry
 			var old := p.state
 			p.state = Sim.spawn_state(p.slot)
 			p.state.weapon = old.weapon
@@ -600,7 +620,7 @@ func _server_step_player(p: ServerPlayer) -> void:
 		p.was_dead = p.state.dead > 0
 		var interact := inp.buttons & Sim.Btn.INTERACT != 0
 		if interact and not p.interact_prev and p.state.dead == 0:
-			if not _vault_interact(p) and not _pick_up(p, 2.2, true) and ecology:
+			if not _stone_interact(p) and not _vault_interact(p) and not _pick_up(p, 2.2, true) and ecology:
 				var gain := ecology.try_eat(p.state.pos, server_tick)
 				if gain > 0:
 					p.state.hp = mini(p.state.hp + gain, Sim.MAX_HP)
@@ -633,6 +653,8 @@ func _melee(p: ServerPlayer, inp: Sim.PlayerInput) -> void:
 	for g: Golems.G in golems.list.values():
 		if g.owner != p.id:
 			targets.append([-1000 - g.id, g.pos])
+	if boss != null:
+		targets.append([Boss.ID, boss_surface(me)])
 	var impact := me + Vector3(face.x, 0, face.y) * 1.3
 	if ecology:   # a tree within reach in front: shake it (fruit trees drop fruit from the 3rd hit)
 		for i in WorldLayout.TREES.size():
@@ -693,6 +715,14 @@ func _server_projectiles() -> void:
 				if _shield_bounce(pr, players[shielded], pt, prev, cur):
 					done = true
 					break
+			if boss != null and Vector2(pt.x - boss.pos.x, pt.z - boss.pos.z).length() < Boss.RADIUS and pt.y > boss.pos.y and pt.y < boss.pos.y + Boss.HEIGHT:
+				if pr.kind == 2:
+					_burst(pr, pt)
+				else:
+					_damage(Boss.ID, pr.damage, pr.owner, cur - prev, 0.0)
+					_end_proj(pr, pt, false)
+				done = true
+				break
 			var gh := _golem_at(pt, pr.owner)
 			if gh > 0:
 				if pr.kind == 2:
@@ -760,6 +790,7 @@ func _in_box(pt: Vector3) -> bool:
 
 ## A fireball bursts: everything nearby takes area damage.
 func _burst(pr: Proj, pos: Vector3) -> void:
+	dmg_spell = "Fireball"
 	projectiles.erase(pr.id)
 	proj_end.rpc(pr.id, server_tick, pos, false)
 	if is_host_player:
@@ -926,6 +957,15 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		return
 	var killed := false
 	var pos: Vector3
+	if target == Boss.ID:   # Thunderhorn: his resistances and weaknesses decide what he takes
+		if boss == null:
+			return
+		var took := boss.hurt(amount, from, dmg_spell)
+		pos = boss.pos + Vector3(0, 2.4, 0)
+		hit_fx.rpc(target, took, pos, dir, boss.hp == 0, from)
+		if is_host_player:
+			hit_fx(target, took, pos, dir, boss.hp == 0, from)
+		return
 	if target <= -1000:   # a golem
 		var gid := -1000 - target
 		if not golems.list.has(gid) or golems.list[gid].owner == from:
@@ -1175,7 +1215,7 @@ func quality_line() -> String:
 	if multiplayer.is_server():
 		var parts := []
 		for p: ServerPlayer in players.values():
-			if p.id == 1 and is_host_player:
+			if (p.id == 1 and is_host_player) or p.npc:
 				continue
 			var pp := peer.get_peer(p.id) if peer else null
 			var rtt := int(pp.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)) if pp else 0
@@ -1290,6 +1330,8 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 				if q.id != p.id and q.state.dead == 0 and q.state.shield == 0 and can_hurt(p.id, q.id) \
 						and _dist_to_body(s.pos + Vector3(0, 0.5, 0), q.state.pos) <= float(sp.radius):
 					q.state.slow = int(sp.slow)
+			if boss != null and _dist_to_body(s.pos + Vector3(0, 0.5, 0), boss_surface(s.pos)) <= float(sp.radius):
+				boss.frosted()
 		"Earth Spikes":
 			var d := Vector2(inp.aim_point.x - s.pos.x, inp.aim_point.z - s.pos.z)
 			if d.length() < 0.5:
@@ -1321,6 +1363,9 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 				if g.owner != p.id and _dist_to_body(end, g.pos) <= r:
 					golems.stun(g.id, int(sp.duration))
 					caught += 1
+			if boss != null and _dist_to_body(end, boss_surface(end)) <= r:
+				boss.stunned(server_tick)   # it only staggers him (shorter each time)
+				caught += 1
 			_fx("stun_beam", [p.id, hand, end, caught])
 			_fx("stun_burst", [end, r])
 
@@ -1390,6 +1435,13 @@ func _ray_cyl(o: Vector3, d: Vector3, c: Vector3, r: float, h: float) -> float:
 ## -> the enemies it struck (ids as _damage takes them: players, -(dummy + 1), -1000 - golem), for chain lightning.
 func _blast(center: Vector3, sp: Dictionary, owner: int, src := Weapons.STAFF) -> Array:
 	dmg_src = src
+	dmg_spell = str(sp.get("name", "Burn"))
+	if boss != null:   # Thunderhorn
+		var bd := _dist_to_body(center, boss_surface(center))
+		var bdmg := Weapons.area_damage(sp, bd)
+		if bdmg > 0:
+			hit_list_boss = true
+			_damage(Boss.ID, bdmg, owner, boss.pos - center, 0.0)
 	var hit := []
 	var r := float(sp.radius)
 	for q: ServerPlayer in players.values():
@@ -1423,6 +1475,10 @@ func _blast(center: Vector3, sp: Dictionary, owner: int, src := Weapons.STAFF) -
 				ecology.hit_tree(i, Weapons.area_damage(sp, 0.0), server_tick, tp - center)
 		ecology.blast_fruit(center, r, server_tick)
 	dmg_src = -1
+	dmg_spell = ""
+	if hit_list_boss:
+		hit.append(Boss.ID)
+		hit_list_boss = false
 	return hit
 
 
@@ -1456,8 +1512,10 @@ func _chain_jump(e: Array, owner: int) -> void:
 	var shielded := _shield_up(best)
 	_fx("chain", [from + Vector3(0, 1.1, 0), to + Vector3(0, 1.1, 0), dmg, int(sp.max_damage)])
 	dmg_src = Weapons.STAFF
+	dmg_spell = "Lightning"
 	_damage(best, dmg, owner, to - from, 2.0)
 	dmg_src = -1
+	dmg_spell = ""
 	if not shielded:
 		pending_spells.append([server_tick + int(sp.chain_every), "chain", to, e[3], best, dmg, seen, jumps])
 
@@ -1474,10 +1532,14 @@ func _chain_candidates(caster: int) -> Array:
 			out.append(-1000 - g.id)
 	for i in WorldLayout.DUMMIES.size():
 		out.append(-(i + 1))
+	if boss != null:
+		out.append(Boss.ID)
 	return out
 
 
 func _target_feet(t: int):
+	if t == Boss.ID:
+		return boss.pos if boss != null else null
 	if t > 0:
 		return players[t].state.pos if players.has(t) and players[t].state.dead == 0 else null
 	if t <= -1000:
@@ -1516,6 +1578,11 @@ func _server_spells() -> void:
 							pending_spells.append([server_tick + int(lsp.chain_every), "chain", e[2], e[3], t, int(lsp.max_damage), seen, 0])
 				"chain":
 					_chain_jump(e, owner)
+				"boss_strike":   # Thunderhorn's called lightning
+					_fx("lightning", [e[2]])
+					for q: ServerPlayer in players.values():
+						if q.state.dead == 0 and not q.npc and _dist_to_body(e[2], q.state.pos) <= 2.5:
+							_damage(q.id, 18, Boss.ID, q.state.pos - e[2], 4.0)
 				"spike":
 					_fx("spike", [e[2]])
 					_blast(e[2], Weapons.spell(Weapons.WAND, 3), owner, Weapons.WAND)
@@ -1537,7 +1604,9 @@ func _server_spells() -> void:
 	# golems
 	var people := []
 	for p: ServerPlayer in players.values():
-		people.append([p.id, p.state.pos, p.pvp, p.state.dead == 0])
+		people.append([p.id, p.state.pos, p.pvp or p.npc, p.state.dead == 0])
+	if boss != null and boss.state != Boss.S.ENTER and boss.state != Boss.S.DEATH:
+		people.append([Boss.ID, boss.pos, true, true])   # everyone's golems fight him
 	for h in golems.tick(server_tick, people):
 		var g: Golems.G = h[0]
 		var tid: int = h[1]
@@ -1592,7 +1661,9 @@ func golem_states(tick: int, data: Array) -> void:
 	golems_changed.emit(tick, data)
 
 
-var dmg_src := -1   # while a spell's damage is being dealt: the weapon it counts for (Weapons.STAFF / WAND), else -1
+var dmg_src := -1
+var dmg_spell := ""        # v0.10.0: the spell dealing the damage right now (Thunderhorn resists some)
+var hit_list_boss := false   # while a spell's damage is being dealt: the weapon it counts for (Weapons.STAFF / WAND), else -1
 
 
 ## A player was knocked out with the staff or wand: count it; at 3, 8 and 18 kills the weapon levels up and gains its
@@ -1716,4 +1787,256 @@ func _server_storms() -> void:
 		at.y = WorldLayout.ground_height(at.x, at.z, c.y + 3.0)
 		pending_spells.append([server_tick + int(sp.warn), "storm_bolt", at, owner])
 		_fx("lightning_warn", [at, int(sp.warn), owner])
+
+
+## How many real players are here (challengers don't count).
+func humans() -> int:
+	var n := 0
+	for p: ServerPlayer in players.values():
+		if not p.npc:
+			n += 1
+	return n
+
+
+# ================================================================ v0.10.0: the Duel Stone, NPCs, the Storm Altar, Thunderhorn
+## The point on Thunderhorn's body nearest to `from` (his body is a column RADIUS wide): what melee, blasts and chains
+## measure to.
+func boss_surface(from: Vector3) -> Vector3:
+	var d := Vector2(from.x - boss.pos.x, from.z - boss.pos.z)
+	var r := minf(d.length(), Boss.RADIUS)
+	var n := d.normalized() if d.length() > 1e-3 else Vector2(0, 1)
+	return boss.pos + Vector3(n.x * r, clampf(from.y - boss.pos.y, 0.0, Boss.HEIGHT - 1.8), n.y * r)
+
+
+## The weapons a challenger may have: bow, slingshot, sword, club; once the presser has levelled the staff or the wand
+## up (level 2), wizards too.
+static func duel_pool(staff_lvl: int, wand_lvl: int) -> Array:
+	var pool := [Weapons.BOW, Weapons.SLING, Weapons.SWORD, Weapons.CLUB]
+	if maxi(staff_lvl, wand_lvl) >= 2:
+		pool.append_array([Weapons.STAFF, Weapons.WAND])
+	return pool
+
+
+const NPC_NAMES := ["Brutus", "Grizelda", "Morwen", "Tobias", "Ragnhild", "Corvin", "Ysolde", "Barnaby", "Thane", "Vesper",
+	"Odalric", "Mirela", "Fenwick", "Sable"]
+
+
+## E at the Duel Stone: a challenger arrives (one at a time per player).
+func _stone_interact(p: ServerPlayer) -> bool:
+	if p.npc or Vector2(p.state.pos.x - WorldLayout.DUEL_C.x, p.state.pos.z - WorldLayout.DUEL_C.y).length() > DUEL_REACH:
+		return false
+	for q: ServerPlayer in players.values():
+		if q.npc and q.ai.owner == p.id and q.state.dead == 0:
+			_toast(p.id, "Defeat your challenger first")
+			return true
+	spawn_npc(p, -1)
+	return true
+
+
+## A challenger for `presser`: weapon -1 picks one from the stone's pool. Returns the new NPC.
+func spawn_npc(presser: ServerPlayer, weapon := -1, difficulty := 1) -> ServerPlayer:
+	var pool := duel_pool(presser.state.staff_lvl, presser.state.wand_lvl)
+	var w: int = weapon if weapon >= 0 else pool[randi() % pool.size()]
+	var q := ServerPlayer.new()
+	q.id = next_npc
+	next_npc += 1
+	q.npc = true
+	q.name = "Challenger " + NPC_NAMES[randi() % NPC_NAMES.size()]
+	q.color = Color("d23a2a")
+	q.character = presser.character
+	q.outfit = 3
+	q.pvp = true
+	q.slot = 0
+	q.state = Sim.PlayerState.new()
+	var away := Vector2(presser.state.pos.x - WorldLayout.DUEL_C.x, presser.state.pos.z - WorldLayout.DUEL_C.y)
+	away = away.normalized() if away.length() > 0.1 else Vector2(0, 1)
+	var at := Vector3(WorldLayout.DUEL_C.x, 0, WorldLayout.DUEL_C.y) - Vector3(away.x, 0, away.y) * 5.0
+	q.state.pos = at
+	q.state.yaw = atan2(away.x, away.y)
+	q.state.owned = 1 | (1 << w)
+	q.state.weapon = w
+	q.state.arrows = 99
+	q.state.rocks = 99
+	var lv := maxi(presser.state.staff_lvl, presser.state.wand_lvl)   # wizards never above the presser's level
+	q.state.staff_lvl = clampi(lv, 1, Weapons.MAX_LEVEL)
+	q.state.wand_lvl = clampi(lv, 1, Weapons.MAX_LEVEL)
+	Sim.quantize(q.state)
+	q.primed = true
+	q.ai = NpcAI.new(q.id, presser.id, w, difficulty)
+	players[q.id] = q
+	_server_send_roster()
+	_fx("npc_arrive", [q.id, at])
+	_toast(presser.id, "%s steps out to fight you with the %s!" % [q.name, Weapons.NAMES[w].to_lower()])
+	return q
+
+
+## Every tick: each challenger thinks (its input goes in its queue like a player's), keeps its ammo, and once it has
+## lain on the ground a moment after falling, it's gone.
+func _server_npcs() -> void:
+	for q: ServerPlayer in players.values().duplicate():
+		if not q.npc:
+			continue
+		if q.state.dead > 0 and q.state.dead < Sim.RESPAWN_TICKS - 90:
+			_fx("npc_leave", [q.id, q.state.pos])
+			players.erase(q.id)
+			_server_send_roster()
+			continue
+		q.state.arrows = 99
+		q.state.rocks = 99
+		var inp := q.ai.think(self, q)
+		inp.seq = q.last_applied + 1
+		q.queue[inp.seq] = inp
+
+
+@rpc("authority", "call_remote", "reliable")
+func toast(text: String) -> void:
+	toast_msg.emit(text)
+
+
+func _toast(id: int, text: String) -> void:
+	if id == my_id:
+		toast_msg.emit(text)
+	elif id > 0 and id < 1000000 and is_inside_tree() and multiplayer.multiplayer_peer != null:
+		toast.rpc_id(id, text)
+
+
+## Landing on the Storm Altar (from a jump), at level 3 or more, with no boss about: Thunderhorn comes.
+func _server_altar() -> void:
+	for p: ServerPlayer in players.values():
+		if p.npc:
+			continue
+		var landed := p.air and p.state.grounded
+		p.air = not p.state.grounded
+		if not landed or boss != null or defeated or p.state.dead > 0:
+			continue
+		if Vector2(p.state.pos.x - WorldLayout.ALTAR_C.x, p.state.pos.z - WorldLayout.ALTAR_C.y).length() > ALTAR_R:
+			continue
+		if maxi(p.state.staff_lvl, p.state.wand_lvl) < 3:
+			_toast(p.id, "The Storm Altar answers only to level 3")
+			continue
+		summon_boss()
+
+
+func summon_boss() -> void:
+	boss_fighters = []
+	for p: ServerPlayer in players.values():
+		if not p.npc:
+			boss_fighters.append(p.id)
+	var at := Vector3(WorldLayout.ALTAR_C.x, 0, WorldLayout.ALTAR_C.y + 14.0)
+	boss = Boss.new(at, boss_fighters.size())
+	boss.yaw = 0.0
+
+
+## Thunderhorn each tick: his brain, then what he did (hits, slows, called lightning, effects); his state to everyone;
+## victory when his death has played out; defeat when every fighter is down at once.
+func _server_boss() -> void:
+	if defeated:
+		defeat_t += 1
+		return
+	if boss == null:
+		return
+	var people := []
+	for id in boss_fighters:
+		if players.has(id):
+			var p: ServerPlayer = players[id]
+			people.append([id, p.state.pos, p.state.dead == 0, p.state.shield > 0])
+	var gl := []
+	for g: Golems.G in golems.list.values():
+		if g.state != Golems.State.DIE:
+			gl.append([g.id, g.pos])
+	boss.tick(server_tick, people, gl)
+	for h in boss.hits:
+		_damage(int(h[0]), int(h[1]), Boss.ID, h[2], float(h[3]))
+	boss.hits.clear()
+	for sl in boss.slows:
+		if players.has(sl[0]) and players[sl[0]].state.shield == 0:
+			players[sl[0]].state.slow = maxi(players[sl[0]].state.slow, int(sl[1]))
+	boss.slows.clear()
+	for st in boss.strikes:
+		_fx("lightning_warn", [st[0], int(st[1]), 0])
+		pending_spells.append([server_tick + int(st[1]), "boss_strike", st[0], 0])
+	boss.strikes.clear()
+	for e in boss.fx:
+		_fx(str(e[0]), e[1])
+	boss.fx.clear()
+	if server_tick % 2 == 0:
+		var data := boss.pack()
+		boss_state.rpc(server_tick, data)
+		if is_host_player:
+			boss_state(server_tick, data)
+	if boss.done:   # victory!
+		boss = null
+		boss_state.rpc(server_tick, [])
+		if is_host_player:
+			boss_state(server_tick, [])
+		_result("victory")
+		return
+	var down := 0
+	for id in boss_fighters:
+		if not players.has(id) or players[id].state.dead > 0:
+			down += 1
+	if down == boss_fighters.size() and boss_fighters.size() > 0:
+		_fx("boss_leave", [boss.pos])
+		boss = null
+		boss_state.rpc(server_tick, [])
+		if is_host_player:
+			boss_state(server_tick, [])
+		defeated = true
+		defeat_t = 0
+		for id in boss_fighters:   # they stay down until someone presses a key
+			if players.has(id):
+				players[id].state.dead = Sim.RESPAWN_TICKS + 99999
+		_result("defeat")
+
+
+## After a defeat: everyone back on their feet at the spawn with full health, the boss gone and the altar ready again.
+## Their weapons and levels stay (so they can try again).
+func restart_after_defeat() -> void:
+	if not defeated:
+		return
+	defeated = false
+	for id in boss_fighters:
+		if players.has(id):
+			var p: ServerPlayer = players[id]
+			var old := p.state
+			p.state = Sim.spawn_state(p.slot)
+			p.state.weapon = old.weapon
+			p.state.owned = old.owned
+			p.state.arrows = old.arrows
+			p.state.rocks = old.rocks
+			p.state.staff_lvl = old.staff_lvl
+			p.state.wand_lvl = old.wand_lvl
+			p.was_dead = false
+	boss_fighters = []
+	_result("restart")
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_restart() -> void:
+	if multiplayer.is_server():
+		restart_after_defeat()
+
+
+## The player pressed a key on the defeat screen.
+func ask_restart() -> void:
+	if not is_inside_tree() or multiplayer.multiplayer_peer == null or multiplayer.is_server():
+		restart_after_defeat()
+	else:
+		request_restart.rpc_id(1)
+
+
+func _result(kind: String) -> void:
+	if is_inside_tree() and multiplayer.multiplayer_peer != null:
+		boss_end.rpc(kind)
+	boss_result.emit(kind)   # here too (the host's own screen; a dedicated server has nobody listening)
+
+
+@rpc("authority", "call_remote", "reliable")
+func boss_end(kind: String) -> void:
+	boss_result.emit(kind)
+
+
+@rpc("authority", "call_remote", "unreliable_ordered", 5)
+func boss_state(tick: int, data: Array) -> void:
+	boss_changed.emit(tick, data)
 

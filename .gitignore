@@ -5,3 +5,7 @@ export/
 # OS
 Thumbs.db
 .DS_Store
+
+# v0.10.0: the prize picture is loaded at runtime from prize/ next to the exe; never commit it
+prize/
+smiguel*.png

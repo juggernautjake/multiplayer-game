@@ -63,6 +63,9 @@ var attack_block_until := 0  # msec: the click that grabs the mouse doesn't also
 var pause_menu: Control
 var pause_char: OptionButton
 var joining_until := 0     # msec: waiting for the host to answer a Join
+var arena_view: ArenaView  # v0.10.0: the Duel Stone and the Storm Altar
+var boss_view: BossView    # Thunderhorn
+var prize: PrizeScreen     # victory (the prize) and defeat screens
 var audit := {}   # --log: counts of every replicated event this client received (network audit)
 
 
@@ -81,6 +84,9 @@ func _ready() -> void:
 	net.item_added.connect(_on_item_added)
 	net.item_removed.connect(_on_item_removed)
 	net.style_changed.connect(_on_style)
+	net.toast_msg.connect(func(text: String):
+		if hud_spells:
+			toast(text))
 	if args_has_log():
 		for sig in ["hit", "item_added", "item_removed", "projectile_spawned", "projectile_ended", "roster_changed"]:
 			audit[sig] = 0
@@ -237,6 +243,8 @@ void fragment() {
 		if b.kind == "vault":
 			_build_vault(b)
 			continue
+		if b.kind == "duel":   # drawn by ArenaView
+			continue
 		var pillar := MeshInstance3D.new()
 		var bm := BoxMesh.new()
 		bm.size = Vector3(b.hx * 2.0, b.h, b.hz * 2.0)
@@ -264,6 +272,18 @@ void fragment() {
 	golem_view.name = "Golems"
 	add_child(golem_view)
 	golem_view.setup(net)
+	arena_view = ArenaView.new()
+	arena_view.name = "Arena"
+	add_child(arena_view)
+	arena_view.setup(net, self)
+	boss_view = BossView.new()
+	boss_view.name = "Boss"
+	add_child(boss_view)
+	boss_view.setup(net, self, magic_fx)
+	prize = PrizeScreen.new()
+	prize.name = "Prize"
+	add_child(prize)
+	prize.setup(net)
 
 	var eco := EcoView.new()   # trees, fruit, worms and birds, drawn from the server's events
 	eco.name = "Eco"
@@ -536,6 +556,19 @@ func _bot_input() -> Array:
 		return _bot_magic()
 	if bot_mode == "show":
 		return _bot_show()
+	if bot_mode == "duel":
+		return _bot_duel()
+	if bot_mode == "boss":
+		return _bot_boss()
+	if bot_mode == "prize":   # just the end screens: --bot prize [--defeat] [--no-prize-pic] --shots <dir>
+		bot_t += 1
+		if bot_t == 30:
+			prize.start_defeat() if _args().has("defeat") else prize.start_victory()
+		if bot_t % 30 == 0 and _args().has("shots"):
+			get_viewport().get_texture().get_image().save_png(str(_args()["shots"]).path_join("prize_%04d.png" % bot_t))
+		if bot_t > 1100:
+			get_tree().quit()
+		return [0, cam_yaw, 0.0, weapon_slot]
 	if bot_mode == "golems":
 		return _bot_golems()
 	if bot_mode == "archery":
@@ -723,6 +756,167 @@ func _bot_golems() -> Array:
 		get_tree().quit()
 	spell_sel[weapon_slot] = spell
 	return [b, cam_yaw, 0.0, weapon_slot, atan2(-(aim - me).x, -(aim - me).z), atan2(-(aim - me).x, -(aim - me).z), spell, aim]
+
+
+## Duel bot (--host --give-all --bot duel --shots <dir>): walks to the Duel Stone and presses E (the real way), then
+## meets one challenger of every kind in turn -- sword, club, bow, slingshot, then (after a level-up turns the stone's
+## runes violet) staff and wand wizards -- for 7 s each, swinging its sword when they come close; both are kept on
+## their feet until the end of each bout, then the challenger falls. Pictures through each fight.
+func _bot_duel() -> Array:
+	bot_t += 1
+	if net.predicted == null or not net.players.has(net.my_id):
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var shots := str(_args().get("shots", ""))
+	var sp: Net.ServerPlayer = net.players[net.my_id]
+	sp.state.hp = maxi(sp.state.hp, 40)
+	var me := net.predicted.pos
+	var stone := Vector3(WorldLayout.DUEL_C.x, 0, WorldLayout.DUEL_C.y)
+	var order := [Weapons.SWORD, Weapons.CLUB, Weapons.BOW, Weapons.SLING, Weapons.STAFF, Weapons.WAND]
+	weapon_slot = Weapons.SWORD
+	var npc: Net.ServerPlayer = null
+	for q: Net.ServerPlayer in net.players.values():
+		if q.npc and q.state.dead == 0:
+			npc = q
+	var b := 0
+	if bot_t < 240:   # walk to the stone and press E
+		var to := stone + Vector3(0, 0, 1.6) - me
+		if Vector2(to.x, to.z).length() > 0.4:
+			b |= Sim.Btn.FORWARD
+			cam_yaw = atan2(-to.x, -to.z)
+		elif npc == null:
+			b |= Sim.Btn.INTERACT
+		if shots != "" and bot_t in [120, 200, 236]:
+			get_viewport().get_texture().get_image().save_png(shots.path_join("duel_stone_%d.png" % bot_t))
+		return [b, cam_yaw, -0.1, weapon_slot]
+	var k := (bot_t - 240) / 420
+	var t := (bot_t - 240) % 420
+	if k >= order.size():
+		get_tree().quit()
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var w: int = order[k]
+	if t == 0:
+		for q: Net.ServerPlayer in net.players.values():
+			if q.npc:
+				net._damage(q.id, 9999, net.my_id, Vector3.FORWARD, 0.0)
+		if w == Weapons.STAFF:
+			sp.state.staff_lvl = 2   # the first level-up: the stone turns violet
+	if t == 30:
+		npc = net.spawn_npc(sp, w, 1)
+	if npc != null and t < 400:
+		npc.state.hp = maxi(npc.state.hp, 30)
+	if t == 400 and npc != null:
+		net._damage(npc.id, 9999, net.my_id, Vector3.FORWARD, 0.0)
+	if npc != null:
+		var to := npc.state.pos - me
+		var d := Vector2(to.x, to.z).length()
+		var face := atan2(-to.x, -to.z)
+		cam_yaw = lerp_angle(cam_yaw, face + 0.6, 0.08)
+		if d > 6.0 and w in [Weapons.BOW, Weapons.SLING, Weapons.STAFF, Weapons.WAND]:
+			b |= Sim.Btn.FORWARD | Sim.Btn.FACE_CAM
+		if d < 2.6 and bot_t % 40 < 4:
+			b |= Sim.Btn.ATTACK
+		if shots != "" and t in [80, 140, 200, 260, 320, 380]:
+			get_viewport().get_texture().get_image().save_png(shots.path_join("duel_%d_%s_%d.png" % [k, Weapons.NAMES[w], t]))
+		return [b, cam_yaw, -0.15, weapon_slot, face, face]
+	return [b, cam_yaw, -0.15, weapon_slot]
+
+
+## Boss bot (--host --give-all --bot boss --shots <dir> [--defeat]): reaches level 3 (the stone turns violet at 2, the
+## altar rises at 3), walks to the Storm Altar and jumps on it; watches Thunderhorn come down and fight from the side
+## of the arena, kept on its feet, casting at him now and then; takes him down to half (enraged) and a quarter (the
+## storm), then beats him -- and pictures the victory and the prize. With --defeat it falls instead: the defeat screen,
+## then a key, and the restart.
+func _bot_boss() -> Array:
+	bot_t += 1
+	if net.predicted == null or not net.players.has(net.my_id):
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var shots := str(_args().get("shots", ""))
+	var defeat := _args().has("defeat")
+	var sp: Net.ServerPlayer = net.players[net.my_id]
+	var me := net.predicted.pos
+	var altar := Vector3(WorldLayout.ALTAR_C.x, 0, WorldLayout.ALTAR_C.y)
+	weapon_slot = Weapons.STAFF
+	if bot_t == 30:
+		sp.state.staff_lvl = 2
+	if bot_t == 60:
+		sp.state.staff_lvl = 3
+	var b := 0
+	var snap := func(nm: String):
+		if shots != "":
+			get_viewport().get_texture().get_image().save_png(shots.path_join(nm + ".png"))
+	if net.boss == null and not net.defeated and not boss_view.alive and not prize.visible and not has_meta("boss_t0"):
+		if bot_t > 4000:
+			get_tree().quit()
+			return [0, cam_yaw, 0.0, weapon_slot]
+		var to := altar - me
+		var d := Vector2(to.x, to.z).length()
+		if d > 0.6:
+			b |= Sim.Btn.FORWARD | Sim.Btn.SPRINT
+			cam_yaw = atan2(-to.x, -to.z)
+		if d < 4.5 and bot_t % 40 == 0:
+			b |= Sim.Btn.JUMP
+		if bot_t % 60 == 0 and d < 30.0:
+			snap.call("boss_approach_%04d" % bot_t)
+		return [b, cam_yaw, -0.2, weapon_slot]
+	var bt := bot_t - int(get_meta("boss_t0", bot_t))
+	if not has_meta("boss_t0"):
+		set_meta("boss_t0", bot_t)
+	if prize.visible:   # the end screens
+		if bt % 20 == 0:
+			snap.call("boss_end_%04d_%s" % [bt, PrizeScreen.Mode.keys()[prize.mode]])
+		if prize.mode == PrizeScreen.Mode.FIESTA and prize.t > 9.0:
+			prize.close()
+			get_tree().quit()
+		if prize.mode == PrizeScreen.Mode.DEFEAT and prize.t > 4.0:
+			var ev := InputEventKey.new()
+			ev.keycode = KEY_SPACE
+			ev.physical_keycode = KEY_SPACE
+			ev.pressed = true
+			Input.parse_input_event(ev)
+		return [0, cam_yaw, 0.0, weapon_slot]
+	if net.defeated:
+		return [0, cam_yaw, 0.0, weapon_slot]
+	var boss := net.boss
+	if boss == null:
+		if bt % 20 == 0:
+			snap.call("boss_after_%04d" % bt)
+		if bt > 1200:   # restarted (defeat run): a look two seconds later, done
+			if not has_meta("restart_t"):
+				set_meta("restart_t", bt)
+			if bt == int(get_meta("restart_t")) + 120:
+				snap.call("boss_restarted")
+				get_tree().quit()
+		return [0, cam_yaw, 0.0, weapon_slot]
+	# keep our player standing (except a defeat run past the first 25 s)
+	if not (defeat and bt > 1500):
+		sp.state.hp = Sim.MAX_HP
+	elif bt == 1501:
+		net._damage(net.my_id, 9999, Boss.ID, Vector3.FORWARD, 0.0)
+	# his health, scripted: full for 30 s, then half (enraged) for 20 s, then a quarter (the storm) for 20 s, then done
+	var floor_k := 1.0 if bt < 1800 else (0.45 if bt < 3000 else (0.2 if bt < 4200 else 0.0))
+	if floor_k > 0.0:
+		boss.hp = maxi(boss.hp, int(boss.max_hp * floor_k)) if bt != 1800 and bt != 3000 else int(boss.max_hp * floor_k)
+	elif bt == 4200:
+		net._damage(Boss.ID, 999999, net.my_id, Vector3.FORWARD, 0.0)
+	# keep 10-16 m from him, strafing round him, facing him, casting now and then
+	var c := boss.pos
+	var face := atan2(-(c - me).x, -(c - me).z)
+	var dist := Vector2(c.x - me.x, c.z - me.z).length()
+	if bt > 200:
+		if dist > 16.0:
+			b |= Sim.Btn.FORWARD
+		elif dist < 10.0:
+			b |= Sim.Btn.BACK
+		b |= Sim.Btn.LEFT if (bt / 600) % 2 == 0 else Sim.Btn.RIGHT
+	cam_yaw = lerp_angle(cam_yaw, face + 0.12, 0.15)
+	cam_pitch = -0.12
+	if bt > 300 and bt % 150 < 3:
+		b |= Sim.Btn.ATTACK
+	if bt % 15 == 0:
+		snap.call("boss_%04d_%s" % [bt, Boss.S.keys()[boss.state]])
+	var aim := c + Vector3(0, 1.5, 0)
+	spell_sel[weapon_slot] = 0
+	return [b, cam_yaw, -0.12, weapon_slot, face, face, 0, aim]
 
 
 func _shot_show(t: int) -> bool:
@@ -1616,6 +1810,13 @@ func _update_items(delta: float) -> void:
 		prompt.text = "E  open the door"
 		prompt.global_position = door + Vector3(0, 1.9, 0)
 		return
+	if best < 0 and arena_view:
+		var ap := arena_view.prompt_for(me)
+		if not ap.is_empty():
+			prompt.visible = true
+			prompt.text = ap[0]
+			prompt.global_position = ap[1]
+			return
 	prompt.visible = best >= 0
 	if best >= 0:
 		var e: Dictionary = items[best]
@@ -1707,7 +1908,12 @@ func toast(text: String) -> void:
 	l.add_theme_constant_override("outline_size", 10)
 	l.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	l.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	l.position.y += 140
+	var stacked := 0   # several at once stack downwards
+	for c in hud_spells.get_parent().get_children():
+		if c.has_meta("toast"):
+			stacked += 1
+	l.set_meta("toast", true)
+	l.position.y += 140 + 52 * stacked
 	hud_spells.get_parent().add_child(l)
 	var tw := l.create_tween()
 	tw.tween_interval(3.0)
