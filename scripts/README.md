@@ -1009,4 +1009,13 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   50-90 / 35-70 / 25-55 ticks. `casts` lists what it cast. Melee keeps `AIM_ERR`; wizards don't use it any more.
   Mana bar: `Avatar.mana_bars` / `show_mana` (a blue bar under the health bar, flashing when low) for challengers
   (`npc`, set by Main from the id) holding a mana weapon, in both the Pip and figure views. Test: `tools/wizard_test.gd`.
+- Challengers learn to dash (v0.12.0, `npc_ai.gd`): `_threat` also reports area spells about to land on them (the
+  warning ring of lightning, a meteor, a storm bolt or Thunderhorn's called lightning within its radius + 0.8 m,
+  `pending_spells`; never a fellow challenger's) and Thunderhorn winding up or running a charge / rush down a line
+  through them (ahead within 28 m, within his radius + 1.6 m of the line); `threat_kind` says which ("shot", "draw",
+  "melee", "spell", "charge"). For spells and charges: noticed after REACT/2 + `SPELL_REACT` (10/6/3) + random ticks,
+  then a side-dash away with `SPELL_DODGE` (0.12/0.4/0.65) by tier. Measured (dodge_test): lightning rings 7% / 42% /
+  73% after ~24 / 15 / 8 ticks; charges 12% / 37% / 70%. `dodges` counts them. Archers and slingers (v0.11.0)
+  verified unchanged: no lead (`_lead(..., 0.0)`), `SHOT_ERR` 0.1/0.075/0.055, `SHOT_START` 0.02/0.028/0.036,
+  `SHOT_HOLD` 32/24/16. Test: `tools/dodge_test.gd`.
 

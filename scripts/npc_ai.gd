@@ -28,6 +28,13 @@ const SHOT_ERR := [0.1, 0.075, 0.055]        # radians, at 10 m, standing target
 const SHOT_START := [0.02, 0.028, 0.036]     # chance a tick to start a draw when ready
 const SHOT_HOLD := [32, 24, 16]              # ticks held at full draw before letting go
 const DODGE := [0.35, 0.6, 0.85]             # chance to dodge a threat it noticed
+# v0.12.0 challengers learn to dash: area spells about to land on them (lightning, meteors, storm bolts, Thunderhorn's
+# called lightning: their warning rings) and Thunderhorn's charge or rush coming down a line through them. Higher tiers
+# see these more often (the same REACT delay first, plus SPELL_REACT for reading the warning), never always.
+const SPELL_DODGE := [0.12, 0.4, 0.65]
+const SPELL_REACT := [10, 6, 3]
+var threat_kind := ""          # what _threat found: "shot", "draw", "melee", "spell", "charge"
+var dodges := 0                # dashes made to dodge (tests)
 
 var id := 0
 var owner := 0              # the player who pressed the stone
@@ -172,7 +179,15 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 			_threat_seen = net.server_tick
 		var r: Array = REACT[difficulty]
 		var noticed := net.server_tick - _threat_seen >= int(r[0]) + rng.randi_range(0, int(r[1]))
-		if noticed and _react <= 0:
+		if threat_kind == "spell" or threat_kind == "charge":
+			noticed = net.server_tick - _threat_seen >= int(r[0]) / 2 + SPELL_REACT[difficulty] + rng.randi_range(0, int(r[1]))
+		if noticed and _react <= 0 and (threat_kind == "spell" or threat_kind == "charge"):
+			_react = 30
+			if rng.randf() < SPELL_DODGE[difficulty] and s.dash_cd == 0:
+				buttons |= Sim.Btn.DASH
+				move = threat
+				dodges += 1
+		elif noticed and _react <= 0:
 			_react = 30
 			var sh := Weapons.idx(Weapons.STAFF, "Shield")
 			if archetype == "staff" and s.atk == 0 and int(_ai_cd.get("Shield", 0)) == 0 and not _run_of("Shield") \
@@ -184,6 +199,7 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 			elif rng.randf() < DODGE[difficulty] and s.dash_cd == 0:
 				buttons |= Sim.Btn.DASH
 				move = threat
+				dodges += 1
 	else:
 		_threat_seen = -1
 	# ---- how it moves and fights
@@ -418,6 +434,35 @@ var _golem_proxy: Net.ServerPlayer = null   # a golem it fights, dressed as a pl
 ## half second, or the target's melee swing winding up while it's in reach.
 func _threat(net: Net, me: Net.ServerPlayer, tgt: Net.ServerPlayer, dist: float) -> Vector2:
 	var s := me.state
+	threat_kind = ""
+	# v0.12.0: Thunderhorn winding up or running a charge / rush down a line through it
+	var bs = net.boss
+	if bs != null and bs.state in [Boss.S.CHARGE_WIND, Boss.S.CHARGE, Boss.S.RUSH]:
+		var along: Vector2 = bs.charge_dir if bs.state != Boss.S.CHARGE_WIND else Vector2(-sin(bs.yaw), -cos(bs.yaw))
+		var rel := Vector2(s.pos.x - bs.pos.x, s.pos.z - bs.pos.z)
+		var ahead := rel.dot(along)
+		var off := rel.dot(Vector2(-along.y, along.x))
+		if ahead > 0.0 and ahead < 28.0 and absf(off) < Boss.RADIUS + 1.6:
+			threat_kind = "charge"
+			var out := Vector2(-along.y, along.x) * (1.0 if off >= 0.0 else -1.0)
+			return out
+	# v0.12.0: an area spell's warning ring under it (lightning, a meteor, a storm bolt, his called lightning)
+	for e in net.pending_spells:
+		var kind := str(e[1])
+		if not (kind in ["lightning", "meteor", "storm_bolt", "boss_strike"]) or int(e[3]) == me.id:
+			continue
+		if net.players.has(int(e[3])) and net.players[int(e[3])].npc:
+			continue   # another challenger's: it can't hurt it
+		var r := 3.0
+		if kind == "meteor":
+			r = float(Weapons.spell_named(Weapons.STAFF, "Meteor").radius)
+		elif kind == "storm_bolt":
+			r = float(Weapons.spell_named(Weapons.STAFF, "Arcane Storm").radius)
+		var at: Vector3 = e[2]
+		var away := Vector2(s.pos.x - at.x, s.pos.z - at.z)
+		if away.length() < r + 0.8 and int(e[0]) - net.server_tick > 3:
+			threat_kind = "spell"
+			return away.normalized() if away.length() > 0.2 else Vector2(1, 0)
 	for pr: Net.Proj in net.projectiles.values():
 		if pr.owner == me.id:
 			continue
@@ -427,17 +472,20 @@ func _threat(net: Net, me: Net.ServerPlayer, tgt: Net.ServerPlayer, dist: float)
 		var rel := s.pos + Vector3(0, 1.0, 0) - p
 		var t := clampf(rel.dot(v) / maxf(v.length_squared(), 1e-4), 0.0, 0.5)
 		if (p + v * t).distance_to(s.pos + Vector3(0, 1.0, 0)) < 1.1:
+			threat_kind = "shot"
 			var flat := Vector2(v.x, v.z).normalized()
 			return Vector2(-flat.y, flat.x) * (1.0 if rng.randf() < 0.5 else -1.0)
 	# v0.12.0: a bow or slingshot drawn at it, well into the draw: a wizard sees it coming and can get the shield up
 	if archetype == "staff" and Weapons.is_ranged(tgt.state.weapon) and tgt.state.charge >= 20 and dist < 30.0:
 		var to_me := Vector2(s.pos.x - tgt.state.pos.x, s.pos.z - tgt.state.pos.z).normalized()
 		if Vector2(-sin(tgt.state.yaw), -cos(tgt.state.yaw)).dot(to_me) > 0.9:
+			threat_kind = "draw"
 			return Vector2(-to_me.y, to_me.x) * (1.0 if rng.randf() < 0.5 else -1.0)
 	if Weapons.is_melee(tgt.state.weapon) and tgt.state.atk > 0:
 		var mv := Weapons.move(tgt.state.weapon, tgt.state.combo)
 		var winding := tgt.state.atk > int(mv.swing) - int(mv.windup)
 		if winding and dist < float(mv.range) + 0.8:
+			threat_kind = "melee"
 			var away := Vector2(s.pos.x - tgt.state.pos.x, s.pos.z - tgt.state.pos.z).normalized()
 			return (away + Vector2(-away.y, away.x) * _strafe).normalized()
 	return Vector2.ZERO

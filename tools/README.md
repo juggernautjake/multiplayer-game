@@ -365,3 +365,11 @@ some sparks but not all (typically ~10 of 21; ~15 of 21 on a still player); over
 at it every 1.5 s, the player stepping into melee every ~12 s) each wizard uses every spell of its kit, never the same
 one more than 3 times running, with a wind-up seen before its casts.
 
+## dodge_test.gd
+
+`<godot> --headless --path . --script tools/dodge_test.gd` (v0.12.0, offline, prints harmless RPC errors): 60
+challengers per tier with a lightning warning ring under them: they dash out more at higher tiers (typically 7% /
+42% / 73%), never always, and only after a reaction delay; 60 per tier in Thunderhorn's charge line: more side-steps
+at higher tiers (~12% / 37% / 70%), none when the charge isn't coming at them; archers aim at the target's current
+position (no lead) and their spread shrinks / draw rate rises with tier.
+
