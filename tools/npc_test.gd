@@ -55,6 +55,29 @@ func _initialize() -> void:
 		npc.state.dead = maxi(npc.state.dead - 1, 0)
 	check(not net.players.has(npc.id), "a fallen challenger is gone soon after")
 
+	# ---- v0.12.0 tiers rise over a run of duels: tier 1, then 2 after three wins, then 3 at level 3 (or 8 wins)
+	var tiers := []
+	a.duel_wins = 0
+	a.state.staff_lvl = 1
+	a.state.wand_lvl = 1
+	for k in 9:
+		a.state.pos = Vector3(WorldLayout.DUEL_C.x, 0, WorldLayout.DUEL_C.y + 1.2)
+		net._stone_interact(a)
+		var ch: Net.ServerPlayer = null
+		for q in net.players.values():
+			if q.npc and q.state.dead == 0:
+				ch = q
+		tiers.append(ch.ai.difficulty + 1)
+		if k == 0 or k == 3:
+			check(ch.name.ends_with("(tier %d)" % (ch.ai.difficulty + 1)), "its name tag shows the tier: " + ch.name)
+		net._damage(ch.id, 500, 1, Vector3(1, 0, 0), 0.0)
+		net.players.erase(ch.id)
+	check(tiers == [1, 1, 1, 2, 2, 2, 2, 2, 3], "tiers rise with challengers beaten (%s)" % str(tiers))
+	check(Net.duel_tier(0, 2) == 1 and Net.duel_tier(0, 3) == 2 and Net.duel_tier(0, 1) == 0, "and with the staff / wand level (2 -> tier 2, 3 -> tier 3)")
+	check(NpcAI.DODGE[0] == 0.0 and NpcAI.SPELL_DODGE[0] == 0.0 and NpcAI.DODGE[1] > 0.0 and NpcAI.DODGE[2] > NpcAI.DODGE[1],
+		"no dash-dodging at tier 1; it starts at tier 2 and grows")
+	a.duel_wins = 0
+
 	# ---- challengers fight: a swordsman comes for you and lands hits
 	a.state = Sim.spawn_state(1)
 	a.state.pos = Vector3(60, 0, 60)

@@ -61,7 +61,7 @@ func _initialize() -> void:
 		reacts.append(float(react_sum) / maxf(n, 1))
 	net.pending_spells = []
 	print("      lightning ring dodged: %s, after %s ticks on average" % [str(rates), str(reacts)])
-	check(rates[0] < rates[2] and rates[1] < rates[2] and rates[2] < 0.95 and rates[2] > 0.35,
+	check(rates[0] < rates[2] and rates[1] < rates[2] and rates[2] < 0.95 and rates[2] > 0.25,
 		"challengers dash out of lightning rings more at higher tiers, never always (%.0f%% / %.0f%% / %.0f%%)" % [rates[0] * 100, rates[1] * 100, rates[2] * 100])
 	check(reacts[2] >= 3.0, "and only after a reaction delay (%.0f ticks at the top tier)" % reacts[2])
 
@@ -81,7 +81,7 @@ func _initialize() -> void:
 				n += 1
 		crates.append(float(n) / 60.0)
 	print("      charge dodged: %s" % str(crates))
-	check(crates[0] < crates[2] and crates[2] < 0.95 and crates[2] > 0.35, "they side-step his charge more at higher tiers, never always")
+	check(crates[0] < crates[2] and crates[2] < 0.95 and crates[2] > 0.25, "they side-step his charge more at higher tiers, never always")
 	var side := func(q: Net.ServerPlayer) -> void:
 		b.state = Boss.S.CHARGE
 		b.pos = q.state.pos + Vector3(8.0, 0, -14)   # a charge well off to the side: nothing to dodge

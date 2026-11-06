@@ -63,6 +63,7 @@ class ServerPlayer:
 	var npc := false            # v0.10.0: a Duel Stone challenger (no network peer: its NpcAI makes its inputs)
 	var ai: NpcAI
 	var air := false            # in the air last tick (landing on the Storm Altar presses it)
+	var duel_wins := 0          # v0.12.0: challengers this player has beaten (their tier rises with it)
 	var heal_t0 := 0            # v0.12.0: the tick this heal-aura channel's pulses count from
 	var heal_last := -100       # the last tick it was channelling
 
@@ -1025,6 +1026,8 @@ func _damage(target: int, amount: int, from: int, dir: Vector3, knock: float) ->
 		if push.length_squared() > 1e-6 and knock > 0.0:
 			q.state.vel += push.normalized() * knock + Vector3(0, knock * 0.35, 0)
 			q.state.grounded = false
+		if q.state.hp == 0 and q.npc and q.ai != null and players.has(q.ai.owner) and q.state.dead == 0:
+			players[q.ai.owner].duel_wins += 1   # v0.12.0: a challenger beaten counts for whoever called it
 		if q.state.hp == 0:
 			q.state.dead = Sim.RESPAWN_TICKS
 			q.state.charge = 0
@@ -2000,8 +2003,20 @@ func _stone_interact(p: ServerPlayer) -> bool:
 		if q.npc and q.ai.owner == p.id and q.state.dead == 0:
 			_toast(p.id, "Defeat your challenger first")
 			return true
-	spawn_npc(p, -1)
+	spawn_npc(p, -1, duel_tier(p.duel_wins, maxi(p.state.staff_lvl, p.state.wand_lvl)))
 	return true
+
+
+## v0.12.0 challenger tiers (NpcAI difficulty 0/1/2, shown as tier 1/2/3 on the name tag): tier 2 after
+## TIER2_WINS challengers beaten or the staff / wand at level 2; tier 3 after TIER3_WINS or level 3.
+const TIER2_WINS := 3
+const TIER3_WINS := 8
+static func duel_tier(wins: int, level: int) -> int:
+	if wins >= TIER3_WINS or level >= 3:
+		return 2
+	if wins >= TIER2_WINS or level >= 2:
+		return 1
+	return 0
 
 
 ## A challenger for `presser`: weapon -1 picks one from the stone's pool. Returns the new NPC.
@@ -2012,7 +2027,7 @@ func spawn_npc(presser: ServerPlayer, weapon := -1, difficulty := 1) -> ServerPl
 	q.id = next_npc
 	next_npc += 1
 	q.npc = true
-	q.name = "Challenger " + NPC_NAMES[randi() % NPC_NAMES.size()]
+	q.name = "Challenger %s (tier %d)" % [NPC_NAMES[randi() % NPC_NAMES.size()], clampi(difficulty, 0, 2) + 1]
 	q.color = Color("d23a2a")
 	q.character = presser.character
 	q.outfit = 3

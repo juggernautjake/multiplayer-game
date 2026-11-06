@@ -1031,4 +1031,12 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
   `MagicFx._heal_pulse`: a green ring spreading to 7 m, gold motes over the staff, green and gold motes rising from
   each one healed, "+N" over them, and `Synth.fx("heal")` (a soft shimmering major-triad chime) each pulse, within
   30 m. Challenger wizards never have it (level 1 kits). Test: `tools/heal_test.gd`.
+- Challenger tiers (v0.12.0, Jacob: every challenger used to be difficulty 1). `ServerPlayer.duel_wins` counts the
+  challengers a player called that went down (`Net._damage`); `Net.duel_tier(wins, level)`: tier 1 (NpcAI difficulty
+  0) at first, tier 2 after `TIER2_WINS` (3) wins or the staff / wand at level 2, tier 3 after `TIER3_WINS` (8) or
+  level 3; `_stone_interact` passes it to `spawn_npc`, and the name tag reads "Challenger Morwen (tier 2)". Dash-dodging
+  now starts at tier 2: `DODGE` 0 / 0.6 / 0.85 and `SPELL_DODGE` 0 / 0.4 / 0.65 (dodge_test now measures ~0% / 30% /
+  58% out of lightning rings, 0% / 27% / 50% out of a charge); aim (`SHOT_ERR`, `AIM_ERR`, `WIZ_ERR`) tightens, draws
+  (`SHOT_START`) come faster and reactions (`REACT`) quicker per tier, as before. Test: npc_test (a run of nine duels
+  goes tier 1, 1, 1, 2, 2, 2, 2, 2, 3).
 

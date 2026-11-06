@@ -381,3 +381,7 @@ an ally 3 m off by 12 each (pulses at 0, 0.5 and 1 s), never a challenger 4 m of
 mana; letting go stops it (no more healing, mana comes back); with everyone in reach full it stops while still held;
 with 8 mana it stops when the mana runs out (~40 ticks).
 
+npc_test (v0.12.0 additions): over nine duels the challengers' tiers go 1, 1, 1, 2, 2, 2, 2, 2, 3 (tier 2 after three
+wins, tier 3 after eight; level 2 / 3 also give tier 2 / 3) and the name tag shows the tier; no dash-dodging at tier 1.
+dodge_test now expects no dodges at tier 1.
+

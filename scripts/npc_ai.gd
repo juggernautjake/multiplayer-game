@@ -27,11 +27,12 @@ const AIM_ERR := [0.07, 0.035, 0.015]        # radians of aim error
 const SHOT_ERR := [0.1, 0.075, 0.055]        # radians, at 10 m, standing target
 const SHOT_START := [0.02, 0.028, 0.036]     # chance a tick to start a draw when ready
 const SHOT_HOLD := [32, 24, 16]              # ticks held at full draw before letting go
-const DODGE := [0.35, 0.6, 0.85]             # chance to dodge a threat it noticed
+# v0.12.0 (Jacob): no dash-dodging at all at tier 1 (difficulty 0); it starts at tier 2 and grows at tier 3
+const DODGE := [0.0, 0.6, 0.85]              # chance to dodge a threat it noticed
 # v0.12.0 challengers learn to dash: area spells about to land on them (lightning, meteors, storm bolts, Thunderhorn's
 # called lightning: their warning rings) and Thunderhorn's charge or rush coming down a line through them. Higher tiers
 # see these more often (the same REACT delay first, plus SPELL_REACT for reading the warning), never always.
-const SPELL_DODGE := [0.12, 0.4, 0.65]
+const SPELL_DODGE := [0.0, 0.4, 0.65]
 const SPELL_REACT := [10, 6, 3]
 var threat_kind := ""          # what _threat found: "shot", "draw", "melee", "spell", "charge"
 var dodges := 0                # dashes made to dodge (tests)
