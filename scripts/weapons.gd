@@ -157,7 +157,9 @@ const DATA := [
 		# `ally_heal` instead (about what a drain gives back); the caster gets nothing from that.
 		# v0.12.7 mastery III: the stream jumps on to a second enemy within jump_r (jump_k damage, drained too)
 		{ "name": "Life Drain", "level": 3, "cost": 0, "windup": 12, "cast": 30, "cooldown": 8, "recharge": 180,
-		  "range": 18.0, "damage": 18, "drain": 0.45, "knock": 0.5, "ally_heal": 12,
+		  # v0.12.18 (Jacob: "a little easier to hit"): reaches 22 m (was 18) and latches onto an enemy up to `assist` m
+		  # off the aim (Net.drain_assist)
+		  "range": 22.0, "assist": 1.6, "damage": 18, "drain": 0.45, "knock": 0.5, "ally_heal": 12,
 		  "mastery": [400, 1200], "by": "damage drained + health given to allies",
 		  "m2": { "damage": 23, "drain": 0.55, "ally_heal": 16, "text": "+25% damage, drains 55%" },
 		  "m3": { "damage": 27, "drain": 0.6, "ally_heal": 22, "jump_r": 6.0, "jump_k": 0.6,

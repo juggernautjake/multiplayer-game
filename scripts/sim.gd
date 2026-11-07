@@ -4,8 +4,9 @@
 class_name Sim
 
 ## FACE_CAM: face where the camera looks (aiming, first person) instead of the way you walk.
-## BLOCK (v0.12.5, the right mouse button): brace behind your weapon (Weapons.block_keep), facing the crosshair.
-enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64, ATTACK = 128, INTERACT = 256, FACE_CAM = 512, BLOCK = 1024 }
+## CANCEL (v0.12.18): lower a drawn bow or slingshot without shooting.
+## BLOCK (v0.12.5; v0.12.18 the F key): brace behind your weapon (Weapons.block_keep), facing the crosshair.
+enum Btn { FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SPRINT = 32, DASH = 64, ATTACK = 128, INTERACT = 256, FACE_CAM = 512, BLOCK = 1024, CANCEL = 2048 }
 
 ## What a step reports, for the server to act on (hit test, launch a projectile) and the client to show.
 enum Ev { NONE, MELEE_HIT, SHOT, CAST }
@@ -392,6 +393,11 @@ static func _combat(s: PlayerState, inp: PlayerInput) -> int:
 				s.combo_t = Weapons.COMBO_WINDOW
 	else:
 		var ammo := s.arrows if w.ammo == "arrows" else s.rocks
+		if inp.buttons & Btn.CANCEL and s.charge > 0:   # v0.12.18: lowered without shooting
+			s.charge = 0
+			return ev
+		if inp.buttons & Btn.CANCEL:
+			return ev
 		if attack and s.atk_cd == 0 and s.atk == 0 and ammo > 0:
 			s.charge = mini(s.charge + 1, int(w.draw))
 		elif not attack and s.charge > 0:

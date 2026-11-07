@@ -1957,6 +1957,17 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 			_fx("spark", [p.id, hand, end, not hits.is_empty(), lv, hits.map(func(h): return h[1]), arc_to])
 		"Life Drain":   # v0.12.0: hurt the first enemy along the aim; some of what it took comes back as health
 			var tgt := _beam_target(p, hand, inp.aim_point, float(sp.range))
+			if int(tgt[0]) == 0 or (int(tgt[0]) < 0 and int(tgt[0]) > -1000):   # v0.12.18: a near miss still latches on
+				var cands := []
+				for t in _chain_candidates(p.id):
+					if t < 0 and t > -1000:
+						continue   # (not onto a practice dummy)
+					var f = _target_feet(t)
+					if f != null:
+						cands.append([t, f])
+				var got = drain_assist(hand, inp.aim_point, float(sp.range), float(sp.get("assist", 0.0)), cands)
+				if got != null and (int(tgt[0]) == 0 or hand.distance_to(got[1]) < hand.distance_to(tgt[1])):
+					tgt = got
 			var hit_id: int = tgt[0]
 			var heal := 0
 			var ally := _ally_on_beam(p, hand, inp.aim_point, hand.distance_to(tgt[1]))
@@ -1990,6 +2001,37 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 			next_fog += 1
 			fogs.append(f)
 			_fx("fog", Fog.to_args(f))
+
+
+## v0.12.18 Life Drain's aim help (Jacob: "make the life steal spell a little easier to hit targets with"): when the
+## beam itself misses, it latches onto the enemy nearest the aim line within `assist` m of it (plus a little more far
+## off: 6% of the distance), in reach, in front, with no wall between. `cands`: [[id, feet], ...].
+## -> [id, the point on them] or null. AimPreview asks the same question with what this screen sees.
+static func drain_assist(from: Vector3, aim: Vector3, reach: float, assist: float, cands: Array):
+	if assist <= 0.0:
+		return null
+	var dir := aim - from
+	if dir.length() < 0.5:
+		return null
+	dir = dir.normalized()
+	var best = null
+	var best_off := INF
+	for c in cands:
+		var at: Vector3 = (c[1] as Vector3) + Vector3(0, 1.1, 0)
+		var rel := at - from
+		var along := rel.dot(dir)
+		if along <= 0.5 or along > reach + 0.6:
+			continue
+		var off := (rel - dir * along).length()
+		if off > assist + along * 0.06:
+			continue
+		var d := rel.length()
+		if WorldLayout.ray_hit(from, rel / d, d) < d - 0.4:
+			continue   # behind a wall
+		if off < best_off:
+			best_off = off
+			best = [c[0], at]
+	return best
 
 
 ## v0.12.0 Life Drain: the health that comes back for `dealt` damage.
@@ -2195,6 +2237,11 @@ func _arrival_burst(p: ServerPlayer, at: Vector3, sp: Dictionary) -> void:
 
 ## A point on the ground (or a pillar top) under where the crosshair is, no further than `reach` from `from`.
 func _aim_ground(from: Vector3, aim: Vector3, reach: float, yaw: float) -> Vector3:
+	return aim_ground(from, aim, reach, yaw)
+
+
+## (static, v0.12.18: AimPreview shows the same spot)
+static func aim_ground(from: Vector3, aim: Vector3, reach: float, yaw: float) -> Vector3:
 	var d := Vector2(aim.x - from.x, aim.z - from.z)
 	if d.length() < 0.5:
 		d = Vector2(-sin(yaw), -cos(yaw)) * minf(reach, 8.0)

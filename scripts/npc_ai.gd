@@ -19,7 +19,17 @@
 class_name NpcAI
 extends RefCounted
 
-const REACT := [[22, 12], [14, 8], [8, 4]]   # [base ticks, random extra] before reacting, per difficulty
+# v0.12.18 (Jacob's friend: "maybe give them varied reaction times"): slower and far less even than before
+# ([[22, 12], [14, 8], [8, 4]]), and each fighter has its own quickness (`quick`, REACT_SPREAD) on top
+const REACT := [[24, 18], [18, 16], [13, 14]]   # [base ticks, random extra] before reacting, per difficulty
+const REACT_SPREAD := [0.8, 1.45]            # this fighter's reaction times are x this (picked when it's made)
+# v0.12.18 ("give different classes different length/speed dashes"): [speed, length] of its dash against a player's,
+# by what it fights with: a sword fighter or a brawler dashes like you; a club's weight, an archer's or a slinger's
+# kit and a wizard's robes make theirs slower and shorter (a club or staff dash covers about half the ground)
+const DASH_STYLE := { "sword": [1.0, 1.0], "fists": [1.05, 1.0], "club": [0.78, 0.72], "ranged": [0.9, 0.85],
+	"staff": [0.75, 0.7], "wand": [0.85, 0.8] }
+var quick := 1.0
+var _dash_fixed := false
 const AIM_ERR := [0.07, 0.035, 0.015]        # radians of aim error
 # v0.11.0 archers and slingers were far too deadly: they aim where you STAND (no leading), with a real spread (more
 # far away, more when you're running or dashing), draw less often, hold the full draw a moment first (a tell you can
@@ -133,6 +143,7 @@ func _init(npc_id: int, presser: int, w: int, diff := 1, seed_v := 0) -> void:
 	weapon = w
 	difficulty = clampi(diff, 0, 2)
 	rng.seed = seed_v if seed_v != 0 else randi()
+	quick = rng.randf_range(REACT_SPREAD[0], REACT_SPREAD[1])
 	archetype = "melee" if w in [Weapons.SWORD, Weapons.CLUB, Weapons.FISTS] else ("ranged" if w in [Weapons.BOW, Weapons.SLING] else ("staff" if w == Weapons.STAFF else "wand"))
 
 
@@ -168,6 +179,7 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 		if _fog_t > 0 and s.dead == 0:
 			return _confused(net, me)
 	fog_mode = ""
+	_dash_style(s)
 	var tgt: Net.ServerPlayer = _pick_target(net, me)
 	var face := s.yaw
 	var move := Vector2.ZERO
@@ -211,9 +223,9 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 		if _threat_seen < 0:
 			_threat_seen = net.server_tick
 		var r: Array = REACT[difficulty]
-		var noticed := net.server_tick - _threat_seen >= int(r[0]) + rng.randi_range(0, int(r[1]))
+		var noticed := net.server_tick - _threat_seen >= int((int(r[0]) + rng.randi_range(0, int(r[1]))) * quick)
 		if threat_kind == "spell" or threat_kind == "charge":
-			noticed = net.server_tick - _threat_seen >= int(r[0]) / 2 + SPELL_REACT[difficulty] + rng.randi_range(0, int(r[1]))
+			noticed = net.server_tick - _threat_seen >= int((int(r[0]) / 2 + SPELL_REACT[difficulty] + rng.randi_range(0, int(r[1]))) * quick)
 		if noticed and _react <= 0 and (threat_kind == "spell" or threat_kind == "charge"):
 			_react = 30
 			if _dodge_rest <= 0 and rng.randf() < SPELL_DODGE[difficulty] and s.dash_cd == 0:
@@ -387,6 +399,27 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 	buttons |= Sim.Btn.FACE_CAM
 	var err: float = AIM_ERR[difficulty] * rng.randfn(0.0, 1.0) if archetype == "melee" else 0.0
 	return Sim.PlayerInput.new(seq, buttons, face, pitch, s.weapon, net.server_tick, face + err, face, spell, aim_point)
+
+
+## v0.12.18: the tick after its dash starts, make it its kind's (DASH_STYLE): slower and / or shorter. (The server
+## owns an NPC's state, so this is its dash for everyone.)
+func dash_style() -> Array:
+	if archetype == "melee":
+		return DASH_STYLE["club" if weapon == Weapons.CLUB else ("fists" if weapon == Weapons.FISTS else "sword")]
+	return DASH_STYLE[archetype]
+
+
+func _dash_style(s: Sim.PlayerState) -> void:
+	if s.dash_ticks == 0:
+		_dash_fixed = false
+		return
+	if _dash_fixed:
+		return
+	_dash_fixed = true
+	var k := dash_style()
+	s.vel.x *= float(k[0])
+	s.vel.z *= float(k[0])
+	s.dash_ticks = maxi(int(round(float(s.dash_ticks + 1) * float(k[1]))) - 1, 1)
 
 
 ## v0.12.0 lost in an enemy's fog: thrash or stumble (see FOG_ROLL). No target: it can't see anyone.

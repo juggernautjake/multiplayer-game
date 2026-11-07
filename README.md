@@ -44,7 +44,10 @@ Contents:
 | Mouse | orbit the camera around you (action-RPG style, like Valheim / Dark Souls) |
 | WASD, Shift, Space, Q | move relative to the camera (you turn to face the way you walk), sprint, jump, dash |
 | Left mouse | attack the way you face (in place, or stepping into it if you're moving); click again for the combo; hold to draw a bow or slingshot, let go to shoot. While you hold it, your character turns toward the crosshair |
-| Right mouse | hold: **block** (brace behind your weapon, facing the crosshair; a slow walk, no attacking). A hit from the front loses 65% with a sword, club or staff, 40% with fists, a bow, a slingshot or the wand (half that against Thunderhorn); none from behind. Drawing a bow or slingshot zooms in on its own |
+| Left mouse, spells | v0.12.18: **hold** to see where the spell will land (a ring on the ground at its real size, the Fireball's arc, the beam's line, your reach; only you see it), **let go to cast**. The Shield and Heal Aura are still held |
+| Right mouse | hold: **aim** (zoom in; with the staff or wand it shows the spell's ring too). Drawing a bow or slingshot zooms in on its own |
+| Cancel | while holding left mouse: click right mouse (if you're already holding it to aim, let go and click it again) or press **X**: the spell isn't cast; a drawn bow or slingshot is lowered without shooting |
+| F | hold: **block** (brace behind your weapon, facing the crosshair; a slow walk, no attacking). A hit from the front loses 65% with a sword, club or staff, 40% with fists, a bow, a slingshot or the wand (half that against Thunderhorn); none from behind |
 | E | pick up the weapon you're standing at (ammo is picked up by walking over it); next to a fallen fruit with no weapon in reach, eat it (+18 HP; walking over a fallen apple while hurt eats it too) |
 | 1-7 | fists, club, sword, bow, slingshot, staff, wand (the ones you have) |
 | Mouse wheel | staff or wand in hand: next / previous spell; otherwise next / previous weapon you own |
@@ -1038,6 +1041,22 @@ every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_te
   percentile, 48% of frames with a visible jolt) to 0.025 m (0.08 m; 0% jolts). `--netsim` now covers his state too.
 - Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
   guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).
+
+## What's new in 0.12.18 (aim rings, cancel, F to block)
+
+- **Controls**: F blocks (was right mouse); right mouse aims (zoom) again; X cancels.
+- **Hold to aim a spell, let go to cast** (`Main._attack_buttons`): while the left button is down a ring shows where
+  it will land, at its real size and your mastery (`scripts/aim_preview.gd`, drawn on your screen only): Lightning,
+  Meteor (and its extra rocks), Arcane Storm, Gravity Well (its pull too), Golem, Stone Titan where they land and
+  your reach; the Fireball's arc to where it bursts and its blast; Stun's bolt and burst; Spark Beam's and Life Drain's
+  line; Teleport's arrival; Frost Nova, Heal Aura and Fog round you.
+- **Cancel** a spell or a drawn bow or slingshot: right-click while holding left (already aiming: let go of right and
+  click again), or X (`Sim.Btn.CANCEL` lowers the draw without shooting).
+- **Life Drain is easier to land**: reaches 22 m (was 18) and latches onto an enemy up to 1.6 m off your aim (a little
+  more far away; never through walls; `Net.drain_assist`). The preview rings the enemy it will catch.
+- **Enemies**: every fighter has its own reaction speed (x0.8 to x1.45) and slower, more varied reactions overall;
+  their dashes depend on their weapon: a sword or fists like yours, a bow or slingshot a bit shorter, the wand
+  shorter, a club or the staff about half the ground (`NpcAI.DASH_STYLE`).
 
 ## What's new in 0.12.17 (fewer dodges)
 

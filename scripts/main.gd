@@ -66,6 +66,7 @@ var aiming := false          # right mouse held: zoomed aim
 var attack_block_until := 0  # msec: the click that grabs the mouse doesn't also swing
 var pause_menu: Control
 var action_sounds: ActionSounds
+var aim_preview: AimPreview
 var music: Music
 var pause_char: OptionButton
 var joining_until := 0     # msec: waiting for the host to answer a Join
@@ -76,13 +77,16 @@ var prize: PrizeScreen     # victory (the prize) and defeat screens
 var audit := {}   # --log: counts of every replicated event this client received (network audit)
 # v0.12.2 selection and orders (see "controls"): the spell hotbar, the radial wheels, taps and holds
 const HOLD_MS := 220         # a key held this long opens its wheel; let go sooner: a tap
-const HELP_LINE := "WASD move  Shift sprint  Space jump  Q dash  LMB attack / cast  RMB block  E use  V view  P PvP  Esc menu  F1 all controls  ` console\nWeapons: 1-7, mouse wheel, tap Tab last, hold Tab wheel     Spells (staff / wand): mouse wheel, R next, Shift+R back, hold R wheel, Ctrl+1-8     Golems: tap G follow / stay, hold G orders, middle mouse attack / go"
+const HELP_LINE := "WASD move  Shift sprint  Space jump  Q dash  LMB attack / cast (hold to aim a spell, let go to cast)  RMB aim  F block  X cancel  E use  V view  P PvP  Esc menu  F1 all controls  ` console\nWeapons: 1-7, mouse wheel, tap Tab last, hold Tab wheel     Spells (staff / wand): mouse wheel, R next, Shift+R back, hold R wheel, Ctrl+1-8     Golems: tap G follow / stay, hold G orders, middle mouse attack / go"
 ## Every control, for the F1 panel (and the Esc menu's Controls button). Keep in step with README "Controls".
 const CONTROLS := [
 	["Move", "WASD (relative to the camera); Shift sprint, Space jump, Q dash"],
-	["Look / aim", "Mouse orbits the camera; drawing a bow or slingshot zooms in"],
-	["Attack / cast", "Left mouse: swing (click again for the combo), hold to draw a bow or slingshot, hold to cast"],
-	["Block", "Hold right mouse: brace behind your weapon, facing the crosshair (a slow walk, no attacking). Hits from the"],
+	["Look / aim", "Mouse orbits the camera; hold right mouse to aim (zoom in; drawing a bow or slingshot zooms too)"],
+	["Attack / cast", "Left mouse: swing (click again for the combo), hold to draw a bow or slingshot (let go to shoot)"],
+	["", "Spells: hold left mouse to see where it lands (only you see the ring), let go to cast. Shield, Heal Aura: hold"],
+	["Cancel", "While holding left mouse: click right mouse (already aiming? let go of it and click again) or press X:"],
+	["", "the spell isn't cast, the bow or slingshot is lowered without shooting"],
+	["Block", "Hold F: brace behind your weapon, facing the crosshair (a slow walk, no attacking). Hits from the"],
 	["", "front lose 65% with a sword, club or staff, 40% with fists, a bow, a slingshot or the wand; none from behind"],
 	["Use", "E: pick up a weapon, open the vault, press the Duel Stone, eat fruit"],
 	["Weapons", "1-7 fists, club, sword, bow, slingshot, staff, wand (the ones you have)"],
@@ -325,6 +329,10 @@ void fragment() {
 	add_child(magic_fx)
 	magic_fx.setup(net, self)
 	magic_fx._vault_door = vault_door
+	aim_preview = AimPreview.new()   # v0.12.18: where your spell will land (your screen only)
+	aim_preview.name = "AimPreview"
+	add_child(aim_preview)
+	aim_preview.setup(net, self)
 	action_sounds = ActionSounds.new()   # v0.12.15: the sounds of swings, shots, casts, spells, jumps and steps
 	action_sounds.name = "ActionSounds"
 	add_child(action_sounds)
@@ -469,8 +477,9 @@ func _process(_delta: float) -> void:
 	var me := Vector3.ZERO
 	if avatars.has(net.my_id):
 		me = (avatars[net.my_id] as Node3D).position
-	# zoomed aim (v0.12.5): while a bow or slingshot is drawn (the right mouse button blocks now)
-	aiming = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and net.predicted != null and net.predicted.charge > 0
+	# zoomed aim: while a bow or slingshot is drawn, or (v0.12.18, Jacob) while the right mouse button is held
+	aiming = Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and net.predicted != null and (net.predicted.charge > 0
+		or (Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not (radial and radial.visible) and not bot))
 	cam.fov = lerpf(cam.fov, 46.0 if aiming else 70.0, clampf(_delta * 12.0, 0.0, 1.0))
 	# the camera follows a smoothed focus point: steady, without lagging behind fast moves
 	cam_focus = me if cam_focus == Vector3.INF else cam_focus.lerp(me, 1.0 - exp(-_delta * 18.0))
@@ -497,6 +506,19 @@ func _process(_delta: float) -> void:
 
 	if action_sounds:
 		action_sounds.update(_delta, avatars)
+	if aim_preview:
+		if _args().has("preview"):   # testing: --preview <spell name>: that spell in hand, its preview shown
+			var nm := str(_args()["preview"]).replace("_", " ")
+			for w in [Weapons.STAFF, Weapons.WAND]:
+				var i := Weapons.idx(w, nm)
+				if i >= 0:
+					weapon_slot = w
+					spell_sel[w] = i
+			bot_preview = true
+			cam_pitch = float(_args().get("pitch", -0.35))
+		var rmb_aim := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
+			and not (radial and radial.visible) and not _cancelled
+		aim_preview.update(previewing or rmb_aim or bot_preview)
 	_update_projectiles(frac)
 	_update_items(_delta)
 	_update_holds()
@@ -557,14 +579,107 @@ func _sample_input() -> Array:
 		if Input.is_physical_key_pressed(KEY_SPACE): b |= Sim.Btn.JUMP
 		if Input.is_physical_key_pressed(KEY_SHIFT): b |= Sim.Btn.SPRINT
 		if Input.is_physical_key_pressed(KEY_Q): b |= Sim.Btn.DASH
-		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and Time.get_ticks_msec() > attack_block_until and not (radial and radial.visible):
-			b |= Sim.Btn.ATTACK
+		var lmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and Time.get_ticks_msec() > attack_block_until and not (radial and radial.visible)
+		b |= _attack_buttons(lmb)
 		if Input.is_physical_key_pressed(KEY_E): b |= Sim.Btn.INTERACT
-		if view == View.FIRST: b |= Sim.Btn.FACE_CAM
-		# v0.12.5: the right mouse button braces behind your weapon (block); it used to aim (the bow and slingshot
-		# now zoom in on their own while drawn)
-		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and not (radial and radial.visible): b |= Sim.Btn.BLOCK
+		if view == View.FIRST or previewing: b |= Sim.Btn.FACE_CAM
+		# v0.12.18 (Jacob): F braces behind your weapon (block); the right mouse button aims again (zoom)
+		if Input.is_physical_key_pressed(KEY_F) and not (radial and radial.visible): b |= Sim.Btn.BLOCK
+	else:
+		_attack_buttons(false)
 	return [b, cam_yaw, aim_pitch, weapon_slot, aim_yaw, face_yaw, int(spell_sel.get(weapon_slot, 0)), aim_point]
+
+
+## v0.12.18 HOLD TO AIM A SPELL, LET GO TO CAST; CANCEL (Jacob's friend: "when you press LMB to cast if you hold it down
+## maybe the casting area appears with its area of effect circle, and then when you release LMB it then casts the
+## spell... if you wanted to cancel... press RMB to cancel it and release LMB without using the spell. Same cancel
+## method with a bow or slingshot"). Jacob: "what if we are already aiming with right mouse?":
+##   - a spell that's thrown, called down or summoned (not the Shield or Heal Aura, which are held): holding the left
+##     button shows where it will land (AimPreview) and sends nothing; letting go casts it (ATTACK is sent until the
+##     cast starts, or CAST_PULSE ticks: if it isn't ready, it doesn't go);
+##   - cancel, while the left button is down: a right-button PRESS that came after the left one went down (if you were
+##     already holding right to aim, let go and tap it again; letting go of right alone never cancels), or X any time.
+##     A spell then isn't cast; a drawn bow or slingshot is lowered without shooting (Sim.Btn.CANCEL); a swing can't be
+##     taken back. Nothing more happens until the left button comes up.
+const CAST_PULSE := 20
+var previewing := false      # holding the left button with a spell to let go of
+var _lmb_was := false
+var _rmb_was := false
+var _cancelled := false
+var _pulse := 0
+var _pulse_swing := 0
+
+
+var bot_preview := false     # (tests: show the preview)
+
+
+## v0.12.18 AimPreview: the enemy Life Drain will latch onto, from what this screen sees (Net.drain_assist).
+func drain_preview_target(hand: Vector3, aim: Vector3, reach: float, assist: float):
+	var cands := []
+	var my_pvp := bool(net.roster.get(net.my_id, {}).get("pvp", false))
+	for id in avatars.keys():
+		if id == net.my_id or not avatars[id].visible:
+			continue
+		var r: Dictionary = net.roster.get(id, {})
+		var foe := false
+		if int(r.get("kind", 0)) != 0:
+			foe = int(r.get("side", 1)) == Net.Side.HOSTILE and not bool(r.get("charmed", false))
+		else:
+			foe = my_pvp and bool(r.get("pvp", false))
+		if foe:
+			cands.append([id, avatars[id].position])
+	var bv = get("boss_view")
+	if bv != null and bv.alive:
+		cands.append([Boss.ID, bv.pos if bv.get("pos") != null else Vector3.INF])
+	cands = cands.filter(func(c): return c[1] != Vector3.INF)
+	var got = Net.drain_assist(hand, aim, reach, assist, cands)
+	return null if got == null else (got[1] as Vector3) - Vector3(0, 1.1, 0)
+
+
+static func preview_spell(sp: Dictionary) -> bool:
+	return not sp.get("hold", false) and not sp.get("channel", false)
+
+
+func _attack_buttons(lmb: bool) -> int:
+	var st := net.predicted
+	var rmb := Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	var x_key := Input.is_physical_key_pressed(KEY_X) and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not (console and console.visible)
+	var b := 0
+	if lmb and not _lmb_was:
+		_cancelled = false
+	if lmb and ((rmb and not _rmb_was) or x_key):
+		_cancelled = true
+	var magic_preview := false
+	if st != null and Weapons.is_magic(st.weapon):
+		var lvl := st.staff_lvl if st.weapon == Weapons.STAFF else st.wand_lvl
+		var si := int(spell_sel.get(weapon_slot, st.spell))
+		if not Weapons.unlocked(st.weapon, si, lvl):
+			si = st.spell
+		magic_preview = preview_spell(Weapons.spell(st.weapon, si))
+	previewing = false
+	if magic_preview:
+		if lmb and not _cancelled:
+			previewing = true
+		elif not lmb and _lmb_was and not _cancelled:
+			_pulse = CAST_PULSE   # let go: cast it
+			_pulse_swing = st.swing_n
+		if _pulse > 0:
+			if st.swing_n != _pulse_swing:
+				_pulse = 0   # it went
+			else:
+				b |= Sim.Btn.ATTACK
+				_pulse -= 1
+	else:
+		_pulse = 0
+		if lmb and not _cancelled:
+			b |= Sim.Btn.ATTACK
+		if _cancelled and lmb:
+			b |= Sim.Btn.CANCEL
+	if not lmb and _cancelled and not _lmb_was:
+		_cancelled = false
+	_lmb_was = lmb
+	_rmb_was = rmb
+	return b
 
 
 ## Aim where the crosshair points: find what the camera's centre ray hits (ground, a pillar, or 80 m away) and pitch
@@ -2508,7 +2623,7 @@ func _name_ready() -> bool:
 func _real_play() -> bool:
 	if bot:
 		return false
-	for a in ["give-all", "give-staff", "give-wand", "max-level", "screenshot", "no-save"]:
+	for a in ["give-all", "give-staff", "give-wand", "max-level", "screenshot", "no-save", "preview"]:
 		if _args().has(a):
 			return false
 	return true
