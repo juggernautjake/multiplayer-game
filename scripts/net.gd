@@ -1927,7 +1927,7 @@ func _cast(p: ServerPlayer, inp: Sim.PlayerInput, before: Vector3) -> void:
 					if not players.has(g.owner) or can_hurt(p.id, g.owner):
 						golem_stun[g.id] = [p.id, server_tick + int(sp.duration)]
 						mastery_add(p.id, "Stun", float(sp.duration) * Config.DT)
-			if boss != null and _dist_to_body(end, boss_surface(end)) <= r:
+			if boss != null and (int(tgt[0]) == Boss.ID or _dist_to_body(end, boss_surface(end)) <= r + STUN_BOSS_PAD):
 				boss.stunned(server_tick)   # it only staggers him (shorter each time)
 				caught += 1
 				mastery_add(p.id, "Stun", 2.0)
@@ -2274,10 +2274,19 @@ func _stun_target(p: ServerPlayer, from: Vector3, aim: Vector3, reach: float) ->
 			if t < best_t:
 				best_t = t
 				best = -1000 - g.id
+	# v0.12.19 (Jacob: "the stun was just going through him"): Thunderhorn stops the bolt too, with a little to spare
+	if boss != null and boss.state != Boss.S.DEATH:
+		var tb := _ray_cyl(from, dir, boss.pos, Boss.RADIUS + STUN_BOSS_PAD, Boss.HEIGHT + STUN_BOSS_PAD)
+		if tb < best_t:
+			best_t = tb
+			best = Boss.ID
 	var wall := WorldLayout.ray_hit(from, dir, best_t)
 	if wall < best_t:
 		return [0, from + dir * wall]
 	return [best, from + dir * best_t]
+
+
+const STUN_BOSS_PAD := 0.6   # m added round Thunderhorn for the Stun bolt to meet him
 
 
 func _ray_cyl(o: Vector3, d: Vector3, c: Vector3, r: float, h: float) -> float:

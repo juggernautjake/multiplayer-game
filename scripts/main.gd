@@ -736,25 +736,30 @@ func _ray_people(o: Vector3, d: Vector3, max_t: float) -> float:
 	var best := INF
 	var cyls: Array = []
 	for p: Vector3 in WorldLayout.DUMMIES:
-		cyls.append(p)
+		cyls.append([p, 0.45, 1.9])
 	for id in avatars.keys():
 		if id != net.my_id and avatars[id].visible:
-			cyls.append(avatars[id].position)
-	for c: Vector3 in cyls:
+			cyls.append([avatars[id].position, 0.45, 1.9])
+	# v0.12.19 (Jacob: "we should be able to aim directly at the boss and hit him"): the crosshair stops on Thunderhorn
+	if boss_view != null and boss_view.alive:
+		cyls.append([boss_view.pos, Boss.RADIUS, Boss.HEIGHT])
+	for cy in cyls:
+		var c: Vector3 = cy[0]
+		var rad: float = cy[1]
 		var oc := Vector2(o.x - c.x, o.z - c.z)
 		var dd := Vector2(d.x, d.z)
 		var a := dd.dot(dd)
 		if a < 1e-8:
 			continue
 		var b := 2.0 * oc.dot(dd)
-		var cc := oc.dot(oc) - 0.45 * 0.45
+		var cc := oc.dot(oc) - rad * rad
 		var disc := b * b - 4.0 * a * cc
 		if disc < 0.0:
 			continue
 		var tt := (-b - sqrt(disc)) / (2.0 * a)
 		if tt > 0.0 and tt < max_t:
 			var y := o.y + d.y * tt
-			if y > c.y and y < c.y + 1.9 and tt < best:
+			if y > c.y and y < c.y + float(cy[2]) and tt < best:
 				best = tt
 				ray_hit_centre = c
 	return best

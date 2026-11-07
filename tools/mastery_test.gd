@@ -83,7 +83,8 @@ func _initialize() -> void:
 		"fireball radius x1.25 / x1.5 and +20% / +40%; lightning +25% / +50%, chains 8 / 10 m, 7 / 9 jumps")
 	var st3 := Weapons.spell_named_lv(Weapons.WAND, "Stun", 3)
 	check(int(Weapons.spell_named_lv(Weapons.WAND, "Stun", 2).duration) == 240 and int(st3.duration) == 300 and int(st3.charm) > 0
-		and float(st3.radius) == 3.0, "stun 3 / 4 / 5 s, wider at II, charms at III")
+		and float(Weapons.spell_named_lv(Weapons.WAND, "Stun", 2).radius) == 3.25 and float(st3.radius) == 4.0,
+		"stun 3 / 4 / 5 s, its burst 2.5 / 3.25 / 4 m, charms at III")
 	check(Weapons.spell_named_lv(Weapons.STAFF, "Shield", 1).cost == 10 and Weapons.spell_named_lv(Weapons.STAFF, "Shield", 2).cost == 5
 		and bool(Weapons.spell_named_lv(Weapons.STAFF, "Shield", 3).get("reflect", false)), "shield: half the cost at II, reflects at III")
 	check(Weapons.spell_named_lv(Weapons.WAND, "Fog", 1).get("poison", 0) == 0 and Weapons.spell_named_lv(Weapons.WAND, "Fog", 2).poison == 2

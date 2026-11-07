@@ -1042,6 +1042,15 @@ every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_te
 - Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
   guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).
 
+## What's new in 0.12.19 (Stun on Thunderhorn)
+
+- **Stun hits Thunderhorn**: the bolt used to pass straight through him (it only looked for players and golems). It
+  now stops on his body, with 0.6 m to spare (`Net.STUN_BOSS_PAD`), and a burst on the ground next to him catches him
+  0.6 m further out too.
+- **Aim right at him**: the crosshair now stops on Thunderhorn's body (`Main._ray_people`), so every shot and spell
+  aims at him, not at the ground behind him.
+- **The Stun's burst grows with mastery**: 2.5 m, 3.25 m at II, 4 m at III (was 2.5 / 3 / 3).
+
 ## What's new in 0.12.18 (aim rings, cancel, F to block)
 
 - **Controls**: F blocks (was right mouse); right mouse aims (zoom) again; X cancels.

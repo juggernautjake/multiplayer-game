@@ -140,9 +140,9 @@ const DATA := [
 		# v0.12.7 mastery III: an NPC it holds is charmed for `charm` ticks after: it fights for the caster (Net._charm)
 		{ "name": "Stun", "cost": 0, "windup": 10, "cast": 26, "cooldown": 10, "recharge": 300, "range": 24.0, "duration": 180, "radius": 2.5,
 		  "mastery": [120, 360], "by": "seconds of stun on enemies + a quarter of the damage your side deals them while stunned",
-		  "m2": { "duration": 240, "radius": 3.0, "text": "Holds 4 s, a wider burst" },
-		  "m3": { "duration": 300, "radius": 3.0, "charm": 360,
-			"text": "Holds 5 s; challengers and units fight for you 6 s after" } },
+		  "m2": { "duration": 240, "radius": 3.25, "text": "Holds 4 s, a wider burst (3.25 m)" },   # v0.12.19: 2.5 / 3.25 / 4 m
+		  "m3": { "duration": 300, "radius": 4.0, "charm": 360,
+			"text": "Holds 5 s, a wide burst (4 m); challengers and units fight for you 6 s after" } },
 		# level 2 (3 kills with the wand; v0.12.0, replaces Earth Spikes): a cloud of fog round the caster (see Fog):
 		# `half` m each way from the centre, `duration` ticks, thinning and drifting over the last `fade`.
 		# v0.12.7 mastery: `poison` damage a second to enemies inside (Net._server_fog_poison); III: slowed inside too
