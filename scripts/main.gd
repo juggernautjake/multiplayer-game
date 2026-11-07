@@ -870,6 +870,35 @@ func _bot_console() -> Array:
 	if lines.has(bot_t):
 		console.edit.text = lines[bot_t]
 		console._submit(lines[bot_t])
+	if bot_t == 200:   # v0.12.14: Ctrl+V pastes from the clipboard (a real key event through the input pipeline)
+		DisplayServer.clipboard_set("give all me")
+		console.edit.text = ""
+		console.edit.grab_focus()
+		for down in [true, false]:
+			var e := InputEventKey.new()
+			e.keycode = KEY_V
+			e.physical_keycode = KEY_V
+			e.ctrl_pressed = true
+			e.pressed = down
+			Input.parse_input_event(e)
+	if bot_t == 206:
+		print("[console-check] %s  Ctrl+V pastes into the console (got '%s', focus %s)" % ["ok  " if console.edit.text == "give all me" else "FAIL",
+			console.edit.text, console.edit.has_focus()])
+		# then a click elsewhere takes the box's focus (as after copying something in another window), and a two-line copy
+		console.edit.text = ""
+		console.edit.release_focus()
+		DisplayServer.clipboard_set("spawn sword 2\r\nfriendly")
+		for down in [true, false]:
+			var e := InputEventKey.new()
+			e.keycode = KEY_V
+			e.physical_keycode = KEY_V
+			e.ctrl_pressed = true
+			e.pressed = down
+			Input.parse_input_event(e)
+	if bot_t == 212:
+		print("[console-check] %s  without focus, Ctrl+V still pastes, on one line (got '%s', focus %s)" % [
+			"ok  " if console.edit.text == "spawn sword 2 friendly" and console.edit.has_focus() else "FAIL", console.edit.text, console.edit.has_focus()])
+		console.edit.text = ""
 	if bot_t == 240:
 		console.toggle()
 	cam_yaw = PI + 0.4

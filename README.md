@@ -1039,6 +1039,13 @@ every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_te
 - Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
   guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).
 
+## What's new in 0.12.14
+
+- **Paste into the dev console**: Ctrl+V or Shift+Insert, or right-click the box and choose Paste. It works even after
+  you've clicked elsewhere (copying something in another window took the box's focus, so pasting and typing did
+  nothing); coming back to the game window puts the focus back in the box, and a copied line break becomes a space.
+  Checked by `--bot console`.
+
 ## What's new in 0.12.13
 
 - **The staff and the wand come back**: 2 minutes after one is taken, a new one appears on top of the tower (the

@@ -46,6 +46,7 @@ func _init(n: Net) -> void:
 	edit.add_theme_font_override("font", mono)
 	edit.add_theme_font_size_override("font_size", 16)
 	edit.text_submitted.connect(_submit)
+	edit.context_menu_enabled = true   # right-click in the box: Paste (and Copy, Cut, Select All)
 	edit.gui_input.connect(_edit_input)
 	box.add_child(edit)
 	visible = false
@@ -76,6 +77,34 @@ func _input(event: InputEvent) -> void:
 	elif visible and k and k.pressed and k.physical_keycode == KEY_ESCAPE:
 		toggle()
 		get_viewport().set_input_as_handled()
+	elif visible and k and k.pressed and not edit.has_focus() and _is_paste(k):
+		paste()   # v0.12.14: pasting works even after a click elsewhere took the text box's focus
+		get_viewport().set_input_as_handled()
+	elif visible and k and k.pressed and not edit.has_focus() and not k.ctrl_pressed and k.unicode >= 32:
+		edit.grab_focus()   # typing goes back into the box too (the key itself then lands in it)
+
+
+## v0.12.14 (Jacob: "make it so that I can paste into the dev console from my clipboard"): Ctrl+V or Shift+Insert.
+static func _is_paste(k: InputEventKey) -> bool:
+	return (k.ctrl_pressed and (k.keycode == KEY_V or k.physical_keycode == KEY_V)) \
+		or (k.shift_pressed and (k.keycode == KEY_INSERT or k.physical_keycode == KEY_INSERT))
+
+
+## Put the clipboard's text in the box at the caret (one line: line breaks become spaces) and keep typing there.
+func paste() -> void:
+	edit.grab_focus()
+	var clip := DisplayServer.clipboard_get().replace("\r", "").replace("\n", " ").replace("\t", " ").strip_edges()
+	if clip == "":
+		return
+	var c := edit.caret_column
+	edit.text = edit.text.left(c) + clip + edit.text.substr(c)
+	edit.caret_column = c + clip.length()
+
+
+## The game window got focus back (you went to copy something): the box gets its focus back too.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_IN and visible and edit:
+		edit.grab_focus.call_deferred()
 
 
 func _can_open() -> bool:

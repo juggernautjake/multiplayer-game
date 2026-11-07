@@ -5,6 +5,7 @@ Every command in the game's dev console, as of v0.12.12.
 ## Opening the console
 
 - Press **`** (the backtick key, left of **1**, under **Esc**) to open and close it.
+- **Ctrl+V** (or Shift+Insert, or right-click > Paste) pastes a command you copied.
 - **Tab** finishes a command or name for you. **Up / Down** go back through what you typed before.
 - The **host** can always use the commands.
 - **Guests** can only use them after the host types `cheats on`. The host turns that back off with `cheats off`.
