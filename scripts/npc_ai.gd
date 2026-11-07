@@ -28,11 +28,20 @@ const SHOT_ERR := [0.1, 0.075, 0.055]        # radians, at 10 m, standing target
 const SHOT_START := [0.02, 0.028, 0.036]     # chance a tick to start a draw when ready
 const SHOT_HOLD := [32, 24, 16]              # ticks held at full draw before letting go
 # v0.12.0 (Jacob): no dash-dodging at all at tier 1 (difficulty 0); it starts at tier 2 and grows at tier 3
-const DODGE := [0.0, 0.6, 0.85]              # chance to dodge a threat it noticed
+## v0.12.17 (Jacob: "the enemies... dodge out of the way of attacks so quickly and constantly... really hard to hit
+## people with spells... the harder they get the more they dodge, but not even as much as they do now"): every tier's
+## chances are well under what tier 3 had (0.85 / 0.65), a dash-dodge is followed by DODGE_REST ticks with no other,
+## and they juke less (STRAFE_FLIP / STRAFE_HOLD / STRAFE_STILL below).
+const DODGE := [0.0, 0.25, 0.4]              # chance to dodge a threat it noticed (was 0 / 0.6 / 0.85)
+const DODGE_REST := [0, 240, 150]            # ticks after a dash-dodge before it will dodge again (4 s / 2.5 s)
+const STRAFE_FLIP := 0.45                    # chance it switches the side it circles to (was 0.55)
+const STRAFE_HOLD := [90, 180]               # ticks between those choices (was 40-110: a constant juke)
+const STRAFE_STILL := [0.45, 0.35, 0.25]     # chance a choice is to stand its ground instead (an easier target)
+var _dodge_rest := 0
 # v0.12.0 challengers learn to dash: area spells about to land on them (lightning, meteors, storm bolts, Thunderhorn's
 # called lightning: their warning rings) and Thunderhorn's charge or rush coming down a line through them. Higher tiers
 # see these more often (the same REACT delay first, plus SPELL_REACT for reading the warning), never always.
-const SPELL_DODGE := [0.0, 0.4, 0.65]
+const SPELL_DODGE := [0.0, 0.18, 0.3]        # (was 0 / 0.4 / 0.65)
 const SPELL_REACT := [10, 6, 3]
 var threat_kind := ""          # what _threat found: "shot", "draw", "melee", "spell", "charge"
 var dodges := 0                # dashes made to dodge (tests)
@@ -184,8 +193,13 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 	var side := Vector2(-dir.y, dir.x)   # to its left
 	_strafe_t -= 1
 	if _strafe_t <= 0:   # change the side it circles to now and then, not on a beat
-		_strafe = -_strafe if rng.randf() < 0.55 else _strafe
-		_strafe_t = rng.randi_range(40, 110)
+		if rng.randf() < STRAFE_STILL[difficulty]:
+			_strafe = 0.0   # stand its ground a while
+		else:
+			var was := _strafe if _strafe != 0.0 else (1.0 if rng.randf() < 0.5 else -1.0)
+			_strafe = -was if rng.randf() < STRAFE_FLIP else was
+		_strafe_t = rng.randi_range(STRAFE_HOLD[0], STRAFE_HOLD[1])
+	_dodge_rest -= 1
 	var low := float(s.hp) / float(Sim.MAX_HP) < 0.3 and not aggressive   # (a minion fights on: v0.12.9)
 	if low and _retreat <= 0 and rng.randf() < 0.01:
 		_retreat = rng.randi_range(90, 160)
@@ -202,10 +216,11 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 			noticed = net.server_tick - _threat_seen >= int(r[0]) / 2 + SPELL_REACT[difficulty] + rng.randi_range(0, int(r[1]))
 		if noticed and _react <= 0 and (threat_kind == "spell" or threat_kind == "charge"):
 			_react = 30
-			if rng.randf() < SPELL_DODGE[difficulty] and s.dash_cd == 0:
+			if _dodge_rest <= 0 and rng.randf() < SPELL_DODGE[difficulty] and s.dash_cd == 0:
 				buttons |= Sim.Btn.DASH
 				move = threat
 				dodges += 1
+				_dodge_rest = DODGE_REST[difficulty]
 		elif noticed and _react <= 0:
 			_react = 30
 			var sh := Weapons.idx(Weapons.STAFF, "Shield")
@@ -215,10 +230,11 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 				_wind = 0
 				_cast_t = 0
 				_note_cast("Shield")
-			elif rng.randf() < DODGE[difficulty] and s.dash_cd == 0:
+			elif _dodge_rest <= 0 and rng.randf() < DODGE[difficulty] and s.dash_cd == 0:
 				buttons |= Sim.Btn.DASH
 				move = threat
 				dodges += 1
+				_dodge_rest = DODGE_REST[difficulty]
 	else:
 		_threat_seen = -1
 	# ---- how it moves and fights

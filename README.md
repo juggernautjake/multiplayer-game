@@ -1039,6 +1039,14 @@ every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_te
 - Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
   guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).
 
+## What's new in 0.12.17 (fewer dodges)
+
+- **Enemies dodge far less** (`scripts/npc_ai.gd`): challengers and Thunderhorn's minions were dashing out of nearly
+  every shot and spell. Dash-dodge chances are now 0 / 25% / 40% for shots and swings (was 0 / 60% / 85%) and
+  0 / 18% / 30% for warning rings and his charge (was 0 / 40% / 65%), so even tier 3 dodges less than tier 2 did; after
+  a dodge they won't dodge again for 4 s (tier 2) or 2.5 s (tier 3). They also juke less: they keep circling one way
+  for 1.5 to 3 s (was 0.7 to 1.8 s) and often plant their feet instead (45% / 35% / 25% of the time by tier).
+
 ## What's new in 0.12.16 (music)
 
 - **Music for what's happening** (`scripts/music.gd`; composed and synthesised from scratch by

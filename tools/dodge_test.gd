@@ -43,6 +43,8 @@ func _initialize() -> void:
 
 	check(NpcAI.SPELL_DODGE[0] < NpcAI.SPELL_DODGE[1] and NpcAI.SPELL_DODGE[1] < NpcAI.SPELL_DODGE[2] and NpcAI.SPELL_DODGE[2] < 1.0
 		and NpcAI.SPELL_REACT[0] > NpcAI.SPELL_REACT[2], "spell / charge dodging: likelier and quicker by tier, never certain")
+	check(NpcAI.DODGE[2] < 0.6 and NpcAI.SPELL_DODGE[2] < 0.4 and NpcAI.DODGE_REST[1] > NpcAI.DODGE_REST[2] and NpcAI.DODGE_REST[2] >= 120,
+		"v0.12.17: even the top tier dodges less than tier 2 used to, and rests between dodges")
 
 	# ---- lightning warning rings under it
 	var rates := []
@@ -61,7 +63,7 @@ func _initialize() -> void:
 		reacts.append(float(react_sum) / maxf(n, 1))
 	net.pending_spells = []
 	print("      lightning ring dodged: %s, after %s ticks on average" % [str(rates), str(reacts)])
-	check(rates[0] < rates[2] and rates[1] < rates[2] and rates[2] < 0.95 and rates[2] > 0.25,
+	check(rates[0] < rates[2] and rates[1] < rates[2] and rates[2] < 0.5 and rates[2] > 0.12,
 		"challengers dash out of lightning rings more at higher tiers, never always (%.0f%% / %.0f%% / %.0f%%)" % [rates[0] * 100, rates[1] * 100, rates[2] * 100])
 	check(reacts[2] >= 3.0, "and only after a reaction delay (%.0f ticks at the top tier)" % reacts[2])
 
@@ -81,7 +83,7 @@ func _initialize() -> void:
 				n += 1
 		crates.append(float(n) / 60.0)
 	print("      charge dodged: %s" % str(crates))
-	check(crates[0] < crates[2] and crates[2] < 0.95 and crates[2] > 0.25, "they side-step his charge more at higher tiers, never always")
+	check(crates[0] < crates[2] and crates[2] < 0.5 and crates[2] > 0.12, "they side-step his charge more at higher tiers, never always")
 	var side := func(q: Net.ServerPlayer) -> void:
 		b.state = Boss.S.CHARGE
 		b.pos = q.state.pos + Vector3(8.0, 0, -14)   # a charge well off to the side: nothing to dodge
