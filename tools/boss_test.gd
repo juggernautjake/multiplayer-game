@@ -274,6 +274,8 @@ func _initialize() -> void:
 	_maximin_tests()
 	_tree_tests()
 	_home_tests()
+	_timing_tests()
+	_view_sync_tests()
 	print("%d failed" % bad)
 	quit(bad)
 
@@ -801,7 +803,9 @@ func _home_tests() -> void:
 	var back := _attacks_in(away, 45 * 60, true)
 	print("from %.0f m out: %.0f m from the arena after 45 s; %d attacks (%d in the arena)" % [back[0], back[1], back[2], base[2]])
 	check(back[1] < WorldLayout.ARENA_R + 15.0, "after a far leap he is back near the arena within 45 s of fighting (%.0f m)" % back[1])
-	check(back[2] >= base[2] * 0.7, "and keeps attacking on the way (%d vs %d attacks)" % [back[2], base[2]])
+	# (v0.12.9: 0.6, was 0.7: a charge out there runs its whole 30 m now; it used to stop after one tick outside the
+	# arena, which counted as an attack)
+	check(back[2] >= base[2] * 0.6, "and keeps attacking on the way (%d vs %d attacks)" % [back[2], base[2]])
 	var lone := Boss.new(c + Vector3(150, 0, -100), 1, 9)
 	lone.state = Boss.S.IDLE
 	var went_home := false
@@ -1151,3 +1155,234 @@ func _tell(kind: String) -> String:
 		"balls": return "%.2f s" % (20 * Config.DT)
 		"orbs": return "0.5 s launch"
 	return "?"
+
+
+# ================================================================ v0.12.9 attack timing and the trees, in whole fights
+## Seeded fights against scripted players (1 or 2: circling him at changing ranges, side-stepping his charges, hitting
+## him at a realistic ~15 damage a second each with a meteor now and then, one landing wand Stuns; a golem at his
+## flank in some), with the Duel Stone cutscene armed and the arena's five apple trees standing. Every state change is
+## logged: [state, entry tick, ticks spent, next state, what it was meant to last, metres run, the planned path].
+const FIGHTS := 12
+const ATTACKS := [Boss.S.CHARGE_WIND, Boss.S.CHARGE, Boss.S.STOMP_WIND, Boss.S.STOMP, Boss.S.BEAM_WIND, Boss.S.BEAM,
+	Boss.S.CALL, Boss.S.ROAR, Boss.S.BALLS, Boss.S.GORE_WIND, Boss.S.GORE, Boss.S.TAIL_WIND, Boss.S.TAIL]
+const ACTIONS := [Boss.S.CHARGE, Boss.S.STOMP, Boss.S.BEAM, Boss.S.CALL, Boss.S.ROAR, Boss.S.BALLS, Boss.S.GORE, Boss.S.TAIL]
+const DESIGNED := [Boss.S.DAZED, Boss.S.DEATH]   # the only things allowed to cut an attack short
+
+
+## What an attack state is meant to last (ticks), as it starts (its variant, his enrage and the wind-up factor then).
+func _meant(b: Boss, st: int, from: int) -> int:
+	match st:
+		Boss.S.CHARGE_WIND: return maxi(int(34 * b.windup_k()), Boss.REC[Boss.S.CHARGE]) if from == Boss.S.CHARGE else b._wind(50)
+		Boss.S.CHARGE: return b.charge_len
+		Boss.S.STOMP_WIND: return b._wind(48)
+		Boss.S.STOMP: return (4 if b.variant > 0 else 3) * Boss.STOMP_EVERY + 12
+		Boss.S.BEAM_WIND: return b._wind(60)
+		Boss.S.BEAM: return 90 if b.variant == 0 else 160
+		Boss.S.CALL: return 60
+		Boss.S.ROAR: return Boss.ROAR_AT + 45
+		Boss.S.BALLS: return 45
+		Boss.S.GORE_WIND: return b._wind(32)
+		Boss.S.GORE: return 24
+		Boss.S.TAIL_WIND: return b._wind(30)
+		Boss.S.TAIL: return 32
+	return -1
+
+
+func _sim_fight(sd: int, n: int) -> Dictionary:
+	var c := Boss.arena_c()
+	var b := Boss.new(c + Vector3(0, 0, 4), n, sd * 7919)
+	b.cut_on = true
+	var rng := RandomNumberGenerator.new()
+	rng.seed = sd
+	var ppl := []
+	for i in n:
+		ppl.append({"id": i + 1, "pos": c + Vector3(-6 + 12 * i, 0, -10), "hp": 100, "r": 9.0 + 5.0 * i, "side": 1.0 if i == 0 else -1.0})
+	var gpos := c + Vector3(10, 0, 0)
+	var standing := []
+	for i in range(WorldLayout.TREES.size() - 5, WorldLayout.TREES.size()):
+		standing.append([i, WorldLayout.TREES[i][1]])
+	var lg := []   # [state, entered, ticks, next, meant, metres, planned]
+	var cur := {"st": b.state, "at": 0, "meant": -1, "from": b.pos, "plan": 0.0}
+	var res := {"log": lg, "trees50": -1.0, "staggers": [], "ticks": 0}
+	var on_change := func(k: int, prev: int) -> void:
+		lg.append([cur.st, cur.at, k - int(cur.at), b.state, cur.meant, _flat_d(b.pos, cur.from), cur.plan])
+		cur.st = b.state
+		cur.at = k
+		cur.meant = _meant(b, b.state, prev)
+		cur.from = b.pos
+		cur.plan = b.charge_m
+	for k in 40000:
+		if b.state == Boss.S.DEATH:
+			break
+		var people := []
+		for p in ppl:
+			people.append([p.id, p.pos, true, false, p.hp, 0, false, false])
+		var gl := [[7, gpos, false, 60]] if sd % 3 == 0 else []
+		b.trees = standing.duplicate()
+		b.apples = []
+		var st0 := b.state
+		b.tick(k, people, gl)
+		if b.state != st0:
+			on_change.call(k + 1, st0)
+		for f in b.felled:
+			for i in range(standing.size() - 1, -1, -1):
+				if int(standing[i][0]) == int(f[0]):
+					standing.remove_at(i)
+		if float(res.trees50) < 0.0 and b.hp <= b.max_hp / 2:
+			res.trees50 = 1.0 - standing.size() / 5.0
+		for h in b.hits:
+			for p in ppl:
+				if int(h[0]) == int(p.id):
+					p.hp = maxi(int(p.hp) - int(h[1]), 15)
+		b.felled.clear(); b.hits.clear(); b.fx.clear(); b.zaps.clear(); b.launches.clear(); b.strikes.clear()
+		b.slows.clear(); b.splats.clear()
+		var st1 := b.state
+		for p in ppl:   # circle him at a changing range, side-step charges, hit him
+			var rel: Vector3 = p.pos - b.pos
+			rel.y = 0.0
+			var out := rel.normalized() if rel.length() > 0.1 else Vector3.RIGHT
+			var tang: Vector3 = Vector3(-out.z, 0, out.x) * float(p.side)
+			var v: Vector3 = tang * 4.0 + out * clampf(float(p.r) - rel.length(), -1.0, 1.0) * 4.0
+			if b.state in [Boss.S.CHARGE, Boss.S.RUSH]:
+				v = tang * 8.0
+			p.pos += v * Config.DT
+			var off: Vector3 = p.pos - c
+			off.y = 0.0
+			if off.length() > 30.0:
+				p.pos = c + off.normalized() * 30.0
+			p.pos.y = 0.0
+			if k % 300 == 0:
+				p.r = rng.randf_range(6.0, 20.0)
+				p.side = -float(p.side) if rng.randf() < 0.3 else float(p.side)
+			if k % 30 == 0:
+				p.hp = mini(int(p.hp) + 1, 100)
+			if k % 30 == int(p.id) * 7 and b.state != Boss.S.ENTER:
+				b.hurt(6, int(p.id), "")
+			if k % 600 == 100 + int(p.id) * 50:
+				var before := b.state
+				b.hurt(40, int(p.id), "Meteor")   # 60: a big hit
+				if b.state == Boss.S.STAGGER and before != Boss.S.STAGGER:
+					res.staggers.append(before)
+			if int(p.id) == 1 and k % 330 == 0 and rng.randf() < 0.6:
+				b.stunned(k)
+		gpos = gpos.lerp(b.pos + Vector3(4, 0, 0), 0.02)
+		if b.state != st1:
+			on_change.call(k + 1, st1)
+		res.ticks = k
+	return res
+
+
+func _timing_tests() -> void:
+	var cut := {}         # attacks ended early by something not designed: "STATE->NEXT": count
+	var bad_next := {}    # attack states followed by something they shouldn't be
+	var short_rec := 0    # a new attack (or move) before the last one's recovery
+	var charges := 0      # charges not cut by a daze or death
+	var full_runs := 0
+	var short_plans := 0
+	var segments := 0
+	var cut_bad := 0
+	var cut_seen := 0
+	var stag_bad := 0
+	var trees := []
+	for sd in range(1, FIGHTS + 1):
+		var r := _sim_fight(sd, 1 + sd % 2)
+		var lg: Array = r.log
+		for i in lg.size():
+			var e: Array = lg[i]
+			var st: int = e[0]
+			var nx: int = e[3]
+			if st in ATTACKS:
+				segments += 1
+				var key := "%s->%s" % [Boss.S.keys()[st], Boss.S.keys()[nx]]
+				if int(e[2]) != int(e[4]) and nx not in DESIGNED:
+					cut[key] = int(cut.get(key, 0)) + 1
+				var ok_next: bool = nx in DESIGNED
+				match st:
+					Boss.S.CHARGE_WIND: ok_next = ok_next or nx == Boss.S.CHARGE
+					Boss.S.STOMP_WIND: ok_next = ok_next or nx == Boss.S.STOMP
+					Boss.S.BEAM_WIND: ok_next = ok_next or nx == Boss.S.BEAM
+					Boss.S.GORE_WIND: ok_next = ok_next or nx == Boss.S.GORE
+					Boss.S.TAIL_WIND: ok_next = ok_next or nx == Boss.S.TAIL
+					Boss.S.CHARGE: ok_next = ok_next or nx in [Boss.S.IDLE, Boss.S.CHARGE_WIND]
+					_: ok_next = ok_next or nx == Boss.S.IDLE
+				if not ok_next:
+					bad_next[key] = int(bad_next.get(key, 0)) + 1
+			if st == Boss.S.CHARGE and nx not in DESIGNED:
+				charges += 1
+				if absf(float(e[5]) - float(e[6])) < 0.6 and int(e[2]) == int(e[4]):
+					full_runs += 1
+				if float(e[6]) < Boss.CHARGE_MIN - 0.01:
+					short_plans += 1
+			# the recovery: after an action, his first non-idle state comes REC ticks later at the earliest
+			if st in ACTIONS and nx == Boss.S.IDLE and i + 1 < lg.size():
+				var idle: Array = lg[i + 1]
+				if int(idle[3]) not in DESIGNED and int(idle[2]) < int(Boss.REC.get(st, 0)):
+					short_rec += 1
+			if nx == Boss.S.CUTSCENE:
+				cut_seen += 1
+				if st not in Boss.FREE:
+					cut_bad += 1
+		for s in r.staggers:
+			if int(s) not in Boss.FREE:
+				stag_bad += 1
+		trees.append(float(r.trees50))
+	print("timing: %d attack segments in %d fights, %d charges (%d ran their whole path)" % [segments, FIGHTS, charges, full_runs])
+	check(cut.is_empty(), "every attack's tell and action play out in full (cut short: %s)" % str(cut))
+	check(bad_next.is_empty(), "no attack starts while another is running (a tell leads to its own action, an action to his recovery; only a daze or death cuts in) %s" % str(bad_next))
+	check(charges > 30 and full_runs == charges, "every charge runs its whole planned path and time (%d of %d)" % [full_runs, charges])
+	check(short_plans == 0, "and a charge's path is never under %.0f m" % Boss.CHARGE_MIN)
+	check(short_rec == 0, "after each attack he recovers (the skid, the slam settling) before the next (%d too soon)" % short_rec)
+	check(cut_seen >= FIGHTS - 2 and cut_bad == 0, "the Duel Stone cutscene waits until he's free (%d played, %d from an attack)" % [cut_seen, cut_bad])
+	check(stag_bad == 0, "a big hit staggers him only between attacks (%d in one)" % stag_bad)
+	_tree_sim_check(trees)
+
+
+## v0.12.9 a guest's BossView draws him on the players' delayed clock between buffered updates: his body, every orb by
+## its id (one popping doesn't move the others), carrying on along their motion past the newest update; his state's
+## clock from the server's t.
+func _view_sync_tests() -> void:
+	var n2 := Net.new()
+	n2.my_id = 2
+	n2.render_tick = 50.0
+	var world := Node3D.new()
+	root.add_child(world)
+	var mfx := MagicFx.new()
+	mfx.net = n2
+	mfx.main = world
+	world.add_child(mfx)
+	var v := BossView.new()
+	world.add_child(v)
+	v.setup(n2, world, mfx)
+	var b := Boss.new(Boss.arena_c(), 1, 1)
+	b.state = Boss.S.HOWL
+	var pk := func(t: int, x: float, orbs: Array, ids: Array) -> Array:
+		b.t = t
+		b.pos = Vector3(x, 0, 52)
+		var d := b.pack()
+		d[12] = PackedVector3Array(orbs)
+		d[14] = PackedInt32Array(ids)
+		return d
+	v._on_state(98, pk.call(40, 0.0, [Vector3(0, 2, 40), Vector3(10, 2, 40)], [5, 6]))
+	v._on_state(100, pk.call(42, 1.0, [Vector3(11, 2, 40)], [6]))   # orb 5 popped
+	v._on_state(102, pk.call(44, 2.0, [Vector3(12, 2, 40)], [6]))
+	v._sample(99.0)
+	check(v.orbs.size() == 2 and absf(v.orbs[v.orb_ids.find(6)].x - 10.5) < 0.01 and absf(v.pos.x - 0.5) < 0.01,
+		"a guest draws him and each orb between the two updates around its clock (orb at %.2f, him at %.2f)" % [v.orbs[v.orb_ids.find(6)].x if v.orb_ids.has(6) else -1.0, v.pos.x])
+	v._sample(101.0)
+	check(v.orbs.size() == 1 and v.orb_ids[0] == 6 and absf(v.orbs[0].x - 11.5) < 0.01, "an orb popping leaves the others where they are (by id)")
+	check(v.state == Boss.S.HOWL and absf(v.state_t - 43.0 * Config.DT) < 0.001, "his animation clock is the server's t (%.3f s)" % v.state_t)
+	v._sample(104.0)
+	check(absf(v.orbs[0].x - 13.0) < 0.01 and absf(v.pos.x - 3.0) < 0.01, "past the newest update they carry on along their motion (no snapping back)")
+	v._on_state(0, [])
+	world.queue_free()
+
+
+## v0.12.9 Jacob: "He should have destroyed all of the fruit trees by around 50% of his health being taken away on
+## average."
+func _tree_sim_check(trees: Array) -> void:
+	var s := 0.0
+	for f in trees:
+		s += float(f)
+	var avg := s / maxf(trees.size(), 1)
+	print("fruit trees felled when he is down to half health: %s, average %.2f" % [str(trees), avg])
+	check(avg >= 0.8 and avg <= 1.0, "he has felled most of the arena's apple trees by half health (%.0f%% on average)" % (avg * 100.0))

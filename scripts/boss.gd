@@ -97,11 +97,14 @@ extends RefCounted
 
 const ID := -5000                # its id as a damage target
 const NAME := "Thunderhorn"
-## Health (v0.11.0): BASE_HP x (1 + 0.7 per extra player): 7000 alone, 11 900 for two (the old x1.7), 16 800 for three.
+## Health (v0.11.0, cut by 45% in v0.12.9: Jacob, "45% less health at each stage"): BASE_HP x (1 + 0.7 per extra
+## player): 3850 alone (was 7000), 6545 for two (was 11 900), 9240 for three (was 16 800). Every stage (the leaps at
+## 80/55/30%, the cutscene at 60%, enrage at 1/2, the storm at 1/4) is a fraction of max_hp, so they all come 45% sooner.
 ## The math: a level-3 wizard's sustained damage on him, dodging half the time, is about 15 a second (mana comes back
 ## at 12 a second: meteors 60 for 45 mana, fireballs ~20 for 22 plus 8 a second of burning, the wand's spark
-## beam 7 a second and life drain 18 every 3 s, sword cuts 8 at most every 0.6 s up close; lightning only 7). 7000 / 15 = ~7.8 minutes.
-const BASE_HP := 7000
+## beam 7 a second and life drain 18 every 3 s, sword cuts 8 at most every 0.6 s up close; lightning only 7).
+## 3850 / 15 = ~4.3 minutes alone (was ~7.8).
+const BASE_HP := 3850
 const HP_PER_EXTRA := 0.7
 const RADIUS := 2.8              # his body, for hits (v0.11.0: about 3.5x a player)
 const HORN_REACH := 5.6          # v0.12.0: the nose spike's tip, metres ahead of his centre (head lowered)
@@ -160,6 +163,37 @@ var stun_hold := 0
 var daze_pending := false        # filled in mid-air: he drops as he lands
 const SEQ := [S.LEAP_WIND, S.LEAP, S.LEAP_LAND, S.HOWL, S.SLAMS, S.PAW, S.RUSH, S.RECOVER]
 const MOVES := [S.STRAFE, S.BACKOFF, S.HOP, S.TURN, S.LUNGE]
+## v0.12.9 ATTACK TIMING (Jacob: "he begins his charge, but then it cuts off too soon and he begins a different
+## attack"). Every attack plays its whole tell, action and recovery, one at a time:
+##  - the tell (a WIND state) is as long as it was when it began (`wind_len`; enraging mid-tell no longer cuts it short);
+##  - the action has a fixed length; the charge and the rush run a path planned as they set off (`charge_m` metres,
+##    `charge_len` ticks, at a speed fixed then): CHARGE_D (30 m) for the charge (the glowing path BossView draws is
+##    that path), the rush to its target and RUSH_OVER past; kept inside the world, and when it starts in or near the
+##    arena it ends no further than CHARGE_EDGE outside it (never under CHARGE_MIN). It used to stop at once whenever he
+##    was outside the arena (after a far leap, after the cutscene at the Duel Stone, at the arena's edge: most charges
+##    ran 1 tick) or as soon as the target was 7 m behind him;
+##  - then he recovers (REC ticks standing in IDLE: the skid, the slam settling, the lash swinging back) before he
+##    chooses again, enraged or not (enraged he may go straight on once recovered; he used to skip the recovery);
+##  - only the designed interrupts cut into an attack: the stun meter (dazed) and death. A big hit (60+) staggers him
+##    only between attacks (`free_now`; it used to stagger him out of any attack), and the Duel Stone's cutscene waits
+##    until he is free and recovered (it used to start in the middle of a beam or a stomp);
+##  - a tree smashed in a charge is splintered on the run ("boss_smash"), not a skid (BossView played a stop for it).
+## boss_test `_timing_tests` runs seeded fights with scripted players and checks all of it.
+const REC := {S.CHARGE: 36, S.STOMP: 18, S.BEAM: 18, S.CALL: 20, S.ROAR: 12, S.BALLS: 12, S.GORE: 16, S.TAIL: 12,
+	S.TREE: 20, S.HOP: 10}
+const CHARGE_D := 30.0
+const CHARGE_MIN := 14.0
+const CHARGE_EDGE := 8.0
+const RUSH_OVER := 10.0
+const RUSH_MIN := 18.0
+const RUSH_MAX := 34.0
+const FREE := [S.IDLE, S.WALK, S.STRAFE, S.BACKOFF, S.TURN, S.LUNGE, S.HOME]
+var wind_len := 0                # this tell's length (ticks), fixed as it starts
+var charge_m := 0.0              # the charge's / rush's planned path (metres; while winding up: where it would go now)
+var charge_len := 0              # and its ticks
+var charge_v := GALLOP           # and its speed
+var idle_wait := 20              # ticks in IDLE before he chooses again
+var idle_rec := 0                # of which recovery (the cutscene waits for it)
 
 static var shown_enraged := false   # clients: set by BossView, read by the Static meters
 
@@ -215,8 +249,9 @@ var orb_total := 0
 var orb_rot := 0
 var big_hit_t := -100000
 var rings: Array = []            # [radius, hit ids, centre, speed, damage, kind]
-var balls: Array = []            # [pos, vel, life, static]
-var orbs: Array = []             # [pos, vel, target, life, age, spent]
+var balls: Array = []            # [pos, vel, life, static, id]
+var orbs: Array = []             # [pos, vel, target, life, age, spent, id]
+var next_id := 1                 # v0.12.9 ids for balls and orbs, so clients can follow each one between updates
 var rng := RandomNumberGenerator.new()
 var done := false
 # what the server applies this tick (Net reads and clears them)
@@ -252,7 +287,7 @@ func _init(at: Vector3, n_players: int, seed_v := 0) -> void:
 
 
 static func hp_for(n_players: int) -> int:
-	return int(BASE_HP * (1.0 + HP_PER_EXTRA * (maxi(n_players, 1) - 1)))
+	return int(round(BASE_HP * (1.0 + HP_PER_EXTRA * (maxi(n_players, 1) - 1))))
 
 
 ## Someone joined the fight mid-way: more health, in proportion (he doesn't heal back to full).
@@ -279,6 +314,14 @@ static func arena_c() -> Vector3:
 func _go(s: int) -> void:
 	state = s
 	t = 0
+	if s == S.IDLE:
+		idle_rec = 0
+		idle_wait = int(rng.randi_range(14, 36) * windup_k())
+
+
+## v0.12.9 free to be interrupted by a non-designed event (header: ATTACK TIMING): between attacks, recovered.
+func free_now() -> bool:
+	return state in FREE and (state != S.IDLE or t >= idle_rec)
 
 
 func in_sequence() -> bool:
@@ -324,13 +367,13 @@ func hurt(amount: int, from: int, spell: String) -> int:
 		_go(S.DEATH)
 		orbs.clear()
 		fx.append(["boss_death", [pos]])
-	elif dmg >= 60 and not in_sequence() and state not in [S.PHASE, S.STAGGER, S.DAZED] and total_t - big_hit_t > 600:
-		big_hit_t = total_t   # a really big hit staggers him (once in 10 s)
+	elif dmg >= 60 and free_now() and total_t - big_hit_t > 600:
+		big_hit_t = total_t   # a really big hit staggers him (once in 10 s), only between attacks (v0.12.9)
 		_go(S.STAGGER)
 		t = 15
 		fx.append(["boss_stagger", [pos]])
-	elif dmg >= 25 and state in [S.IDLE, S.WALK, S.STRAFE]:
-		fx.append(["boss_flinch", [pos]])
+	elif dmg >= 25 and state not in [S.DAZED, S.LEAP]:
+		fx.append(["boss_flinch", [pos]])   # (in an attack: a flinch of the hide, the attack goes on)
 	return dmg
 
 
@@ -391,10 +434,10 @@ func _daze() -> void:
 
 ## v0.12.3 the Duel Stone's corruption is due: armed, not played yet this fight, below Cutscene.CUT_HP and still
 ## alive, and not in the middle of something it mustn't cut into (a Storm Leap sequence, a daze or one waiting to
-## land, a phase change, his arrival): those finish first.
+## land, a phase change, his arrival, v0.12.9: any attack or its recovery: he must be free_now()): those finish first.
 func cut_due() -> bool:
-	return cut_on and not cut_done and hp > 0 and float(hp) < Cutscene.CUT_HP * float(max_hp) and not in_sequence() \
-		and state not in [S.ENTER, S.DEATH, S.DAZED, S.PHASE, S.CUTSCENE] and not daze_pending and pos.y < 0.01
+	return cut_on and not cut_done and hp > 0 and float(hp) < Cutscene.CUT_HP * float(max_hp) and free_now() \
+		and not daze_pending and pos.y < 0.01
 
 
 func _start_cutscene() -> void:
@@ -412,6 +455,40 @@ func _start_cutscene() -> void:
 	charge_hit = {}
 	_go(S.CUTSCENE)
 	fx.append(["cutscene_start", [cut_from, yaw]])
+
+
+## v0.12.9 how far a charge (or the rush) runs from `from` heading `yaw` (header: ATTACK TIMING): `full` metres, kept
+## inside the world, and when it starts in or near the arena, ending no further than CHARGE_EDGE outside it (but never
+## under CHARGE_MIN). BossView draws this path on the ground during the wind-up and the pawing.
+static func charge_reach(from: Vector3, a: float, full: float) -> float:
+	var dir := Vector2(-sin(a), -cos(a))
+	var lim := Config.WORLD_HALF - 6.0
+	var d := full
+	if absf(dir.x) > 1e-4:
+		d = minf(d, ((lim if dir.x > 0.0 else -lim) - from.x) / dir.x)
+	if absf(dir.y) > 1e-4:
+		d = minf(d, ((lim if dir.y > 0.0 else -lim) - from.z) / dir.y)
+	var c := arena_c()
+	var f := Vector2(from.x - c.x, from.z - c.z)
+	var r := WorldLayout.ARENA_R + CHARGE_EDGE
+	if f.length() <= r:
+		var b := f.dot(dir)
+		var s := -b + sqrt(maxf(b * b - (f.length_squared() - r * r), 0.0))   # where the line leaves that circle
+		d = minf(d, maxf(s, CHARGE_MIN))
+	return maxf(d, 0.0)
+
+
+## v0.12.9 plan the run along charge_dir: its path (charge_reach of `full` metres), speed and ticks.
+func _plan_run(full: float, v: float) -> void:
+	charge_m = charge_reach(pos, atan2(-charge_dir.x, -charge_dir.y), full)
+	charge_v = v
+	charge_len = maxi(int(ceil(charge_m / v / Config.DT)), 1)
+
+
+## The rush's full length: to its target (rp: where they are, or null) and RUSH_OVER past.
+func charge_m_full(rp) -> float:
+	var to: float = _flat((rp as Vector3) - pos).length() if rp != null else RUSH_MAX
+	return clampf(to + RUSH_OVER, RUSH_MIN, RUSH_MAX)
 
 
 ## A wind-up of `base` ticks: shorter enraged and with two or more, never under MIN_TELL.
@@ -452,7 +529,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			fx.append(["boss_roar", [pos, 1]])
 			_go(S.IDLE)
 			moved = true
-			t = 999   # straight back to choosing
+			idle_wait = 0   # straight back to choosing
 		return
 	if cut_due():
 		_start_cutscene()
@@ -497,6 +574,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 	var wk := windup_k()
 	_trees_and_apples(living)
 	_drift_home(living)
+	_drift_trees()
 	match state:
 		S.ENTER:
 			if t >= 150:
@@ -505,7 +583,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 		S.IDLE:
 			if tp != null:
 				_turn_to(tp, 0.07)
-			if t >= int(rng.randi_range(14, 36) * wk):
+			if t >= idle_wait:   # v0.12.9: the wait (with its recovery) is fixed as he stops (_go, _after)
 				_choose(living, golems)
 		S.WALK:
 			if tp == null:
@@ -526,13 +604,13 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				var d := _flat(tp - pos)
 				var tang := Vector2(-d.y, d.x).normalized() * move_side
 				var radial := d.normalized() * clampf((d.length() - 11.0) * 0.25, -0.6, 0.6)
-				_step((tang + radial).normalized() * WALK * speed_k())
+				_step(_lean_tree((tang + radial).normalized() * WALK * speed_k(), 0.6))   # v0.12.9 toward a tree
 		S.BACKOFF:  # backing away, still facing them
 			if tp == null or t >= move_len:
 				_after_move()
 			else:
 				_turn_to(tp, 0.12)
-				_step(-_flat(tp - pos).normalized() * WALK * 0.9 * speed_k())
+				_step(_lean_tree(-_flat(tp - pos).normalized() * WALK * 0.9 * speed_k(), 0.8))   # v0.12.9 toward a tree
 		S.HOP:      # a crouch, a pounce to a new spot, a heavy landing
 			if t == 1:
 				fx.append(["boss_hop", [pos, hop_to]])
@@ -567,18 +645,22 @@ func tick(now: int, people: Array, golems: Array) -> void:
 		S.CHARGE_WIND:   # head down, a hoof scraping: then he goes
 			if t == 1:
 				via_tree = _tree_on_line(tp)
-			var cw := _wind(50)   # v0.12.0: never under MIN_TELL; the aim locks 16 ticks before he goes
+			var cw := wind_len   # v0.12.0: never under MIN_TELL; the aim locks 16 ticks before he goes
 			if tp != null and t < cw - 16:
 				_turn_to(via_tree if via_tree != null else tp, 0.14)   # v0.12.0: lined up through a tree when he can
+			charge_m = charge_reach(pos, yaw, CHARGE_D)   # v0.12.9: the path he will run (drawn on the ground)
 			if t % 18 == 9:
 				fx.append(["boss_scrape", [pos, yaw]])
 			if t >= cw:
 				charge_dir = Vector2(-sin(yaw), -cos(yaw))
 				charge_hit = {}
-				fx.append(["boss_charge", [pos, yaw]])
+				_plan_run(CHARGE_D, GALLOP * (1.3 if enraged else 1.0))
+				fx.append(["boss_charge", [pos, yaw, charge_m]])
 				_go(S.CHARGE)
 		S.CHARGE:
-			_step(charge_dir * GALLOP * (1.3 if enraged else 1.0))   # v0.12.0: frost no longer slows a charge
+			if charge_len <= 0:   # (set going directly, as the tests do)
+				_plan_run(CHARGE_D, GALLOP * (1.3 if enraged else 1.0))
+			_step(charge_dir * charge_v)   # v0.12.0: frost no longer slows a charge
 			for p in foes:   # v0.12.2: golems too (thrown like players)
 				var d := _flat(p[1] - pos)
 				if (d.length() < RADIUS + 1.4 or _on_spike(d, charge_dir)) and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
@@ -587,21 +669,18 @@ func tick(now: int, people: Array, golems: Array) -> void:
 					hits.append([p[0], 30 if enraged else 25, cdir, 0.0])
 					launches.append([p[0], cdir])   # v0.12.0: the charge throws you too
 			_trample_bystanders(RADIUS + 1.4, 25)
-			var past := true
-			if tp != null:
-				var d := _flat(tp - pos)
-				past = d.dot(charge_dir) < -7.0
-			if t >= 80 or (t > 30 and past) or _flat(pos - arena_c()).length() > WorldLayout.ARENA_R + 6.0:
+			if t >= charge_len:   # v0.12.9: the whole planned path, every time (header: ATTACK TIMING)
+				charge_len = 0
 				fx.append(["boss_skid", [pos, yaw]])
 				if rep > 0:
 					rep -= 1
 					_go(S.CHARGE_WIND)
-					t = _wind(50) - maxi(int(34 * wk), 30)   # a shorter wind-up for the next one (0.5 s at least)
+					wind_len = maxi(int(34 * wk), REC[S.CHARGE])   # a shorter wind-up for the next one, the skid included
 					fx.append(["boss_charge_wind", [pos, yaw, rep]])
 				else:
 					_after()
 		S.STOMP_WIND:   # he rears up
-			if t >= _wind(48):
+			if t >= wind_len:
 				_slam(STOMP_V, 13)
 				_go(S.STOMP)
 		S.STOMP:   # v0.12.0: STOMP_EVERY apart at one speed, so every ring can be jumped on the beat
@@ -615,7 +694,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 		S.BEAM_WIND:    # the horns crackle and glow
 			if tp != null:
 				_turn_to(tp, 0.1)
-			if t >= _wind(60):
+			if t >= wind_len:
 				var sweep := deg_to_rad(110.0 if variant == 0 else 150.0)
 				var side := 1.0 if rng.randf() < 0.5 else -1.0
 				beam_from = yaw - side * sweep * 0.5
@@ -671,14 +750,15 @@ func tick(now: int, people: Array, golems: Array) -> void:
 				var n := 5 if variant > 0 else 3
 				for i in n:
 					var a := yaw + (float(i) - (n - 1) * 0.5) * 0.5
-					balls.append([pos + Vector3(-sin(a) * 3.0, HEAD_Y - 0.5, -cos(a) * 3.0), Vector3(-sin(a), 0.2, -cos(a)) * 4.0, 360, variant > 0])
+					balls.append([pos + Vector3(-sin(a) * 3.0, HEAD_Y - 0.5, -cos(a) * 3.0), Vector3(-sin(a), 0.2, -cos(a)) * 4.0, 360, variant > 0, next_id])
+				next_id += 1
 				fx.append(["boss_balls", [pos, variant]])
 			if t >= 45:
 				_after()
 		S.GORE_WIND:   # the head drops and swings back to one side
 			if tp != null:
 				_turn_to(tp, 0.16)
-			if t >= _wind(32):
+			if t >= wind_len:
 				fx.append(["boss_gore", [pos, yaw]])
 				_go(S.GORE)
 		S.GORE:
@@ -691,7 +771,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 			if t >= 24:
 				_after()
 		S.TAIL_WIND:   # the body coils, the tail lifts
-			if t >= _wind(30):
+			if t >= wind_len:
 				fx.append(["boss_tail", [pos, yaw, move_side]])
 				_go(S.TAIL)
 		S.TAIL:
@@ -717,7 +797,7 @@ func tick(now: int, people: Array, golems: Array) -> void:
 						strikes.append([(p[1] as Vector3) + Vector3(rng.randf_range(-3, 3), 0, rng.randf_range(-3, 3)), 50])
 			if t >= 130:
 				_go(S.IDLE)
-				t = 999
+				idle_wait = 0
 		# ---- the Storm Leap
 		S.LEAP_WIND:
 			if tp != null and t < 40:
@@ -790,15 +870,24 @@ func tick(now: int, people: Array, golems: Array) -> void:
 					rp = p[1]
 			if rp != null and t < 78:
 				_turn_to(rp, 0.12)
+			if t < 78 or charge_m <= 0.0:   # v0.12.9: the path: to them and RUSH_OVER past (drawn on the ground)
+				charge_m = charge_reach(pos, yaw, charge_m_full(rp))
 			if t % 20 == 5:
 				fx.append(["boss_scrape", [pos, yaw]])
 			if t >= 96:
 				charge_dir = Vector2(-sin(yaw), -cos(yaw))
 				charge_hit = {}
-				fx.append(["boss_rush", [pos, yaw]])
+				_plan_run(charge_m_full(rp), RUSH_V)
+				fx.append(["boss_rush", [pos, yaw, charge_m]])
 				_go(S.RUSH)
 		S.RUSH:
-			_step(charge_dir * RUSH_V)   # v0.12.0: nor the rush (only the stun meter stops them)
+			if charge_len <= 0:   # (set going directly, as the tests do)
+				var rp = null
+				for p in living:
+					if int(p[0]) == rush_target:
+						rp = p[1]
+				_plan_run(charge_m_full(rp), RUSH_V)
+			_step(charge_dir * charge_v)   # v0.12.0: nor the rush (only the stun meter stops them)
 			for p in foes:
 				var d := _flat(p[1] - pos)
 				if (d.length() < RADIUS + 1.3 or _on_spike(d, charge_dir)) and not charge_hit.has(p[0]) and (p[1] as Vector3).y < 3.5:
@@ -811,11 +900,8 @@ func tick(now: int, people: Array, golems: Array) -> void:
 					hits.append([p[0], 35 if enraged else 30, dir, 0.0])
 					launches.append([p[0], dir])
 			_trample_bystanders(RADIUS + 1.3, 30)
-			var past := true
-			for p in living:
-				if int(p[0]) == rush_target:
-					past = _flat(p[1] - pos).dot(charge_dir) < -8.0
-			if t >= 70 or (t > 20 and past) or _flat(pos - arena_c()).length() > WorldLayout.ARENA_R + 7.0:
+			if t >= charge_len:   # v0.12.9: the whole planned path (it used to stop at once outside the arena: after
+				charge_len = 0                         # a far leap, nearly always)
 				fx.append(["boss_skid", [pos, yaw]])
 				_go(S.RECOVER)
 		S.HOME:   # v0.12.0: nobody near him, far from home: he gallops back to the arena
@@ -919,12 +1005,24 @@ func _drift_home(_living: Array) -> void:
 ## arena) and `apples` ([fruit id, position] on the ground there) each tick, and bumps `eaten` when a fighter eats one;
 ## he answers with `felled` ([tree, direction]) and `splats` (fruit ids), which Net passes to Ecology.
 ##  - Now and then (TREE_CD apart; more likely when someone is below half health or has just eaten) he goes for the
-##    nearest tree within 24 m, gores it and it falls (S.TREE): no more apples from it this fight.
-##  - Lining up a charge, he aims through a tree that stands near his line to the target (within 3 m of it, short of
+##    nearest tree within TREE_GO m, gores it and it falls (S.TREE): no more apples from it this fight.
+##  - v0.12.9 (Jacob: "target the fruit trees a bit more often... destroyed all of them by around 50% of his health...
+##    not a focus exactly, just something he does whenever he is near a tree, and he should wander towards the rest of
+##    the trees more easily while still engaging"): between attacks he drifts toward the nearest standing tree within
+##    TREE_SEEK (`_tree_lure`: idling he ambles to it at TREE_DRIFT, his circling and backing off lean its way, his hops
+##    land nearer it), and a tree within TREE_NEAR when he chooses is swiped on the way most of the time (TREE_NEAR_CD
+##    apart). boss_test `_tree_sim_tests`: in seeded fights he has felled ~90% of the arena's five apple trees by the
+##    time he has lost half his health.
+##  - Lining up a charge, he aims through a tree that stands near his line to the target (within 4 m of it, short of
 ##    the target): `_tree_on_line`; anything his charge or rush runs through is felled.
 ##  - Apples under his hooves while he moves are trampled; near an apple (APPLE_CD apart, shorter when they're low or
 ##    eating) he stomps it to mush, or bucks and stomps everything within 5 m.
-const TREE_CD := 15 * 60
+const TREE_CD := 6 * 60          # v0.12.9 (was 15 s)
+const TREE_NEAR_CD := 3 * 60
+const TREE_GO := 30.0
+const TREE_NEAR := RADIUS + 5.0
+const TREE_SEEK := 36.0
+const TREE_DRIFT := 2.4
 const APPLE_CD := 4 * 60
 var trees: Array = []
 var apples: Array = []
@@ -968,13 +1066,13 @@ func _pressure(living: Array) -> float:
 
 ## A standing tree near his line to the target (and short of it): where to aim so the charge goes through it.
 func _tree_on_line(tp):
-	if tp == null or rng.randf() > 0.7:
+	if tp == null or rng.randf() > 0.85:
 		return null
 	var to := _flat(tp - pos)
 	if to.length() < 0.1:
 		return null
 	var best = null
-	var best_d := 3.0
+	var best_d := 4.0
 	for tr in trees:
 		var rel := _flat((tr[1] as Vector3) - pos)
 		var along := rel.dot(to.normalized())
@@ -997,7 +1095,7 @@ func _trees_and_apples(living: Array) -> void:
 		for tr in trees.duplicate():
 			if _flat((tr[1] as Vector3) - pos).length() < RADIUS + 0.7:
 				_fell(int(tr[0]), Vector3(charge_dir.x, 0, charge_dir.y))
-				fx.append(["boss_skid", [pos, yaw]])
+				fx.append(["boss_smash", [tr[1], yaw]])   # v0.12.9: splintered on the run (it played a skid)
 	if state in [S.LEAP, S.ENTER, S.DEATH]:
 		return
 	var moving := state in [S.CHARGE, S.RUSH, S.WALK, S.STRAFE, S.BACKOFF, S.LUNGE, S.TREE, S.HOP]
@@ -1020,20 +1118,58 @@ func _trees_and_apples(living: Array) -> void:
 			apple_cd = int(APPLE_CD / (1.0 + _pressure(living)))
 
 
+## v0.12.9 the nearest standing tree within TREE_SEEK (where he wanders between attacks), or null.
+func _tree_lure():
+	var best = null
+	var best_d := TREE_SEEK
+	for tr in trees:
+		var d := _flat((tr[1] as Vector3) - pos).length()
+		if d < best_d:
+			best_d = d
+			best = tr[1]
+	return best
+
+
+## v0.12.9 between attacks (idling) he ambles toward the nearest tree (header: knows apples heal).
+func _drift_trees() -> void:
+	if state != S.IDLE:
+		return
+	var lure = _tree_lure()
+	if lure == null:
+		return
+	var d := _flat(lure - pos)
+	if d.length() > RADIUS + 2.0:
+		_step(d.normalized() * TREE_DRIFT * speed_k())
+
+
+## A step direction leaning toward the tree lure (k: how much), for his manoeuvres.
+func _lean_tree(dir: Vector2, k: float) -> Vector2:
+	var lure = _tree_lure()
+	if lure == null:
+		return dir
+	var d := _flat(lure - pos)
+	if d.length() < RADIUS + 2.0:
+		return dir
+	return (dir.normalized() + d.normalized() * k).normalized() * dir.length()
+
+
 ## Go for a tree now? (from _choose)
 func _want_tree(living: Array) -> bool:
-	if tree_cd > 0 or trees.is_empty() or in_sequence():
-		return false
-	if rng.randf() > 0.1 + 0.3 * _pressure(living):
+	if trees.is_empty() or in_sequence():
 		return false
 	var best := -1
-	var best_d := 24.0
+	var best_d := TREE_GO
 	for tr in trees:
 		var d := _flat((tr[1] as Vector3) - pos).length()
 		if d < best_d:
 			best_d = d
 			best = int(tr[0])
 	if best < 0:
+		return false
+	if best_d < TREE_NEAR:   # v0.12.9 right by one: a swipe on the way, most of the time
+		if tree_cd > TREE_CD - TREE_NEAR_CD or rng.randf() > 0.6 + 0.2 * _pressure(living):
+			return false
+	elif tree_cd > 0 or rng.randf() > 0.25 + 0.3 * _pressure(living):
 		return false
 	tree_target = best
 	tree_cd = TREE_CD
@@ -1110,18 +1246,25 @@ func _step(v: Vector2) -> void:
 	pos.z = clampf(pos.z, -Config.WORLD_HALF + 6, Config.WORLD_HALF - 6)
 
 
-## After an attack: enraged, he often goes straight into the next one; otherwise a moment's pause.
+## After an attack: he recovers (REC of the attack just done: v0.12.9, header ATTACK TIMING); then enraged, he often
+## goes straight into the next one; otherwise a moment's pause.
 func _after() -> void:
+	var rec := int(REC.get(state, 0))
 	_go(S.IDLE)
 	moved = false
+	idle_rec = rec
 	if enraged and rng.randf() < 0.45:
-		t = 999   # choose at once
+		idle_wait = rec   # choose as soon as he's recovered
+	else:
+		idle_wait += rec
 
 
 func _after_move() -> void:
+	var rec := int(REC.get(state, 0))   # (the hop's landing settles first)
 	_go(S.IDLE)
 	moved = true
-	t = 999
+	idle_rec = rec
+	idle_wait = rec
 
 
 # ================================================================ choosing
@@ -1260,6 +1403,9 @@ func _hop_spot(tp: Vector3) -> Vector3:
 			continue
 		var dt := _flat(tp - q).length()
 		var s := -absf(dt - 11.0) - off * 0.05
+		var lure = _tree_lure()   # v0.12.9 landing nearer a tree
+		if lure != null:
+			s -= _flat(lure - q).length() * 0.35
 		if _los(q + Vector3(0, HEAD_Y, 0), tp + Vector3(0, 1.2, 0)):
 			s += 6.0
 		if s > best_s:
@@ -1277,12 +1423,16 @@ func _attack(pick: String, tp) -> void:
 		"charge":
 			rep = 0 if variant == 0 else (1 if variant == 1 and rng.randf() < 0.5 else (2 if variant == 2 else 0))
 			_go(S.CHARGE_WIND)
+			wind_len = _wind(50)
+			charge_m = charge_reach(pos, yaw, CHARGE_D)
 			fx.append(["boss_charge_wind", [pos, yaw, rep]])
 		"stomp":
 			_go(S.STOMP_WIND)
+			wind_len = _wind(48)
 			fx.append(["boss_rear", [pos, variant]])
 		"beam":
 			_go(S.BEAM_WIND)
+			wind_len = _wind(60)
 			fx.append(["boss_beam_wind", [pos, variant]])
 		"call":
 			_go(S.CALL)
@@ -1294,10 +1444,12 @@ func _attack(pick: String, tp) -> void:
 			_go(S.BALLS)
 		"gore":
 			_go(S.GORE_WIND)
+			wind_len = _wind(32)
 			fx.append(["boss_gore_wind", [pos, yaw]])
 		"tail":
 			move_side = 1.0 if rng.randf() < 0.5 else -1.0
 			_go(S.TAIL_WIND)
+			wind_len = _wind(30)
 			fx.append(["boss_tail_wind", [pos, yaw]])
 
 
@@ -1594,7 +1746,8 @@ func _launch_orb(living: Array, i: int) -> void:
 	var v := Vector3(cos(a) * 3.0, 7.0, sin(a) * 3.0)
 	# v0.12.0 after a far leap: enough life to cross the distance (at the far cruise speed), never less than before
 	var far := _flat((p[1] as Vector3) - pos).length()
-	orbs.append([from, v, int(p[0]), maxi(ORB_LIFE, int(far / ORB_FAR_V * 60.0) + 240), 0, false])
+	orbs.append([from, v, int(p[0]), maxi(ORB_LIFE, int(far / ORB_FAR_V * 60.0) + 240), 0, false, next_id])
+	next_id += 1
 	orb_sent[int(p[0])] = int(orb_sent.get(int(p[0]), 0)) + 1
 
 
@@ -1684,8 +1837,10 @@ func _flat(v: Vector3) -> Vector2:
 
 
 ## His state, flat, for the network: [state, t, x, y, z, yaw, hp, max hp, status bits, beam angle, rings, balls, orbs,
-## extra]. Rings: [r, cx, cz, kind]; balls: [pos, static]; orbs: positions as one PackedVector3Array; extra: [leap x,
-## leap z, variant, phase, target, rush target, rep, leap air ticks, stun meter (v0.12.0, 0..STUN_NEED)]. Status bits:
+## extra, orb ids]. Rings: [r, cx, cz, kind, speed (v0.12.9)]; balls: [pos, static, id (v0.12.9)]; orbs: positions as
+## one PackedVector3Array, their ids (v0.12.9) as a PackedInt32Array after extra; extra: [leap x,
+## leap z, variant, phase, target, rush target, rep, leap air ticks, stun meter (v0.12.0, 0..STUN_NEED), the charge's
+## or rush's path in metres (v0.12.9), this tell's length in ticks (v0.12.9)]. Status bits:
 ## 1 staggered, 2 slowed, 4 burning, 8 enraged, 16 untouchable (arriving), 32 storm, 64 dazed (v0.12.0), 128 the Duel
 ## Stone is corrupted (v0.12.3: from the slam in the cutscene until the fight ends).
 func pack() -> Array:
@@ -1693,9 +1848,12 @@ func pack() -> Array:
 		| (16 if state == S.ENTER or state == S.CUTSCENE else 0) | (32 if storm else 0) | (64 if state == S.DAZED else 0) \
 		| (128 if cut_done and not (state == S.CUTSCENE and t < Cutscene.CORRUPT_AT) else 0)
 	var ov := PackedVector3Array()
+	var oi := PackedInt32Array()
 	for o in orbs:
 		ov.append(o[0])
+		oi.append(int(o[6]) if o.size() > 6 else 0)
 	return [state, t, pos.x, pos.y, pos.z, yaw, hp, max_hp, flags, beam_a,
-		rings.map(func(r): return [float(r[0]), (r[2] as Vector3).x, (r[2] as Vector3).z, int(r[5])]),
-		balls.map(func(b): return [b[0], b[3]]), ov,
-		[leap_to.x, leap_to.z, variant, phase, target, rush_target, rep, leap_air, snappedf(stun_m, 0.01)]]
+		rings.map(func(r): return [float(r[0]), (r[2] as Vector3).x, (r[2] as Vector3).z, int(r[5]), float(r[3])]),
+		balls.map(func(b): return [b[0], b[3], int(b[4]) if b.size() > 4 else 0]), ov,
+		[leap_to.x, leap_to.z, variant, phase, target, rush_target, rep, leap_air, snappedf(stun_m, 0.01),
+			snappedf(charge_m, 0.01), wind_len], oi]

@@ -59,6 +59,14 @@ var _shot_err_p := 0.0
 var _plan_spell := -1
 var _cast_t := 0
 var _retreat := 0
+## v0.12.9 the Duel Stone's corrupted minions (Net.spawn_minions sets it; Jacob: "very aggressive. They can still juke
+## and dodge, but they should not get skittish whenever they get low health. They should continue trying to fight"):
+## no backing off at low health (challengers still do), melee strikes and combos far more often with fewer feints and
+## closing in at a sprint, archers and slingers start draws ~2.5x as readily, rarely pause after a shot and only kite
+## when you're right on them (they keep shooting while they do), wizards pause half as long between casts, rest later
+## and stay at their range when low on mana. Their dodges, dashes, shields, feints and the archers' full-draw tell
+## are unchanged.
+var aggressive := false
 # v0.12.0 the wand's Fog: lost inside an enemy's fog it's confused: "thrash" (attacks random spots round it) or
 # "stumble" (wanders, the heading jerking about, until it's out), picked again every FOG_ROLL ticks, still confused
 # FOG_RECOVER ticks after getting out. Outside, it can't target anyone hidden in one and steers round the cloud.
@@ -178,7 +186,7 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 	if _strafe_t <= 0:   # change the side it circles to now and then, not on a beat
 		_strafe = -_strafe if rng.randf() < 0.55 else _strafe
 		_strafe_t = rng.randi_range(40, 110)
-	var low := float(s.hp) / float(Sim.MAX_HP) < 0.3
+	var low := float(s.hp) / float(Sim.MAX_HP) < 0.3 and not aggressive   # (a minion fights on: v0.12.9)
 	if low and _retreat <= 0 and rng.randf() < 0.01:
 		_retreat = rng.randi_range(90, 160)
 	_retreat -= 1
@@ -224,26 +232,28 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 				move += dir if _feint > 12 else -dir
 			elif dist > reach + 1.2:
 				move += dir + side * _strafe * 0.25
-				if dist > 7.0:
+				if dist > (4.0 if aggressive else 7.0):
 					buttons |= Sim.Btn.SPRINT
 			else:
 				move += side * _strafe * 0.8 + dir * clampf(dist - reach, -1.0, 1.0)
 				# strike when they're recovering (punish), or now and then; feint sometimes instead
 				var opening: bool = tgt.state.atk_cd > 0 or (tgt.state.atk > 0 and tgt.state.charge == 0)
 				var chance := 0.06 if opening else 0.018 + 0.01 * difficulty
+				if aggressive:
+					chance = 0.12 if opening else 0.05 + 0.01 * difficulty
 				if _combo <= 0 and rng.randf() < chance:
-					if rng.randf() < 0.15:
+					if rng.randf() < (0.08 if aggressive else 0.15):
 						_feint = 24
 					else:
-						_combo = rng.randi_range(1, 3)
+						_combo = rng.randi_range(2, 4) if aggressive else rng.randi_range(1, 3)
 				if _combo > 0 and dist <= reach + 0.6 and seq % 12 == 0:
 					buttons |= Sim.Btn.ATTACK
 					_combo -= 1
 		"ranged":
 			var want := ideal_range()
-			if _retreat > 0 or dist < want - 3.0:
-				move += -dir + side * _strafe * 0.5   # kite
-			elif dist > want + 4.0:
+			if _retreat > 0 or dist < want - (6.0 if aggressive else 3.0):
+				move += -dir + side * _strafe * 0.5   # kite (a minion only when you're on top of it)
+			elif dist > want + (2.0 if aggressive else 4.0):
 				move += dir
 			else:
 				move += side * _strafe
@@ -261,7 +271,7 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 				elif full and _full_t < SHOT_HOLD[difficulty]:
 					_full_t += 1
 					buttons |= Sim.Btn.ATTACK   # holding the full draw: the tell
-				elif s.charge == 0 and s.atk_cd == 0 and rng.randf() < SHOT_START[difficulty]:
+				elif s.charge == 0 and s.atk_cd == 0 and rng.randf() < SHOT_START[difficulty] * (2.5 if aggressive else 1.0):
 					buttons |= Sim.Btn.ATTACK   # start a draw, with this shot's error
 					_full_t = 0
 					var tv := Vector2(tgt.state.vel.x, tgt.state.vel.z).length()
@@ -269,19 +279,19 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 					_shot_err = rng.randfn(0.0, spread)
 					_shot_err_p = rng.randfn(0.0, spread * 0.5)
 				elif full:   # let go: the shot leaves; then maybe a pause to reposition
-					if rng.randf() < 0.4:
-						_pause = rng.randi_range(40, 90)
+					if rng.randf() < (0.12 if aggressive else 0.4):
+						_pause = rng.randi_range(15, 35) if aggressive else rng.randi_range(40, 90)
 		"staff", "wand":
 			var want := ideal_range()
 			var mana := s.mana / 5
 			if archetype == "staff":
-				if mana < LOW_MANA:
+				if mana < (LOW_MANA / 2 if aggressive else LOW_MANA):
 					_resting = true
-				elif mana >= REST_MANA:
+				elif mana >= (REST_MANA - 20 if aggressive else REST_MANA):
 					_resting = false
 			for k in _ai_cd.keys():
 				_ai_cd[k] = maxi(int(_ai_cd[k]) - 1, 0)
-			if _resting:
+			if _resting and not aggressive:
 				want += 5.0   # out of mana: keep away and let it come back
 			if _wind > 0:
 				pass   # winding up: planted, facing them (the tell)
@@ -307,6 +317,8 @@ func think(net: Net, me: Net.ServerPlayer) -> Sim.PlayerInput:
 				buttons |= Sim.Btn.ATTACK
 				if _cast_t == 0:
 					_gap = rng.randi_range(int(PAUSE[difficulty][0]), int(PAUSE[difficulty][1]))
+					if aggressive:
+						_gap /= 2
 			elif _gap > 0:
 				_gap -= 1
 			elif not _resting and s.atk == 0 and s.atk_cd == 0:

@@ -169,6 +169,7 @@ var interp_delay := float(Config.INTERP_DELAY_TICKS)  # ticks behind the newest 
 var _late_ms: Array = []    # how late each recent snapshot arrived, relative to the earliest seen
 var _off_base := INF
 var extrap_frames := 0      # frames where another player had to be guessed ahead (no newer snapshot yet)
+var own_off := INF          # v0.12.9 the server tick an input is applied at, minus its seq (from the snapshots' acks)
 var drawn_frames := 0
 # network simulator (testing): extra one-way delay, jitter and loss on this client's traffic
 var sim_lat_ms := 0.0
@@ -176,6 +177,8 @@ var sim_jit_ms := 0.0
 var sim_loss := 0.0
 var _sim_out: Array = []    # [deliver_ms, data]
 var _sim_in: Array = []
+var _sim_boss: Array = []   # v0.12.9 Thunderhorn's state through the simulator too: [deliver_ms, tick, data]
+var _boss_latest := -1      # the newest boss_state taken (unreliable_ordered: an older one arriving late is dropped)
 var _offs: Array = []       # recent arrival offsets (ms): the window's minimum is the "on time" base
 var _last_frame_us := 0
 var _frame_us := 0          # how long the last frame took: samples taken right after a local hitch are skipped
@@ -390,6 +393,9 @@ func shutdown() -> void:
 	is_host_player = false
 	_sim_out.clear()
 	_sim_in.clear()
+	_sim_boss.clear()
+	_boss_latest = -1
+	own_off = INF
 
 
 func _exit_tree() -> void:
@@ -1412,9 +1418,12 @@ func _process(_delta: float) -> void:
 	var now_us := Time.get_ticks_usec()
 	_frame_us = now_us - _last_frame_us if _last_frame_us > 0 else 0
 	_last_frame_us = now_us
-	if _sim_out.is_empty() and _sim_in.is_empty():
+	if _sim_out.is_empty() and _sim_in.is_empty() and _sim_boss.is_empty():
 		return
 	var now := Time.get_ticks_msec()
+	while not _sim_boss.is_empty() and _sim_boss[0][0] <= now:
+		var e: Array = _sim_boss.pop_front()
+		_boss_state_in(int(e[1]), e[2])
 	while not _sim_out.is_empty() and _sim_out[0][0] <= now:
 		var d: PackedByteArray = _sim_out.pop_front()[1]
 		if multiplayer.multiplayer_peer != null:
@@ -1501,6 +1510,8 @@ func _client_receive_snapshot(s: Dictionary) -> void:
 		cur_pos = predicted.pos
 		return
 	var ack: int = s.ack
+	var off := float(tick - ack)   # v0.12.9 (own_tick): smoothed, a jump on a big change
+	own_off = off if own_off == INF or absf(off - own_off) > 30.0 else lerpf(own_off, off, 0.1)
 	while not pending.is_empty() and (pending[0] as Sim.PlayerInput).seq <= ack:
 		pending.pop_front()
 	var replay := server_state.copy()
@@ -1547,6 +1558,15 @@ func _measure_jitter(tick: int) -> void:
 	var want := (p95 + 6.0) / (Config.DT * 1000.0) + Config.SNAPSHOT_EVERY
 	want = clampf(want, Config.SNAPSHOT_EVERY + 1.0, 20.0)
 	interp_delay = want if want > interp_delay else lerpf(interp_delay, want, 0.04)
+
+
+## v0.12.9 the server tick the input we are making now will be applied at (our own, predicted clock in server
+## ticks; frac: into the next tick), or -1 if not known yet. BossView draws his rings on it, so the ring you see at
+## your feet is the ring the host checks your jump against.
+func own_tick(frac: float) -> float:
+	if own_off == INF or predicted == null:
+		return -1.0
+	return float(next_seq - 1) + own_off + frac
 
 
 ## Where to draw our own player this frame (between the last two ticks, plus any correction being blended out).
@@ -3195,9 +3215,29 @@ func boss_end(kind: String) -> void:
 	boss_result.emit(kind)
 
 
+## Thunderhorn's state, every other tick (v0.12.9: on a guest it goes through the network simulator like the
+## snapshots, so --netsim tests his orbs too; BossView buffers it and draws it on the players' delayed clock).
 @rpc("authority", "call_remote", "unreliable_ordered", 5)
 func boss_state(tick: int, data: Array) -> void:
-	if multiplayer != null and not multiplayer.is_server():
+	var guest := multiplayer != null and multiplayer.multiplayer_peer != null and not multiplayer.is_server()
+	if guest and (sim_lat_ms > 0.0 or sim_loss > 0.0):
+		if randf() < sim_loss and not data.is_empty():
+			return
+		_sim_boss.append([_sim_delay(), tick, data])
+		_sim_boss.sort_custom(func(x, y): return x[0] < y[0])
+		return
+	_boss_state_in(tick, data)
+
+
+func _boss_state_in(tick: int, data: Array) -> void:
+	var guest := multiplayer != null and multiplayer.multiplayer_peer != null and not multiplayer.is_server()
+	if guest and not data.is_empty():
+		if tick <= _boss_latest:
+			return   # overtaken by a newer one (unreliable_ordered drops these too)
+		_boss_latest = tick
+	elif data.is_empty():
+		_boss_latest = -1
+	if guest:
 		WorldLayout.altar_pressed = not data.is_empty()
 	cut_client = not data.is_empty() and int(data[0]) == Boss.S.CUTSCENE
 	boss_changed.emit(tick, data)
@@ -3299,6 +3339,7 @@ func spawn_minions() -> void:
 		q.primed = true
 		q.ai = NpcAI.new(q.id, 0, w, tier)
 		q.ai.reach = MINION_REACH
+		q.ai.aggressive = true   # v0.12.9: they fight on, low health or not (NpcAI.aggressive)
 		players[q.id] = q
 	_server_send_roster()
 	_fx("minions_rise", [Cutscene.stone()])
