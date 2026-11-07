@@ -15,7 +15,7 @@ const LINE_COUNT := 12
 const IN_T := 0.35       # seconds to slide back behind the cover
 const LEAN := 0.9        # m he slides back toward the cover's middle as he hides
 const TILT := 13.0       # degrees he leans out (the top of him away from the cover)
-const PIC_H := 1.95      # m: the portrait's height (assets/smiguel/peek.png; tools/make_smiguel_peek.py)
+const PIC_H := 2.3       # m: the portrait's height (a little taller than a player, so he reads from afar)
 
 var net: Net
 var main: Node

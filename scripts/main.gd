@@ -600,7 +600,7 @@ func _sample_input() -> Array:
 		if Input.is_physical_key_pressed(KEY_F) and not (radial and radial.visible): b |= Sim.Btn.BLOCK
 	else:
 		_attack_buttons(false)
-	if _args().has("peekshot") and frames > 230 and frames < 520:   # testing: walk toward him
+	if _args().has("peekshot") and frames * clampf(Engine.time_scale, 0.1, 1.0) > 230 and frames * clampf(Engine.time_scale, 0.1, 1.0) < 520:   # testing: walk toward him
 		b |= Sim.Btn.FORWARD
 	return [b, cam_yaw, aim_pitch, weapon_slot, aim_yaw, face_yaw, int(spell_sel.get(weapon_slot, 0)), aim_point]
 
@@ -631,10 +631,15 @@ var bot_preview := false     # (tests: show the preview)
 ## Testing (--peekshot [n] --screenshot path --shot-frame 140): stand 14 m in front of the n-th hiding place with your
 ## back to it, let Smiguel take his spot, then turn round to face it.
 var _peek_cover := []
+var _peek_done := false
 func _peek_shot() -> void:
 	if net.predicted == null or not net.players.has(net.my_id):
 		return
-	if frames == 40:
+	var k := float(_args().get("slow", 1.0)) if str(_args().get("slow", "1")).is_valid_float() else 1.0   # --slow 0.35: slow motion
+	k = clampf(k, 0.1, 1.0)
+	Engine.time_scale = k
+	var f := int(frames * k)   # the timetable runs on game time
+	if f == 40 and _peek_cover.is_empty():
 		var cs := SmiguelPeek.covers().filter(func(c): return absf(c[0].x) < 60 and absf(c[0].z) < 60 and float(c[3].h) > 2.0)
 		var pick := str(_args().get("peekshot", "0"))
 		_peek_cover = cs[(int(pick) if pick.is_valid_int() else 0) % cs.size()]
@@ -642,20 +647,21 @@ func _peek_shot() -> void:
 		var dir := Vector3(cc.x, 0, cc.z).normalized() * -1.0
 		if dir.length() < 0.1:
 			dir = Vector3(0, 0, 1)
-		var at := cc + dir * 14.0
+		var at := cc + dir * 11.0
 		at.y = 0.0
 		for st in [net.players[net.my_id].state, net.predicted]:
 			st.pos = at
 		cam_yaw = atan2(-dir.x, -dir.z)   # looking away from it (forward is (-sin, -cos))
-	if frames == 80:
+	if f == 80 and not _peek_done:
+		_peek_done = true
 		print("[peekshot] ", net.smiguel.force_peek(net))
-	if frames >= 110 and frames < 175 and not _peek_cover.is_empty():
+	if f >= 110 and f < 175 and not _peek_cover.is_empty():
 		var cc: Vector3 = net.smiguel.pos if net.smiguel.peeking else _peek_cover[0]
 		var me: Vector3 = net.predicted.pos
 		var want := atan2(-(cc.x - me.x), -(cc.z - me.z))
-		cam_yaw = lerp_angle(cam_yaw, want + 0.2, 0.09)   # (a little off him: right on him, he ducks)
+		cam_yaw = lerp_angle(cam_yaw, want + 0.2, 0.09 * k)   # (a little off him: right on him, he ducks)
 		cam_pitch = -0.08
-		if frames == 125:
+		if f == 125:
 			print("[peekshot] peeking=%s at %s  view shown=%s av=%s  me=%s" % [net.smiguel.peeking, str(net.smiguel.pos), smiguel_view.shown, str(smiguel_view.av.position) if smiguel_view.av else "-", str(net.predicted.pos)])
 
 
