@@ -6,7 +6,24 @@
 ##   Godot.exe --path . --resolution 1280x720 --write-movie review.avi --fixed-fps 30 -s tools/boss_anim_review.gd -- <out dir>
 ## Writes <out dir>/segments.txt: "name first_frame last_frame" per motion (frames of the movie). Options after --:
 ## <out dir> [speed] (time scale, default 0.25).
+## v0.12.9 SIM mode: `-- <out dir> 1.0 sim <scenario> [label]` drives the same BossView from a REAL Boss (the server's
+## brain, ticking at 60 a second against a scripted player; his packed state every other tick and his events, as a
+## client gets them), to review whole attacks with their real timing: what comes next, what cuts in. Scenarios:
+##   charge_out  a charge started outside the arena (where he is after a far leap or the Duel Stone cutscene)
+##   beam_meteor the horn beam, hit by a meteor (60) part-way through the sweep
+##   stomp_cut   a stomp, his health dropping under 60% (the Duel Stone cutscene) mid-slams
+##   charge_rage an enraged charge in the arena, and what follows it
+## Each runs SIM_SECS; the label (e.g. BEFORE / AFTER) is shown on screen.
 extends SceneTree
+
+const SIM_SECS := {"charge_out": 7.0, "beam_meteor": 6.0, "stomp_cut": 8.0, "charge_rage": 7.0}
+var sim := ""
+var sim_label := ""
+var sb: Boss
+var sim_k := 0
+var sim_acc := 0.0
+var sim_p := Vector3.ZERO
+var sim_log := []
 
 # [game seconds, state, speed m/s, turn rad/s, label, event at the start]
 const PLAN := [
@@ -59,6 +76,9 @@ func _init() -> void:
 	var a := OS.get_cmdline_user_args()
 	out = a[0] if a.size() > 0 else ""
 	Engine.time_scale = float(a[1]) if a.size() > 1 else 0.25
+	if a.size() > 3 and a[2] == "sim":
+		sim = a[3]
+		sim_label = a[4] if a.size() > 4 else ""
 	if out != "":
 		DirAccess.make_dir_recursive_absolute(out)
 	world = Node3D.new()
@@ -116,7 +136,11 @@ func _init() -> void:
 	label.add_theme_constant_override("outline_size", 10)
 	label.add_theme_color_override("font_outline_color", Color.BLACK)
 	hud.add_child(label)
-	process_frame.connect(_tick)
+	if sim != "":
+		_sim_setup()
+		process_frame.connect(_sim_frame)
+	else:
+		process_frame.connect(_tick)
 
 
 func _tick() -> void:
@@ -179,4 +203,86 @@ func _write_segments() -> void:
 	var f := FileAccess.open(out.path_join("segments.txt"), FileAccess.WRITE)
 	for s in _segs:
 		f.store_line("%s|%d|%d" % [s[0], s[1], s[2]])
+	f.close()
+
+
+# ================================================================ v0.12.9 SIM mode (header)
+func _sim_setup() -> void:
+	var c := Boss.arena_c()
+	match sim:
+		"charge_out":   # next to the Duel Stone, as after the cutscene: 40 m outside the arena
+			sb = Boss.new(Vector3(WorldLayout.DUEL_C.x - 4.0, 0, WorldLayout.DUEL_C.y + 6.0), 1, 77)
+			sim_p = sb.pos + Vector3(-3, 0, 18)
+		"beam_meteor", "stomp_cut", "charge_rage":
+			sb = Boss.new(c, 1, 78)
+			sim_p = c + Vector3(-2, 0, -12 if sim == "beam_meteor" else (-6 if sim == "stomp_cut" else -16))
+	sb.state = Boss.S.IDLE
+	sb.yaw = atan2(-(sim_p - sb.pos).x, -(sim_p - sb.pos).z)
+	sb.fx.clear()
+	if sim == "charge_rage":
+		sb.enraged = true
+		sb.phase = 1
+		sb.want_phase = 1
+		sb.hp = int(sb.max_hp * 0.45)
+	if sim == "stomp_cut":
+		sb.cut_on = true
+		sb.hp = int(sb.max_hp * 0.62)
+	sb.leaps = Boss.LEAP_MAX   # (no Storm Leap here)
+	match sim:
+		"charge_out", "charge_rage": sb._attack("charge", sim_p)
+		"beam_meteor": sb._attack("beam", sim_p)
+		"stomp_cut": sb._attack("stomp", sim_p)
+	target.position = sim_p
+
+
+func _sim_frame() -> void:
+	var dt := get_root().get_process_delta_time()
+	_gt += dt
+	if _gt > float(SIM_SECS.get(sim, 6.0)):
+		_write_sim_log()
+		quit()
+		return
+	sim_acc += dt
+	while sim_acc >= Config.DT:
+		sim_acc -= Config.DT
+		_sim_tick()
+	var names: String = Boss.S.keys()[sb.state]
+	label.text = "%s  %s
+%s  (t %d)" % [sim_label, sim.replace("_", " "), names, sb.t]
+	var mid := (view.root.position if view.root else sb.pos).lerp(sim_p, 0.35) + Vector3(0, 2.5, 0)
+	var ang := 0.9 + 0.12 * sin(_gt * 0.3)
+	cam.look_at_from_position(mid + Vector3(sin(ang), 0, cos(ang)) * 30.0 + Vector3(0, 11.0, 0), mid)
+	_frame += 1
+
+
+func _sim_tick() -> void:
+	sim_k += 1
+	# the player: side-steps slowly, out of the way of a charge
+	sim_p += Vector3(1.2, 0, 0) * Config.DT
+	target.position = sim_p
+	var st0 := sb.state
+	sb.tick(sim_k, [[1, sim_p, true, false, 100, 0, false, false]], [])
+	if sim == "beam_meteor" and sim_k == 100:
+		sb.hurt(40, 1, "Meteor")
+		sb.fx.append(["boss_stun_hit", [sb.pos, 0]])   # (a burst on him so the hit shows)
+	if sim == "stomp_cut" and sim_k == 90:
+		sb.hurt(int(sb.max_hp * 0.04), 1, "")
+	if sb.state != st0:
+		sim_log.append("%d %s -> %s" % [sim_k, Boss.S.keys()[st0], Boss.S.keys()[sb.state]])
+	for e in sb.fx:
+		view._on_fx(str(e[0]), e[1])
+	sb.fx.clear(); sb.hits.clear(); sb.zaps.clear(); sb.launches.clear(); sb.strikes.clear(); sb.slows.clear()
+	sb.felled.clear(); sb.splats.clear()
+	if sim_k % 2 == 0:
+		view._on_state(sim_k, sb.pack())
+		view.hud.visible = false
+
+
+func _write_sim_log() -> void:
+	print("[sim %s %s] %s" % [sim, sim_label, ", ".join(sim_log)])
+	if out == "":
+		return
+	var f := FileAccess.open(out.path_join("sim_%s.txt" % sim), FileAccess.WRITE)
+	for l in sim_log:
+		f.store_line(l)
 	f.close()

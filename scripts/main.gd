@@ -512,6 +512,9 @@ func _process(_delta: float) -> void:
 			hud.text += "\n\n" + host_info
 
 	frames += 1
+	_log_boss_draw()
+	if bot_mode == "watchboss" and frames > int(_args().get("until", 2400)) * 2 + 600:   # (the host went away first)
+		get_tree().quit()
 	if _args().has("leave-at") and frames == int(_args()["leave-at"]):   # testing: press "Leave game"
 		print("[leave] leaving at frame %d" % frames)
 		_leave_game()
@@ -657,6 +660,8 @@ func _bot_input() -> Array:
 		return _bot_console()
 	if bot_mode == "fog":
 		return _bot_fog()
+	if bot_mode == "watchboss":
+		return _bot_watchboss()
 	bot_t += 1
 	cam_yaw = wrapf(bot_t * 0.01, -PI, PI)
 	var b: int = Sim.Btn.FORWARD
@@ -1333,6 +1338,67 @@ func _bot_boss() -> Array:
 	var aim := c + Vector3(0, 1.5, 0)
 	spell_sel[weapon_slot] = 0
 	return [b, cam_yaw, -0.12, weapon_slot, face, face, 0, aim]
+
+
+## v0.12.9 a guest watching Thunderhorn (--join <host> --bot watchboss [--netsim 120,30,2] [--orblog <file>]
+## [--until N]): walks to the arena's south edge, strafes to and fro there facing him (so his orbs and balls chase
+## it), the camera behind it looking at him; quits after --until ticks (default 2400). With --orblog every drawn
+## frame's boss body, homing orbs and balls go to the file (main._log_boss_draw) to measure how smoothly they move.
+func _bot_watchboss() -> Array:
+	bot_t += 1
+	if net.predicted == null:
+		return [0, cam_yaw, 0.0, weapon_slot]
+	if bot_t > int(_args().get("until", 2400)):
+		get_tree().quit()
+	var me := net.predicted.pos
+	var spot := Boss.arena_c() + Vector3(0, 0, -16)
+	var b := 0
+	var look := Boss.arena_c()
+	if boss_view != null and boss_view.alive and boss_view.root != null:
+		look = boss_view.root.position
+	var to := spot - me
+	if Vector2(to.x, to.z).length() > 3.0 and bot_t < 900:
+		b |= Sim.Btn.FORWARD | Sim.Btn.SPRINT
+		cam_yaw = atan2(-to.x, -to.z)
+		return [b, cam_yaw, -0.15, weapon_slot]
+	var f := look - me
+	cam_yaw = lerp_angle(cam_yaw, atan2(-f.x, -f.z), 0.1)
+	b |= Sim.Btn.LEFT if (bot_t / 150) % 2 == 0 else Sim.Btn.RIGHT
+	return [b, cam_yaw, -0.18, weapon_slot]
+
+
+var _boss_log: FileAccess
+var _boss_rec: FileAccess
+
+
+## v0.12.9 --orblog: one line per drawn frame: "ms|boss x,y,z|orb key:x,y,z;...|ball key:x,y,z;..." (BossView's
+## nodes as drawn; the key is the orb's id, or its slot for a view that keeps them by index).
+func _log_boss_draw() -> void:
+	if _args().has("bosslog"):   # --bosslog <file>: every boss_state as it arrives, and our clock each frame
+		if _boss_rec == null:    # (tools/boss_replay.gd plays it back through BossView into a movie)
+			_boss_rec = FileAccess.open(str(_args()["bosslog"]), FileAccess.WRITE)
+			net.boss_changed.connect(func(tick: int, d: Array):
+				_boss_rec.store_line("B|%d|%d|%s" % [Time.get_ticks_msec(), tick, Marshalls.raw_to_base64(var_to_bytes(d))]))
+		var me := net.predicted.pos if net.predicted != null else Vector3.ZERO
+		_boss_rec.store_line("R|%d|%.3f|%s|%.3f" % [Time.get_ticks_msec(), net.render_tick + Engine.get_physics_interpolation_fraction(), _v3s(me), cam_yaw])
+	if not _args().has("orblog") or boss_view == null or not boss_view.alive or boss_view.root == null:
+		return
+	if _boss_log == null:
+		_boss_log = FileAccess.open(str(_args()["orblog"]), FileAccess.WRITE)
+	var line := "%d|%s" % [Time.get_ticks_usec() / 1000, _v3s(boss_view.root.position)]
+	for nodes in [boss_view.orb_nodes, boss_view.ball_nodes]:
+		var parts := []
+		var keys: Array = nodes.keys() if nodes is Dictionary else range(nodes.size())
+		for k in keys:
+			var n: Node3D = nodes[k]
+			if n.visible:
+				parts.append("%s:%s" % [str(k), _v3s(n.global_position)])
+		line += "|" + ";".join(parts)
+	_boss_log.store_line(line)
+
+
+static func _v3s(v: Vector3) -> String:
+	return "%.3f,%.3f,%.3f" % [v.x, v.y, v.z]
 
 
 func _shot_show(t: int) -> bool:

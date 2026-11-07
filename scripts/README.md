@@ -806,8 +806,8 @@ and two churning see-through shells of flame, a flickering light, embers, a smok
     24 m/s (`launches`; a dashing player is untouchable), `RECOVER` 70.
   - Orbs: `ORB_V0` 6 -> `ORB_VMAX` 15 m/s at `ORB_ACC` 5, `ORB_TURN` 2.8 rad/s, a little lead from `pvel`, gone after
     `ORB_LIFE` 330 ticks or in a pillar; a shield bounces them (spent).
-  - Health: `hp_for(n)` = 7000 x (1 + 0.7 (n - 1)); `add_fighter()` when someone joins mid-fight (Net
-    `_server_add_player`).
+  - Health: `hp_for(n)` = 3850 x (1 + 0.7 (n - 1)), rounded (v0.12.9: was 7000); `add_fighter()` when someone joins
+    mid-fight (Net `_server_add_player`).
   - Rings are `[radius, hit, centre, speed, damage, kind]`; `pack()` sends rings as [r, cx, cz, kind], balls as
     [pos, static], orbs as a PackedVector3Array and `[leap x, leap z, variant, phase, target, rush target, rep]`.
   - `people` rows from Net: [id, pos, alive, shielded, hp, dash ticks, casting, helpless].
@@ -1196,3 +1196,27 @@ Every spell levels up I -> II -> III from what it achieves (README, "What's new 
   and the progress bar (`_mastery`). `main.gd`: `_proj_node(kind, lv)`, the hotbar's points, F1 lines, `--foes`.
 - `dev_cmd.gd`: `mastery <spell|staff|wand|all> <1-3> [target]` (`mastery_slots(word)`: partial names), `max` sets III,
   `help mastery` lists the metrics. Tests: `tools/mastery_test.gd`, `tools/dev_test.gd`.
+
+## v0.12.9: Thunderhorn's attack timing, trees, minions, smooth guests
+
+- `boss.gd` (header ATTACK TIMING): `wind_len` (a tell's length, fixed as it starts), `charge_reach(from, yaw, full)`
+  and `_plan_run` (the charge's / rush's path: `charge_m` metres, `charge_len` ticks at `charge_v`; CHARGE_D 30 m,
+  CHARGE_MIN 14, CHARGE_EDGE 8 past the arena when it starts there, RUSH_OVER / RUSH_MIN / RUSH_MAX), `REC` (recovery
+  ticks in IDLE after each action: `_after`, `_after_move`, `idle_rec`, `idle_wait`), `FREE` and `free_now()` (a big-hit
+  stagger and the cutscene only then). The old early stops (outside the arena, "past" the target) are gone; a tree
+  in a charge is `boss_smash`, not `boss_skid`. Trees: `_tree_lure` / `_drift_trees` / `_lean_tree` (TREE_SEEK,
+  TREE_DRIFT, TREE_NEAR, TREE_NEAR_CD, TREE_GO; TREE_CD 6 s). Orbs and balls carry an id (`next_id`); `pack()`: rings
+  [r, cx, cz, kind, speed], balls [pos, static, id], extra + [charge_m, wind_len], then the orb ids (PackedInt32Array).
+- `boss_view.gd` (header SMOOTH ON A GUEST): `_buf` of updates, `_sample(render tick)` interpolates body, yaw, beam,
+  orbs and balls by id (extrapolating up to 6 ticks past the newest), the state clock from the server's t; rings on
+  `Net.own_tick`. `orb_nodes` / `ball_nodes` are dictionaries by id. `_live()` false (tools feeding it by hand): the old
+  direct drawing (`_apply_direct`). The charge path is drawn `extra[9]` long.
+- `net.gd`: `boss_state` goes through the network simulator on a guest (`_sim_boss`, `_boss_state_in`, newest-only like
+  `unreliable_ordered`); `own_off` / `own_tick(frac)` (the server tick our current input lands on, from the acks);
+  minions get `ai.aggressive`.
+- `npc_ai.gd`: `aggressive` (minions): no low-health retreat, more strikes and combos, fewer feints, archers start
+  draws 2.5x as readily, rarely pause, kite only within want - 6 m; wizards half the pause, rest later, hold range.
+- `main.gd`: `--bot watchboss`, `--orblog`, `--bosslog` (`_log_boss_draw`). Tools: `tools/boss_replay.gd`,
+  `tools/boss_anim_review.gd` sim mode. Tests: boss_test `_timing_tests` (12 seeded fights: full tells/actions/
+  recoveries, whole charge paths, the cutscene and staggers only when free), `_tree_sim_check` (trees felled at half
+  health, 0.8-1.0 on average), `_view_sync_tests`; npc_test (minions fight on at low health; health numbers).

@@ -120,11 +120,46 @@ func _initialize() -> void:
 		net.players.erase(ar.id)
 	var ar := {"id": -999}
 	net._server_send_roster()
+	# ---- v0.12.9 corrupted minions (NpcAI.aggressive) fight on at low health; challengers still back off
+	var fought := {}
+	for aggro in [false, true]:
+		for w in [Weapons.SWORD, Weapons.BOW]:
+			a.state = Sim.spawn_state(1)
+			a.state.pos = Vector3(60, 0, 60)
+			var m := net.spawn_npc(a, w, 2)
+			m.ai.aggressive = aggro
+			m.state.pos = Vector3(60, 0, 66 if w == Weapons.SWORD else 72)
+			var away := 0
+			var near_sum := 0.0
+			var shots := 0
+			var last_n := m.state.swing_n
+			for t in 1800:
+				m.state.hp = 20   # badly hurt the whole time
+				net._server_tick()
+				a.state.hp = Sim.MAX_HP
+				a.state.dead = 0
+				if m.ai._retreat > 0:
+					away += 1
+				near_sum += Vector2(m.state.pos.x - a.state.pos.x, m.state.pos.z - a.state.pos.z).length()
+				if m.state.swing_n != last_n:
+					shots += 1
+					last_n = m.state.swing_n
+			fought["%s %s" % ["minion" if aggro else "challenger", Weapons.NAMES[w]]] = [away, near_sum / 1800.0, shots]
+			net.players.erase(m.id)
+	print("      low health, 30 s: [ticks backing off, mean distance, swings/shots] %s" % str(fought))
+	check(int(fought["challenger Sword"][0]) > 0 and int(fought["challenger Bow"][0]) > 0, "a hurt challenger still backs off now and then")
+	check(int(fought["minion Sword"][0]) == 0 and int(fought["minion Bow"][0]) == 0, "a hurt minion never does: it keeps fighting")
+	check(float(fought["minion Sword"][1]) < float(fought["challenger Sword"][1]) and int(fought["minion Sword"][2]) > int(fought["challenger Sword"][2]),
+		"a minion swordsman stays closer and swings more")
+	check(int(fought["minion Bow"][2]) > int(fought["challenger Bow"][2]), "a minion archer shoots more")
+	net._server_send_roster()
 
 	# ---- Thunderhorn: health for one and for two players
 	var b1 := Boss.new(Vector3.ZERO, 1)
 	var b2 := Boss.new(Vector3.ZERO, 2)
-	check(b2.max_hp == int(Boss.BASE_HP * 1.7) and b1.max_hp == Boss.BASE_HP and Boss.hp_for(3) == int(Boss.BASE_HP * 2.4), "two players: 1.7x his health, three 2.4x (%d vs %d)" % [b2.max_hp, b1.max_hp])
+	# v0.12.9 Jacob: "45% less health at each stage": 55% of the old 7000 / 11 900 / 16 800
+	check(b1.max_hp == 3850 and b2.max_hp == 6545 and Boss.hp_for(3) == 9240, "his health is 45%% less: %d alone, %d for two, %d for three (was 7000 / 11 900 / 16 800)" % [b1.max_hp, b2.max_hp, Boss.hp_for(3)])
+	check(b2.max_hp == int(round(Boss.BASE_HP * 1.7)) and b1.max_hp == Boss.BASE_HP and Boss.hp_for(3) == int(round(Boss.BASE_HP * 2.4)), "two players: 1.7x his health, three 2.4x (%d vs %d)" % [b2.max_hp, b1.max_hp])
 	# what each spell does to him
 	var t1 := Boss.new(Vector3.ZERO, 1)
 	t1.state = Boss.S.IDLE

@@ -66,12 +66,20 @@ func _initialize() -> void:
 		keep_alive(net)
 	check(b.state != Boss.S.CUTSCENE and not b.cut_done, "at 61% nothing happens")
 
-	# ---- below 60%: it starts at once
+	# ---- below 60%: it starts as soon as he's free (v0.12.9: never in the middle of an attack or its recovery)
 	var was := b.state
+	var waited := 0
+	var last := b.state
+	var free_then := false
 	b.hp = int(b.max_hp * 0.59)
-	step(net)
-	keep_alive(net)
-	check(b.state == Boss.S.CUTSCENE and b.cut_done and net.cutscene_on(), "below 60%% the cutscene starts (he was %s)" % Boss.S.keys()[was])
+	while b.state != Boss.S.CUTSCENE and waited < 900:
+		last = b.state
+		free_then = b.free_now()
+		step(net)
+		keep_alive(net)
+		waited += 1
+	check(b.state == Boss.S.CUTSCENE and b.cut_done and net.cutscene_on() and free_then and waited < 600,
+		"below 60%% the cutscene starts once he's free (he was %s; %.1f s later, from %s)" % [Boss.S.keys()[was], waited / 60.0, Boss.S.keys()[last]])
 	check(b.rings.is_empty() and b.balls.is_empty() and b.orbs.is_empty() and net.pending_spells.is_empty(), "rings, balls, orbs and pending spells are cleared")
 	var pk := b.pack()
 	check(int(pk[0]) == Boss.S.CUTSCENE and int(pk[1]) == b.t, "the boss state carries it (state and film time) to every client, late joiners too")

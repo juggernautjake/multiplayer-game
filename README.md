@@ -231,9 +231,16 @@ hooves or tail while they attack, in the attack's colour. Clouds gather, he come
 the ground and roars. His health bar (with his status, and gold ticks where Storm Leaps are guaranteed) is at the top
 of the screen.
 
-**Health:** 7000 alone, x1.7 with two players (11 900), +0.7x for each player after that (`Boss.hp_for`); someone
-joining mid-fight adds health in proportion. At a level-3 wizard's realistic ~15 damage a second (dodging half the
-time) that is a fight of about 8 minutes alone.
+**Health** (v0.12.9: 45% less than before at every player count): 3850 alone, x1.7 with two players (6545), +0.7x
+for each player after that (9240 for three) (`Boss.hp_for`); someone joining mid-fight adds health in proportion.
+Every stage is a share of his health (the Storm Leaps at 80/55/30%, the Duel Stone at 60%, enraged at half, the storm
+at a quarter), so they all come sooner too. At a level-3 wizard's realistic ~15 damage a second (dodging half the
+time) that is a fight of about 4 minutes alone.
+
+**Every attack plays out in full** (v0.12.9): its wind-up, the attack and a short recovery (the skid after a charge,
+the slam settling) before the next one; only filling his stun meter or killing him cuts one short. A charge always
+runs the whole glowing path shown on the ground (30 m; shorter only near the arena's edge, never under 14 m). A big
+hit staggers him only between attacks, and the Duel Stone's cutscene waits until he's finished what he's doing.
 
 He moves like a hunting animal between attacks: circling you, backing off, pouncing hops to a new spot, snapping round
 with stamping hooves, short feint lunges, snorting and shaking his head.
@@ -242,7 +249,7 @@ His attacks, and how to see them coming:
 
 | Attack | The warning | What to do |
 |---|---|---|
-| **Charge** | He lowers his head, scrapes a hoof; a path glows on the ground | Step sideways at the last moment; enraged he may charge twice, in the storm three times |
+| **Charge** | He lowers his head, scrapes a hoof; a path glows on the ground (the whole run) | Step sideways at the last moment; enraged he may charge twice, in the storm three times |
 | **Stomp** | He rears up on his hind legs | Jump the rings that roll out over the ground (enraged: four slams, the last a double ring) |
 | **Horn beam** | His horns light up, arcs jump between them | The beam sweeps the ground in front of him (enraged: back and forth): get behind him, or shield |
 | **Called lightning** | He bellows at the sky | Circles appear under you: keep moving (in the storm the bolts walk at you in a line) |
@@ -300,7 +307,9 @@ or be hurt (players, golems, him, the minions) and anything in flight is cleared
 
 The six **corrupted minions** (a swordsman, a clubber, an archer, a slinger, a staff wizard and a wand wizard: dark,
 red-eyed, purple-red) fight like Duel Stone challengers (tier 2 alone, tier 3 with two or more players; wizards with
-their level-1 spells, the wand wizard at most 3 golems). They go for you and your golems; kill them or ignore them.
+their level-1 spells, the wand wizard at most 3 golems), but (v0.12.9) **very aggressively**: they never back off when
+hurt, swing and combo far more often, archers and slingers shoot more and barely kite, wizards cast with half the
+pauses. They still dodge, dash and feint. They go for you and your golems; kill them or ignore them.
 Killing one counts toward your levels like a challenger. His charge tramples them too. When Thunderhorn dies they
 collapse and dissolve into purple smoke; a defeat or restart removes them. The corrupted stone summons nobody until
 the fight is over; then it is cleansed (gold again). It plays once per fight and again after a restart.
@@ -605,6 +614,7 @@ The bot modes (all in `scripts/main.gd`, functions `_bot_input`, `_bot_fight` an
 | `--bot duel` | (`--host --give-all --shots <folder>`) Walks to the Duel Stone and presses E, then meets a challenger of every kind (sword, club, bow, slingshot, then after a level-up staff and wand) for 7 s each, with pictures through each fight. |
 | `--bot boss --leap` | (v0.11.0, `--host --give-all --shots <folder>`) Static stacks on you, then a Storm Leap at once; a picture every 10 ticks for 25 s. |
 | `--bot boss --cutscene` | (v0.12.3, `--host --give-all`) As `--bot boss`, but drops him under 60% right after his entrance so the Duel Stone's corruption plays at once, lets the minions come for 10 s (`--kill-after <ticks>`), then kills him (the minions collapse into smoke). `--every N --shots <folder>` saves pictures, `--until T` quits. Record it with `--write-movie cut.avi --fixed-fps 30 --quit-after 1150` before `--`. |
+| `--bot watchboss` | (v0.12.9, a guest: `--join <host> --bot watchboss [--netsim 120,30,2] [--until N]`) Walks to the arena's south edge and strafes there facing Thunderhorn (run the host with `--bot boss --leap`). `--orblog <file>` writes every drawn frame's boss, orb and ball positions (`python` over it for the jitter), `--bosslog <file>` every boss update as it arrived, for `tools/boss_replay.gd` (`<godot> --path . --write-movie out.avi --fixed-fps 60 -s tools/boss_replay.gd -- <log> [label] [from_s] [secs]`). |
 | `--bot boss [--defeat]` | (`--host --give-all --shots <folder>`) Levels up to 3 (the stone turns violet, the altar rises), jumps on the altar, watches Thunderhorn come down and fight from 10-16 m (kept alive), takes him to half and a quarter of his health, then beats him and pictures the victory and the prize. With `--defeat` it dies instead: the defeat screen, a key, the restart. |
 | `--bot prize [--defeat] [--no-prize-pic] [--every N] [--ticks N]` | Just the end screens (victory and the prize, or defeat); `--no-prize-pic` shows the drawn stand-in. `--every N` saves a shot every N ticks (default 30), `--ticks N` runs that long (default 1100; ~2300 shows a whole fiesta loop). For a video use Godot's `--write-movie out.avi --fixed-fps 30` before the `--`. |
 | `--bot close` | Close-quarters test. After picking everything up, for each weapon it walks right into the middle dummy and then into the nearest tall pillar (7 s each), keeps the crosshair on the target, and attacks (clicks, then holds; bows draw and release). Every 6 ticks it logs how far the body is turned from the target and from the camera; at the end it prints the worst angle per weapon and quits. Add `--shots <folder>` to save screenshots at three moments of each phase. |
@@ -622,7 +632,7 @@ Other command-line options (after `--`):
 | `--log` | Print every hit and pick-up on the server, and (with `--bot fight`) an audit line counting every replicated event this client received. |
 | `--give-all`, `--give-staff`, `--give-wand`, `--max-level` | (host) start with every weapon, or the basic weapons plus the staff or the wand; every spell unlocked. |
 | `--give-guests` | (host) guests start with every weapon too, so a guest can be tested casting over `--netsim`. |
-| `--netsim ping_ms,jitter_ms,loss_percent` | Test this client over a simulated bad connection: delays, jitters and drops its own inputs and incoming snapshots. Example: `--netsim 150,40,3`. |
+| `--netsim ping_ms,jitter_ms,loss_percent` | Test this client over a simulated bad connection: delays, jitters and drops its own inputs and incoming snapshots (v0.12.9: and Thunderhorn's state). Example: `--netsim 150,40,3`. |
 
 ### Checking the netcode
 
@@ -963,3 +973,27 @@ teleport's reach and the shield's cost are predicted like everything else) and k
 Dev console: `mastery <spell|staff|wand|all> <1-3> [target]` (names may be partial: `mastery fire 3`), `max` sets
 every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_test.gd`; pictures:
 `--bot magic --give-all --max-level --mastery 3 --foes --every --shots <dir>` (`--plan2`, `--plan3`).
+
+## What's new in 0.12.9 (Thunderhorn fixes)
+
+- **45% less health** at every player count: 3850 alone, 6545 for two, 9240 for three (was 7000 / 11 900 / 16 800).
+  All his stages are shares of his health, so they come just as they did, only sooner.
+- **His attacks no longer cut off.** The charge used to stop after one tick whenever he was outside the arena (after
+  a far Storm Leap, after the Duel Stone cutscene, near the edge) or as soon as you were a few metres behind him, and
+  the rush the same after a far leap; a meteor's big hit staggered him out of any attack; the cutscene could start
+  mid-attack; enraging mid-wind-up shortened the tell; and he went into his next attack before the skid or the slam
+  had finished. Now every attack plays its tell, the attack and a recovery, one at a time (`Boss` header: ATTACK
+  TIMING); the charge runs the path drawn on the ground. `tools/boss_test.gd` checks it over 12 simulated fights.
+- **The fruit trees**: between attacks he drifts toward the nearest apple tree, his circling and hops lean its way,
+  and he swipes a tree he's next to, so by the time he's lost half his health most of the arena's five apple trees
+  are down (~85% on average in the simulated fights), while he keeps fighting you.
+- **Corrupted minions are very aggressive** (see above).
+- **Smooth for guests**: his body, his homing orbs and ball lightning used to be drawn from the newest packet as it
+  arrived, and the orbs were matched by their place in the list (when one popped, the rest jumped), so on a laggy
+  connection they rubber-banded. Now a guest buffers his updates and draws everything on the same delayed clock as the
+  other players, each orb and ball followed by its id and interpolated, carrying on smoothly through a late packet;
+  his rings are drawn on your own clock (where they will be when your jump reaches the host). Measured on a guest at
+  120 ms ping, 30 ms jitter, 2% loss: the orbs' frame-to-frame wobble went from 0.24 m (median; 11 m at the 99th
+  percentile, 48% of frames with a visible jolt) to 0.025 m (0.08 m; 0% jolts). `--netsim` now covers his state too.
+- Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
+  guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).

@@ -45,8 +45,8 @@ var marker: Node3D
 var marker_mat: StandardMaterial3D
 var path: MeshInstance3D
 var ring_nodes: Array = []
-var ball_nodes: Array = []
-var orb_nodes: Array = []
+var ball_nodes := {}             # v0.12.9 ball id -> its node
+var orb_nodes := {}              # v0.12.9 orb id -> its node
 var state := -1
 var state_t := 0.0
 var pos := Vector3.ZERO
@@ -56,8 +56,23 @@ var max_hp := 1
 var flags := 0
 var beam_a := 0.0
 var rings: Array = []
-var balls: Array = []
+var balls: Array = []            # [pos, static, id]
 var orbs := PackedVector3Array()
+var orb_ids := PackedInt32Array()   # v0.12.9 (in step with orbs)
+## v0.12.9 SMOOTH ON A GUEST (Jacob: "the orbs rubberband... he can't really dodge them"). His state comes every other
+## tick, unreliably, with real lag and jitter; it used to be drawn as it arrived (the newest packet, eased toward
+## with a per-frame lerp, snapped past a few metres), and orbs and balls were matched to their nodes by their place in
+## the list, so when one popped every later one jumped onto its neighbour's node. Now the updates are buffered
+## (`_buf`) and everything is drawn on the same delayed clock as the other players (Net.render_tick: interp_delay
+## behind the newest update, sized from the measured jitter), interpolated between the two updates around it: his
+## body, heading and the beam; every orb and ball by its id (Boss.next_id). Rings are the one thing drawn AHEAD, on
+## our own predicted clock (Net.own_tick): they grow at a steady speed (r + speed * time since the update), so where
+## a ring is when our jump reaches the host is known exactly, and that is where it's drawn (drawn late, a guest at
+## 120 ms jumped ~0.2 s too late every time). His state and its clock come from the server's own t, so an
+## animation starts exactly when the server's state did. Past the newest update (a late or lost packet) things carry
+## on along their last motion for up to 0.1 s, never snapping back. Tools that feed the view by hand (no network) get
+## the old direct drawing.
+var _buf: Array = []             # [tick, data], oldest first
 var extra: Array = [0.0, 0.0, 0, 0, 0, 0, 0]
 var phase := 0.0
 var flinch := 0.0
@@ -163,8 +178,9 @@ func _build() -> void:
 
 
 # ================================================================ state from the server
-func _on_state(_tick: int, d: Array) -> void:
+func _on_state(tick: int, d: Array) -> void:
 	if d.is_empty():
+		_buf.clear()
 		_despawn()
 		return
 	if not alive:
@@ -172,6 +188,21 @@ func _on_state(_tick: int, d: Array) -> void:
 		alive = true
 		hud.visible = true
 		root.position = Vector3(d[2], d[3], d[4])
+	if _live():
+		if _buf.is_empty() or tick > int(_buf[-1][0]):
+			_buf.append([tick, d])
+		while _buf.size() > 2 and int(_buf[1][0]) < tick - 90:
+			_buf.pop_front()
+		return
+	_apply_direct(d)
+
+
+## Drawn on the network's delayed clock (a real game), or straight from what was handed in (the review tools)?
+func _live() -> bool:
+	return net != null and net.my_id != 0 and net.render_tick > 0.0
+
+
+func _apply_direct(d: Array) -> void:
 	if int(d[0]) != state:
 		state = int(d[0])
 		state_t = float(d[1]) * Config.DT
@@ -186,6 +217,146 @@ func _on_state(_tick: int, d: Array) -> void:
 	if d.size() > 13:
 		orbs = d[12]
 		extra = d[13]
+	orb_ids = _ids_of(d)
+	Boss.shown_enraged = flags & 8 != 0
+
+
+static func _ids_of(d: Array) -> PackedInt32Array:
+	if d.size() > 14:
+		return d[14]
+	var out := PackedInt32Array()   # (older data: by place in the list)
+	if d.size() > 12:
+		for i in (d[12] as PackedVector3Array).size():
+			out.append(i)
+	return out
+
+
+static func _ball_id(b, i: int) -> int:
+	return int(b[2]) if b is Array and b.size() > 2 else i
+
+
+## v0.12.9 his whole state at render tick rt, between the buffered updates around it (header: SMOOTH ON A GUEST).
+func _sample(rt: float) -> void:
+	if _buf.is_empty():
+		return
+	var ia := -1
+	for i in _buf.size():
+		if float(_buf[i][0]) <= rt:
+			ia = i
+		else:
+			break
+	if ia < 0:
+		ia = 0
+		rt = float(_buf[0][0])
+	var a: Array = _buf[ia]
+	var da: Array = a[1]
+	var ta := float(a[0])
+	var db: Array = []
+	var tb := ta
+	if ia + 1 < _buf.size():
+		db = _buf[ia + 1][1]
+		tb = float(_buf[ia + 1][0])
+	var w := clampf((rt - ta) / maxf(tb - ta, 1.0), 0.0, 1.0) if not db.is_empty() else 0.0
+	# past the newest update: carry on along the last motion, up to 6 ticks
+	var dp: Array = []
+	var tp := ta
+	var ahead := 0.0
+	if db.is_empty() and ia > 0:
+		dp = _buf[ia - 1][1]
+		tp = float(_buf[ia - 1][0])
+		ahead = clampf(rt - ta, 0.0, 6.0)
+	# the state and its clock, from the server's t (it changed between the two updates: at tb - its t)
+	var st := int(da[0])
+	var st_t := (float(da[1]) + rt - ta) * Config.DT
+	if not db.is_empty():
+		var entered := tb - float(db[1])
+		if (int(db[0]) != st or entered > ta) and rt >= entered:
+			st = int(db[0])
+			st_t = (rt - entered) * Config.DT
+	state = st
+	state_t = st_t
+	var pa := Vector3(da[2], da[3], da[4])
+	if not db.is_empty():
+		pos = pa.lerp(Vector3(db[2], db[3], db[4]), w)
+		yaw = lerp_angle(float(da[5]), float(db[5]), w)
+		beam_a = lerp_angle(float(da[9]), float(db[9]), w)
+	elif not dp.is_empty():
+		var pp := Vector3(dp[2], dp[3], dp[4])
+		pos = pa + (pa - pp) / maxf(ta - tp, 1.0) * ahead if pa.distance_to(pp) < 8.0 else pa
+		yaw = float(da[5])
+		beam_a = float(da[9])
+	else:
+		pos = pa
+		yaw = float(da[5])
+		beam_a = float(da[9])
+	hp = int(da[6])
+	max_hp = maxi(int(da[7]), 1)
+	flags = int(da[8])
+	if da.size() > 13:
+		extra = da[13]
+	# rings: on OUR clock (Net.own_tick: the tick our input now reaches the host at), from the newest update, at their
+	# exact radius then (a steady speed): the ring you see reach your feet is the one the host checks your jump against
+	var own := net.own_tick(Engine.get_physics_interpolation_fraction())
+	var rd: Array = da
+	var rtk := rt
+	var rta := ta
+	if own > 0.0:
+		rd = _buf[-1][1]
+		rta = float(_buf[-1][0])
+		rtk = maxf(own, rta)
+	var rr := []
+	for r in rd[10]:
+		if r is Array and (r as Array).size() > 4:
+			var q: Array = (r as Array).duplicate()
+			q[0] = float(q[0]) + float(q[4]) * (rtk - rta) * Config.DT
+			rr.append(q)
+		else:
+			rr.append(r)
+	rings = rr
+	# balls and orbs: each by its id, between its two positions (or carried on along its motion)
+	var bb := {}
+	var bp := {}
+	if not db.is_empty():
+		for i in (db[11] as Array).size():
+			bb[_ball_id(db[11][i], i)] = db[11][i][0]
+	elif not dp.is_empty():
+		for i in (dp[11] as Array).size():
+			bp[_ball_id(dp[11][i], i)] = dp[11][i][0]
+	var nb := []
+	for i in (da[11] as Array).size():
+		var e: Array = da[11][i]
+		var id := _ball_id(e, i)
+		var p0: Vector3 = e[0]
+		var at := p0
+		if bb.has(id):
+			at = p0.lerp(bb[id], w)
+		elif bp.has(id):
+			at = p0 + (p0 - (bp[id] as Vector3)) / maxf(ta - tp, 1.0) * ahead
+		nb.append([at, bool(e[1]) if e.size() > 1 else false, id])
+	balls = nb
+	var oa: PackedVector3Array = da[12] if da.size() > 12 else PackedVector3Array()
+	var ida := _ids_of(da)
+	var ob := {}
+	var op := {}
+	if not db.is_empty():
+		var idb := _ids_of(db)
+		for i in idb.size():
+			ob[idb[i]] = (db[12] as PackedVector3Array)[i]
+	elif not dp.is_empty():
+		var idp := _ids_of(dp)
+		for i in idp.size():
+			op[idp[i]] = (dp[12] as PackedVector3Array)[i]
+	var no := PackedVector3Array()
+	for i in mini(oa.size(), ida.size()):
+		var p0 := oa[i]
+		if ob.has(ida[i]):
+			no.append(p0.lerp(ob[ida[i]], w))
+		elif op.has(ida[i]):
+			no.append(p0 + (p0 - (op[ida[i]] as Vector3)) / maxf(ta - tp, 1.0) * ahead)
+		else:
+			no.append(p0)
+	orbs = no
+	orb_ids = ida.slice(0, no.size())
 	Boss.shown_enraged = flags & 8 != 0
 
 
@@ -217,11 +388,11 @@ func _despawn() -> void:
 		_leap_pillar = null
 	if _arrow != null:
 		_arrow.visible = false
-	for n in ring_nodes + ball_nodes + orb_nodes + _swirl:
+	for n in ring_nodes + ball_nodes.values() + orb_nodes.values() + _swirl:
 		(n as Node).queue_free()
 	ring_nodes = []
-	ball_nodes = []
-	orb_nodes = []
+	ball_nodes = {}
+	orb_nodes = {}
 	_swirl = []
 	if hud:
 		hud.visible = false
@@ -236,11 +407,19 @@ func _process(delta: float) -> void:
 		banner.visible = banner_t > 0.0
 	if not alive or root == null:
 		return
-	state_t += delta
+	var live := _live()
+	if live:   # v0.12.9 on the players' delayed clock, between the updates (header: SMOOTH ON A GUEST)
+		_sample(net.render_tick + Engine.get_physics_interpolation_fraction())
+	else:
+		state_t += delta
 	var enraged := flags & 8 != 0
 	var before := root.position
-	root.position = root.position.lerp(pos, clampf(delta * 14.0, 0.0, 1.0)) if root.position.distance_to(pos) < 8.0 else pos
-	root.rotation.y = lerp_angle(root.rotation.y, yaw, clampf(delta * 12.0, 0.0, 1.0))
+	if live:
+		root.position = pos
+		root.rotation.y = yaw
+	else:
+		root.position = root.position.lerp(pos, clampf(delta * 14.0, 0.0, 1.0)) if root.position.distance_to(pos) < 8.0 else pos
+		root.rotation.y = lerp_angle(root.rotation.y, yaw, clampf(delta * 12.0, 0.0, 1.0))
 	var mv := Vector2(root.position.x - before.x, root.position.z - before.z) / maxf(delta, 1e-4)
 	var speed := mv.length()
 	var fwd := Vector2(-sin(yaw), -cos(yaw))
@@ -1232,7 +1411,7 @@ func _update_path(col: Color) -> void:
 	path.visible = show
 	if not show:
 		return
-	var len := 30.0
+	var len := float(extra[9]) if extra.size() > 9 and float(extra[9]) > 0.0 else 30.0   # v0.12.9 the planned path
 	var k := clampf(state_t / (1.4 if state == Boss.S.PAW else 0.8), 0.0, 1.0)
 	var f := Vector3(-sin(root.rotation.y), 0, -cos(root.rotation.y))
 	path.global_position = Vector3(root.position.x, pos.y + 0.05, root.position.z) + f * (len * 0.5 + 2.0)
@@ -1362,51 +1541,67 @@ func _draw_rings() -> void:
 
 
 func _draw_balls(col: Color) -> void:
-	while ball_nodes.size() < balls.size():
-		var holder := Node3D.new()
-		var mi := MeshInstance3D.new()   # a plain damage ball: a smooth blue-white sphere
-		var sm := SphereMesh.new()
-		sm.radius = 0.4
-		sm.height = 0.8
-		mi.mesh = sm
-		mi.name = "plain"
-		mi.material_override = MagicFx._glow_mat(Color("dff0ff"), 8.0)
-		var l := OmniLight3D.new()
-		l.light_color = Color("9fc4ff")
-		l.light_energy = 2.0
-		l.omni_range = 4.0
-		mi.add_child(l)
-		holder.add_child(mi)
-		var star := static_star(1.3)   # a Static ball
-		star.name = "static"
-		holder.add_child(star)
-		main.add_child(holder)
-		ball_nodes.append(holder)
+	var seen := {}
 	var stat_n := 0
-	for i in ball_nodes.size():
-		var holder: Node3D = ball_nodes[i]
-		holder.visible = i < balls.size()
-		if holder.visible:
-			var b = balls[i]
-			var target: Vector3 = b[0] if b is Array else b
-			var stat: bool = b is Array and bool(b[1])
-			holder.global_position = holder.global_position.lerp(target, 0.5) if holder.global_position.distance_to(target) < 3.0 else target
-			var mi: MeshInstance3D = holder.get_node("plain")
-			var star: Node3D = holder.get_node("static")
-			mi.visible = not stat
-			star.visible = stat
-			if stat:
-				stat_n += 1
-				_static_spin(star, get_process_delta_time())
-			else:
-				mi.scale = Vector3.ONE * (0.95 + 0.1 * randf())
-				(mi.material_override as StandardMaterial3D).emission = col.lightened(0.4)
-				if randf() < 0.3:
-					var c0 := holder.global_position
-					_arc(c0, c0 + Vector3(randf_range(-0.8, 0.8), randf_range(-0.8, 0.8), randf_range(-0.8, 0.8)), col, 0.1)
+	var live := _live()
+	for i in balls.size():
+		var b = balls[i]
+		var id := _ball_id(b, i)
+		var target: Vector3 = b[0] if b is Array else b
+		var stat: bool = b is Array and bool(b[1])
+		seen[id] = true
+		var holder: Node3D = ball_nodes.get(id, null)
+		var fresh := holder == null
+		if fresh:
+			holder = _new_ball()
+			ball_nodes[id] = holder
+		# v0.12.9 each ball keeps its own node (by id); on the delayed clock it is already smooth
+		if fresh or live or holder.global_position.distance_to(target) > 3.0:
+			holder.global_position = target
+		else:
+			holder.global_position = holder.global_position.lerp(target, 0.5)
+		var mi: MeshInstance3D = holder.get_node("plain")
+		var star: Node3D = holder.get_node("static")
+		mi.visible = not stat
+		star.visible = stat
+		if stat:
+			stat_n += 1
+			_static_spin(star, get_process_delta_time())
+		else:
+			mi.scale = Vector3.ONE * (0.95 + 0.1 * randf())
+			(mi.material_override as StandardMaterial3D).emission = col.lightened(0.4)
+			if randf() < 0.3:
+				var c0 := holder.global_position
+				_arc(c0, c0 + Vector3(randf_range(-0.8, 0.8), randf_range(-0.8, 0.8), randf_range(-0.8, 0.8)), col, 0.1)
+	for id in ball_nodes.keys():
+		if not seen.has(id):
+			(ball_nodes[id] as Node).queue_free()
+			ball_nodes.erase(id)
 	if stat_n > _stat_seen and root != null:
 		_static_seen(root.position)
 	_stat_seen = stat_n
+
+
+func _new_ball() -> Node3D:
+	var holder := Node3D.new()
+	var mi := MeshInstance3D.new()   # a plain damage ball: a smooth blue-white sphere
+	var sm := SphereMesh.new()
+	sm.radius = 0.4
+	sm.height = 0.8
+	mi.mesh = sm
+	mi.name = "plain"
+	mi.material_override = MagicFx._glow_mat(Color("dff0ff"), 8.0)
+	var l := OmniLight3D.new()
+	l.light_color = Color("9fc4ff")
+	l.light_energy = 2.0
+	l.omni_range = 4.0
+	mi.add_child(l)
+	holder.add_child(mi)
+	var star := static_star(1.3)   # a Static ball
+	star.name = "static"
+	holder.add_child(star)
+	main.add_child(holder)
+	return holder
 
 
 ## v0.12.0: every Static source (homing orbs, static balls) looks the same, and nothing like his plain blue damage
@@ -1481,30 +1676,39 @@ func _static_seen(at: Vector3) -> void:
 
 ## The homing orbs: violet cores in a crackling shell, each trailing sparks; a zip as each one launches.
 func _draw_orbs(delta: float) -> void:
-	if orbs.size() > _orbs_seen and root != null:
+	var seen := {}
+	var fresh_n := 0
+	var live := _live()
+	for i in mini(orbs.size(), orb_ids.size()):
+		var id := orb_ids[i]
+		var target := orbs[i]
+		seen[id] = true
+		var mi: Node3D = orb_nodes.get(id, null)
+		var fresh := mi == null
+		if fresh:   # v0.12.9 each orb keeps its own node (by id), so one popping no longer shifts the others
+			fresh_n += 1
+			mi = static_star(1.1)
+			if id % 4 == 0:   # a light on every fourth (cheap)
+				var l := OmniLight3D.new()
+				l.light_color = STATIC_CORE
+				l.light_energy = 1.5
+				l.omni_range = 5.0
+				mi.add_child(l)
+			main.add_child(mi)
+			orb_nodes[id] = mi
+		if fresh or live or mi.global_position.distance_to(target) > 4.0:
+			mi.global_position = target
+		else:
+			mi.global_position = mi.global_position.lerp(target, clampf(delta * 30.0, 0.0, 1.0))
+		mi.scale = Vector3.ONE * (0.9 + 0.2 * randf())
+		_static_spin(mi, delta)
+	for id in orb_nodes.keys():
+		if not seen.has(id):
+			(orb_nodes[id] as Node).queue_free()
+			orb_nodes.erase(id)
+	if fresh_n > 0 and root != null:
 		_sound("chirp", root.position, -6.0)
-	_orbs_seen = orbs.size()
-	while orb_nodes.size() < orbs.size():
-		var mi := static_star(1.1)
-		if orb_nodes.size() % 4 == 0:   # a light on every fourth (cheap)
-			var l := OmniLight3D.new()
-			l.light_color = STATIC_CORE
-			l.light_energy = 1.5
-			l.omni_range = 5.0
-			mi.add_child(l)
-		main.add_child(mi)
-		orb_nodes.append(mi)
-	if orbs.size() > _orbs_buzzed and root != null:
 		_static_seen(root.position)
-	_orbs_buzzed = orbs.size()
-	for i in orb_nodes.size():
-		var mi: Node3D = orb_nodes[i]
-		mi.visible = i < orbs.size()
-		if mi.visible:
-			var target := orbs[i]
-			mi.global_position = mi.global_position.lerp(target, clampf(delta * 30.0, 0.0, 1.0)) if mi.global_position.distance_to(target) < 4.0 else target
-			mi.scale = Vector3.ONE * (0.9 + 0.2 * randf())
-			_static_spin(mi, delta)
 
 
 # ================================================================ events
@@ -1601,6 +1805,11 @@ func _on_fx(kind: String, a: Array) -> void:
 		"boss_charge":
 			_sound("roar2", a[0], 0.0)
 			_sound("whoosh", a[0], 2.0)
+		"boss_smash":   # v0.12.9 a tree splintered in the middle of a charge: he runs on (no skid)
+			fx._smoke(a[0], 6, 1.8, 1.0, 0.5)
+			Fx.burst(main, (a[0] as Vector3) + Vector3(0, 1.5, 0), Vector3.UP, Color("7a5a3a"), 24, 7.0, 0.08)
+			fx._shake_near_scaled(a[0], 0.3)
+			_sound("slam", a[0], 0.0)
 		"boss_skid":
 			_skid_t = 0.6
 			fx._smoke(a[0], 8, 2.4, 1.2, 0.55)
