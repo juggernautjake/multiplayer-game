@@ -111,6 +111,8 @@ var controls_panel: Control  # F1: every control
 
 func _ready() -> void:
 	SoundSettings.setup()   # v0.12.9: the Effects / Music / Voice buses and the saved volumes
+	Avatar.warm()   # v0.12.12: every costume's sheets load in the background now, not in the middle of a fight
+	Synth.warm()    # v0.12.12: and every made-from-scratch sound is built in the background too
 	net = Net.new()
 	net.name = "Net"
 	add_child(net)
@@ -2477,6 +2479,7 @@ func _start_host() -> void:
 	if not _name_ready():
 		return
 	net.persist = _real_play()   # v0.12.7
+	net.netlog = net.persist     # v0.12.12: the connection log (user://netlog.txt)
 	net.style = "figure" if char_pick.selected == 1 else "pip"
 	var port := int(port_edit.text)
 	var err := net.host(port, name_edit.text)
@@ -2494,6 +2497,7 @@ func _start_host() -> void:
 func _start_join() -> void:
 	if not _name_ready():
 		return
+	net.netlog = _real_play()   # v0.12.12: the connection log (user://netlog.txt)
 	var addr := addr_edit.text.strip_edges()
 	var inv := decode_invite(addr)
 	if inv.size() == 2:   # an invite code: it carries the address and the port

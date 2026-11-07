@@ -164,3 +164,66 @@ rented machine in a data center:
   hosts again on the same port, has a guest leave and rejoin, and goes host -> leave -> join -> leave -> host.
 - **Shots bounce off shields** on the server; the new path goes to everyone (`proj_bounce`, channel 6) and each
   client's copy of the shot follows it.
+
+## 0.12.12
+
+Written after Jacob asked to "make the lag better and reduce the ping" for his friend (a guest over Tailscale).
+
+**The round trip itself can't be shortened by the game**: it's the distance and the route between the two houses.
+The biggest thing either of you can do is still to get Tailscale going **direct** instead of through a DERP relay
+(see above; the HUD says which). What the game can do is stop adding its own delay on top, and stop freezing.
+
+### Measuring it: `tools/lag_proxy.py` and `--netstat`
+
+`--netsim` delays packets inside the game, so ENet never sees the lag. `tools/lag_proxy.py` is a UDP proxy between
+two copies of the game: ENet sees a real bad link (its round-trip estimate, throttle and resends all react).
+
+```
+python tools/lag_proxy.py 7793 7792 90 30 1 1280 160      # listen, host port, round trip, jitter, loss %, mtu, seconds
+Godot --headless --path . -- --host --port 7792 --name Host --bot boss --give-guests --netstat
+Godot --headless --path . -- --join 127.0.0.1 --port 7793 --name Guest --bot watchboss --until 6000 --netstat
+```
+
+`--netstat` prints, every 5 s, on the host: bytes and packets a second each way (ENet's own count), each guest's
+round trip and input buffer, and what was sent by kind; on the guest: the link line, interpolation delay,
+corrections and snapshots received a second. On both, any frame over 80 ms and the messages handled just before it.
+
+What a guest gets in a boss fight with 6 minions: about 40 KB/s from the host (snapshots 20 KB/s, Thunderhorn's
+state 7-18 KB/s, golems 2.5 KB/s) and it sends 19 KB/s (60 input packets a second, each repeating the last 8
+inputs). That's small for any broadband connection; bandwidth isn't the problem.
+
+### What was wrong, and the fixes
+
+| Found | Fix |
+|---|---|
+| The host's **input buffer for a guest grew and never drained**: each time it ran dry it grew by one, and the queue then kept that depth for good (it only drained when 3+ over its target). In the boss fight it sat at 5-7 ticks, so everything the guest did reached the host 80-115 ms later than it needed to. | `_server_step_player`: if the queue stays above its target for a whole second (`TRIM_WINDOW`), one spare input is applied early (the guest moves one tick further that tick, unnoticeable) and the delay drops a tick. Running dry during the host's own catch-up ticks (3+ physics ticks in one frame) doesn't count. Running dry several times within a second grows it by one at most. Shrinks after 5 s calm (`CALM_SHRINK`, was 10 s). Now 1-2 ticks through the fight. |
+| **Both games froze 0.6 s as the minions rose**: each costume's four sprite sheets loaded the first time someone wore it, and the minions were the first to wear most of them. A frozen guest sends no inputs, so the host's buffer ran dry (and grew), and the guest then drew everyone 333 ms behind for several seconds. | `Avatar.warm()` starts loading every costume in the background when the game opens. |
+| **0.15-0.22 s freezes at the cutscene and at Thunderhorn's sounds**: every sound is synthesised sample by sample in GDScript, and the long ones (roars, thunder, the cutscene's drone) were built the moment they were first played, some every time. | `Synth` keeps each sound once built (`_memo`), and `Synth.warm()` builds them all on a background thread at start-up. |
+| **0.15 s on the host at each Storm Leap**: picking where he lands checked 6400 grid points against every obstacle each time. | `Boss._open_spots()`: the clear grid points, worked out once while the game loads. |
+| **ENet's throttle** drops a share of unreliable packets (snapshots, inputs) whenever a round trip comes in above average, guessing at congestion. | `_no_throttle`: deceleration 0 on every peer, both sides. Snapshots received in the fight went from 27-29 to 29-30 a second. |
+
+Measured through the proxy (90 ms, 30 ms jitter, 1% loss, Tailscale's 1280 MTU), boss fight with minions:
+
+| | Before | After |
+|---|---|---|
+| Host's input buffer for the guest | 5-7 ticks | 1-2 ticks |
+| Freeze when the minions rise | 0.6 s (both) | none |
+| Guest drawing others 333 ms behind afterwards | about 5 s | never |
+| Guest's corrections (rubber-band) over the fight | 36-41 | 26 |
+| Snapshots received a second | 27-29 | 29-30 |
+
+### The connection log
+
+In real games (not tests or bots) the host and each guest append the HUD's connection line every 30 s to
+`user://netlog.txt` (`%APPDATA%\Godot\app_userdata\Multiplayer Game\netlog.txt` on Windows; over 400 KB it becomes
+`netlog.old.txt`). The guest's file says whether Tailscale is direct or relayed and how much jitter there is; the
+host's says each guest's round trip and buffer. Look there after a laggy evening.
+
+### Still worth doing (from the list above)
+
+- Slimmer snapshots: other players' entries carry fields only their own player needs (the wand's eight recharges,
+  mastery, mana): 83 bytes each, about half could go. A boss fight's snapshot is ~670 bytes; with Thunderhorn's
+  state that's near Tailscale's 1280-byte packet size, past which a packet travels in two pieces and is lost if
+  either is.
+- Pack Thunderhorn's state as bytes instead of Godot Variants (about half the size).
+- A dedicated server, or the Steam relay, when Tailscale can't go direct.

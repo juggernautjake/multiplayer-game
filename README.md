@@ -1037,3 +1037,22 @@ every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_te
   percentile, 48% of frames with a visible jolt) to 0.025 m (0.08 m; 0% jolts). `--netsim` now covers his state too.
 - Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
   guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).
+
+## What's new in 0.12.12 (less lag for guests)
+
+Measured with the new `tools/lag_proxy.py` (real ENet traffic through a 90 ms / 30 ms jitter / 1% loss link) in a
+boss fight; details in [docs/networking.md](docs/networking.md#01212).
+
+- **The host's input buffer for each guest no longer gets stuck deep.** It grew whenever it ran dry and never
+  drained back, so in the boss fight a guest's every action reached the host 5-7 ticks (80-115 ms) late; now 1-2.
+  A buffer that stays fuller than it needs for a second is trimmed by a tick; a stall on the host (catch-up ticks)
+  doesn't grow it; one stall on the guest grows it by one tick at most; it shrinks after 5 s calm (was 10).
+- **No more freezes when the minions rise or Thunderhorn acts**: the costumes' sprite sheets load and the
+  made-from-scratch sounds are built in the background at start-up (they loaded on first sight: 0.6 s frozen on
+  everyone's screen as the minions rose, 0.15-0.2 s at the cutscene's sounds), and his Storm Leap's landing grid is
+  worked out once (0.15 s each leap). A frozen guest sends no inputs, so this was lag for everyone.
+- **ENet no longer throws away snapshots and inputs** on a jittery link (its "throttle", meant for congestion).
+- **A connection log** in real games: every 30 s, `user://netlog.txt` gets the HUD's connection line (round trip,
+  jitter, loss, Tailscale direct or relayed, each guest's buffer), so a laggy evening can be checked afterwards.
+- Tools: `--netstat` (host: what is sent each guest by kind, bytes and packets a second; both: frames over 80 ms and
+  what arrived just before), `tools/lag_proxy.py`.

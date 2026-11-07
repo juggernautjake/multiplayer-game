@@ -33,6 +33,7 @@ the script through `OS.get_cmdline_user_args()`.
 | [release.sh](#releasesh) | script | no | Builds and publishes a new version on GitHub. |
 | [make_weapon_frames.py](#make_weapon_framespy) | asset generator | no | Makes Pip's sword, bow and slingshot frames from his sheet. |
 | [netcode_model.py](#netcode_modelpy) | model | no | Simulates the netcode over bad connections and counts corrections. |
+| lag_proxy.py | tool | no | v0.12.12: a UDP proxy acting as a bad link (delay, jitter, loss, MTU) between two copies of the game; see [docs/networking.md](../docs/networking.md#01212). |
 
 ---
 

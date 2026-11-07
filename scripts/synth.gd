@@ -36,7 +36,7 @@ static func play(parent: Node, stream: AudioStream, volume_db := 0.0, bus := "Ef
 ## A bull's roar from a storm: a low growl (a saw falling in pitch, roughened by noise) with a thunder rumble under it.
 ## kind 0: the entrance (long, rising then falling), 1: enraged (higher, harsher), 2: a short bellow, 3: the death
 ## (a long fall into a rumble).
-static func roar(kind := 0) -> AudioStreamWAV:
+static func _make_roar(kind := 0) -> AudioStreamWAV:
 	var dur: float = [2.4, 1.8, 1.0, 3.2, 4.4][kind]   # 4 (v0.11.0): the Storm Leap's long howl
 	var base: float = [78.0, 105.0, 90.0, 70.0, 86.0][kind]
 	var n := int(RATE * dur)
@@ -72,7 +72,7 @@ static func roar(kind := 0) -> AudioStreamWAV:
 ## pulse's chime); v0.12.0 the horn beam: "beam_hum" (the orb charging: a rising whine with a swelling hum and
 ## quickening snaps), "beam" / "beam_long" (the beam firing, 1.6 s / 2.75 s: a crackling sustained roar with a slow
 ## warble, rising in the attack and dying away), "pop" (the orb collapsing).
-static func fx(kind: String) -> AudioStreamWAV:
+static func _make_fx(kind: String) -> AudioStreamWAV:
 	var dur: float = {"snort": 0.45, "hoof": 0.35, "scrape": 0.5, "crackle": 1.0, "charge": 1.6, "whoosh": 0.7,
 		"zap": 0.25, "slam": 1.4, "chirp": 0.18, "stun": 0.9, "pant": 1.4, "eat": 0.82, "buzz": 0.6, "heal": 0.55,
 		"beam_hum": 1.05, "beam": 1.6, "beam_long": 2.75, "pop": 0.35, "clang": 0.6, "thock": 0.22}.get(kind, 0.5)
@@ -178,7 +178,7 @@ static func fx(kind: String) -> AudioStreamWAV:
 
 
 ## A thunder crack: a sharp burst of noise, then a long rolling rumble.
-static func thunder() -> AudioStreamWAV:
+static func _make_thunder() -> AudioStreamWAV:
 	var dur := 2.2
 	var n := int(RATE * dur)
 	var d := PackedFloat32Array()
@@ -199,7 +199,7 @@ static func thunder() -> AudioStreamWAV:
 
 
 ## The prize's blaring trumpet chord (D major, a sawtooth stack swelling in), as in the 4X game.
-static func trumpet() -> AudioStreamWAV:
+static func _make_trumpet() -> AudioStreamWAV:
 	var dur := 1.1
 	var n := int(RATE * dur)
 	var d := PackedFloat32Array()
@@ -217,7 +217,7 @@ static func trumpet() -> AudioStreamWAV:
 
 
 ## One bar of maraca shakes at the band's 165 bpm (eighths, accented on the beat); loops.
-static func maracas() -> AudioStreamWAV:
+static func _make_maracas() -> AudioStreamWAV:
 	var beat := 60.0 / 165.0
 	var n := int(RATE * beat * 4.0)
 	var d := PackedFloat32Array()
@@ -239,7 +239,7 @@ static func maracas() -> AudioStreamWAV:
 
 
 ## The sad trombone: four notes sliding down, the last one wobbling ("wah wah wah waaaah").
-static func sad_trombone() -> AudioStreamWAV:
+static func _make_sad_trombone() -> AudioStreamWAV:
 	var notes := [[233.08, 0.45], [220.0, 0.45], [207.65, 0.45], [196.0, 1.4]]
 	var total := 0.0
 	for nt in notes:
@@ -277,7 +277,7 @@ static func sad_trombone() -> AudioStreamWAV:
 ##             a dissonant chord (minor second and tritone sines) with a tremolo that quickens (3.4 s);
 ##   "snap"    every bone snapping straight at once as they freeze and turn (0.5 s);
 ##   "slam"    Thunderhorn's hooves meeting the stone: a stone crack with a deep boom (1.2 s).
-static func corrupt(kind: String) -> AudioStreamWAV:
+static func _make_corrupt(kind: String) -> AudioStreamWAV:
 	var dur: float = {"drone": 5.0, "creak": 1.6, "whisper": 3.4, "snap": 0.5, "slam": 1.2}.get(kind, 1.0)
 	var n := int(RATE * dur)
 	var d := PackedFloat32Array()
@@ -361,7 +361,7 @@ static func corrupt(kind: String) -> AudioStreamWAV:
 
 ## v0.12.2 a golem acknowledging an order: a short, gravelly "hrm" (a low buzzy tone through a moving low-pass, with
 ## a rasp of noise), pitched down for the titan. kind 0: an order taken, 1: a lower, longer "hrrmm" (attack).
-static func grunt(kind := 0, titan := false) -> AudioStreamWAV:
+static func _make_grunt(kind := 0, titan := false) -> AudioStreamWAV:
 	var dur := 0.32 if kind == 0 else 0.48
 	var base := (92.0 if kind == 0 else 74.0) * (0.7 if titan else 1.0)
 	var n := int(RATE * dur)
@@ -396,7 +396,7 @@ static func grunt(kind := 0, titan := false) -> AudioStreamWAV:
 ##   "firework" a rocket whistling up and bursting into crackles (1.6 s);
 ##   "bonk"     the chancla landing: a rubbery slap with a cartoon "doink" (0.4 s);
 ##   "ting"     the ring catching the light: a bright little bell (inharmonic partials ringing out) (1.0 s).
-static func fiesta(kind: String) -> AudioStreamWAV:
+static func _make_fiesta(kind: String) -> AudioStreamWAV:
 	var dur: float = {"airhorn": 2.0, "siren": 2.0, "whistle": 1.0, "boing": 0.6, "thwack": 0.25, "pinata": 1.4,
 		"firework": 1.6, "bonk": 0.4, "ting": 1.0}.get(kind, 0.5)
 	var n := int(RATE * dur)
@@ -470,3 +470,85 @@ static func fiesta(kind: String) -> AudioStreamWAV:
 					+ sin(t * TAU * 4186.0) * 0.3 * exp(-t * 9.0)) * minf(t / 0.003, 1.0) * 0.5
 		d[i] = clampf(s, -1.0, 1.0)
 	return _wav(d)
+
+
+# ================================================================ v0.12.12 made once, ahead of time
+## Every sound is built sample by sample in GDScript: 0.05-0.3 s of work for the long ones (a roar, the cutscene's
+## drone). Built the moment they were first needed, they froze the game for a moment in the middle of the boss fight
+## (and a frozen guest sends no inputs). Now each is built once and kept, and warm() builds them all on a background
+## thread as the game opens. They're all seeded, so a kept copy sounds exactly like a fresh one.
+static var _cache := {}
+static var _lock := Mutex.new()
+
+
+static func _memo(key: String, make: Callable) -> AudioStreamWAV:
+	_lock.lock()
+	var w: AudioStreamWAV = _cache.get(key, null)
+	_lock.unlock()
+	if w == null:   # not built yet (or the background thread hasn't got to it): build it here
+		w = make.call()
+		_lock.lock()
+		_cache[key] = w
+		_lock.unlock()
+	return w
+
+
+static func roar(kind := 0) -> AudioStreamWAV:
+	return _memo("roar%d" % kind, _make_roar.bind(kind))
+
+
+static func fx(kind: String) -> AudioStreamWAV:
+	return _memo("fx " + kind, _make_fx.bind(kind))
+
+
+static func thunder() -> AudioStreamWAV:
+	return _memo("thunder", _make_thunder)
+
+
+static func trumpet() -> AudioStreamWAV:
+	return _memo("trumpet", _make_trumpet)
+
+
+static func maracas() -> AudioStreamWAV:
+	return _memo("maracas", _make_maracas)
+
+
+static func sad_trombone() -> AudioStreamWAV:
+	return _memo("sad_trombone", _make_sad_trombone)
+
+
+static func corrupt(kind: String) -> AudioStreamWAV:
+	return _memo("corrupt " + kind, _make_corrupt.bind(kind))
+
+
+static func grunt(kind := 0, titan := false) -> AudioStreamWAV:
+	return _memo("grunt%d%s" % [kind, "t" if titan else ""], _make_grunt.bind(kind, titan))
+
+
+static func fiesta(kind: String) -> AudioStreamWAV:
+	return _memo("fiesta " + kind, _make_fiesta.bind(kind))
+
+
+## Build every sound the fight and the yard use, on a background thread (once).
+static func warm() -> void:
+	if _warming:
+		return
+	_warming = true
+	WorkerThreadPool.add_task(_warm_all, false, "Synth.warm")
+
+
+static var _warming := false
+
+
+static func _warm_all() -> void:
+	for k in 5:
+		roar(k)
+	thunder()
+	for k in ["drone", "creak", "whisper", "snap", "slam"]:
+		corrupt(k)
+	for k in ["snort", "hoof", "scrape", "crackle", "charge", "whoosh", "zap", "slam", "chirp", "stun", "pant", "eat",
+			"buzz", "heal", "beam_hum", "beam", "beam_long", "pop", "clang", "thock"]:
+		fx(k)
+	for k in 2:
+		grunt(k, false)
+		grunt(k, true)

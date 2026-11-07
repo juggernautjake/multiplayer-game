@@ -54,6 +54,9 @@ class ServerPlayer:
 	var primed := false
 	var calm := 0               # ticks since the buffer last ran dry
 	var starves := 0            # times it ran dry (for the stats)
+	var low := 99               # v0.12.12: the fewest inputs queued at any tick of this window (spare ones get trimmed)
+	var low_t := 0              # ticks into the window
+	var grew_at := -9999        # v0.12.12: the server tick the buffer last grew
 	var slot := 0               # spawn slot
 	var hist: Array = []        # [tick, position] for the last 1.5 s: melee hits rewind to what the attacker saw
 	var was_dead := false
@@ -186,6 +189,62 @@ var jitter_ms := 0.0        # how unevenly snapshots arrive (95th percentile lat
 var tailscale_path := {}    # address -> "direct" / "relayed (DERP ...)" / "checking" / "": see check_tailscale_path()
 var golem_orders := {}      # v0.12.2: summoner id -> [Golems.Order, point, target] as the server last said (not FOLLOW)
 var cut_client := false     # v0.12.3: the boss state says the corruption cutscene is playing (this client sends no buttons)
+var _recent_msgs: Array = []   # --netstat: messages handled this frame, named when a frame hitches
+var snaps_in := 0         # snapshots received (a guest), for --netstat
+var netstat := {}         # --netstat (host): message kind -> [count, payload bytes], printed every 5 s
+
+
+func _print_netstat() -> void:
+	var sent := peer.host.pop_statistic(ENetConnection.HOST_TOTAL_SENT_DATA)
+	var pk := peer.host.pop_statistic(ENetConnection.HOST_TOTAL_SENT_PACKETS)
+	var rec := peer.host.pop_statistic(ENetConnection.HOST_TOTAL_RECEIVED_DATA)
+	var rpk := peer.host.pop_statistic(ENetConnection.HOST_TOTAL_RECEIVED_PACKETS)
+	var lines := []
+	var keys := netstat.keys()
+	keys.sort_custom(func(a, b): return netstat[a][1] > netstat[b][1])
+	for k in keys:
+		lines.append("%s %d/s %dB/s (avg %d)" % [k, netstat[k][0] / 5, netstat[k][1] / 5, netstat[k][1] / maxi(netstat[k][0], 1)])
+	print("[netstat] t=%d ents=%d  ENet out %d B/s %d pk/s, in %d B/s %d pk/s  | %s  | %s" % [server_tick, players.size(),
+		sent / 5, pk / 5, rec / 5, rpk / 5, quality_line(), ", ".join(lines.slice(0, 10))])
+	netstat.clear()
+
+
+## --netstat: count what the host sends each guest, by kind (payload bytes; ENet adds its own headers).
+## v0.12.12 a connection log for real games (not tests or bots): every 30 s one line of what the HUD's connection
+## readout says (a guest: round trip, jitter, loss, interpolation, corrections, Tailscale direct or relayed; the host:
+## each guest's round trip and input buffer), in user://netlog.txt. So a laggy evening can be looked at afterwards.
+var netlog := false
+const NETLOG := "user://netlog.txt"
+const NETLOG_MAX := 400000   # bytes: past this the old log is kept as netlog.old.txt and a new one started
+
+
+func _netlog_line() -> void:
+	var line := quality_line()
+	if line == "" or line.ends_with("none"):
+		return
+	if not multiplayer.is_server():
+		line += "   others drawn %d ms behind   corrections %d   guessed %.1f%%" % [int(interp_delay * Config.DT * 1000.0),
+			corrections, 100.0 * extrap_frames / maxf(drawn_frames, 1.0)]
+	var f := FileAccess.open(NETLOG, FileAccess.READ_WRITE) if FileAccess.file_exists(NETLOG) else FileAccess.open(NETLOG, FileAccess.WRITE)
+	if f == null:
+		return
+	if f.get_length() > NETLOG_MAX:
+		f.close()
+		DirAccess.rename_absolute(ProjectSettings.globalize_path(NETLOG), ProjectSettings.globalize_path("user://netlog.old.txt"))
+		f = FileAccess.open(NETLOG, FileAccess.WRITE)
+		if f == null:
+			return
+	f.seek_end()
+	f.store_line("%s  v%s  %s" % [Time.get_datetime_string_from_system(), Updater.running_version(), line])
+	f.close()
+
+
+var _netstat_on := OS.get_cmdline_user_args().has("--netstat")
+func _tally(kind: String, bytes: int) -> void:
+	if not _netstat_on:
+		return
+	var e: Array = netstat.get(kind, [0, 0])
+	netstat[kind] = [e[0] + 1, e[1] + bytes]
 
 
 func _ready() -> void:
@@ -220,6 +279,7 @@ func host(port: int, player_name: String, with_player := true) -> Error:
 		_spawn_item_at(i)
 	ecology = Ecology.new()
 	ecology.event.connect(_on_eco_event)
+	Boss._open_spots()   # v0.12.12: his leap's landing grid, worked out while the game loads rather than mid-fight
 	if with_player:
 		_server_add_player(1, player_name, str(get_meta("character", "pip")))
 		if OS.get_cmdline_user_args().has("--give-all"):   # testing: the host starts with every weapon
@@ -428,12 +488,25 @@ func _on_server_disconnected() -> void:
 
 func _on_connected() -> void:
 	my_id = multiplayer.get_unique_id()
+	_no_throttle(peer.get_peer(1) if peer else null)
 	hello.rpc_id(1, str(get_meta("join_name", "Player")), str(get_meta("character", "pip")), Updater.running_version())
 	status.emit("Connected.")
 
 
-func _on_peer_connected(_id: int) -> void:
-	pass  # a player only counts once it says hello
+func _on_peer_connected(id: int) -> void:
+	# a player only counts once it says hello
+	if multiplayer.is_server() and peer:
+		_no_throttle(peer.get_peer(id))
+
+
+## v0.12.12: ENet "throttles" unreliable packets: whenever a round trip comes in above the recent average plus twice
+## its variance it starts throwing away a share of them on purpose, guessing the link is congested. On a jittery
+## home link (Wi-Fi, Tailscale) that guess is usually wrong, and what it throws away are our snapshots and inputs.
+## Through tools/lag_proxy.py (90 ms, 30 ms jitter, 1% loss) a guest got 27-29 of 30 snapshots a second in the boss
+## fight before, 29-30 after. Our traffic is a few dozen KB/s, nowhere near congesting anything: never throttle down.
+func _no_throttle(pp: ENetPacketPeer) -> void:
+	if pp:
+		pp.throttle_configure(5000, 2, 0)   # interval, acceleration, deceleration 0: stays at full rate
 
 
 ## One of a kind (Jacob 2026-11-04): only one player at a time can have the staff, and one the wand.
@@ -504,6 +577,8 @@ func welcome(tick: int) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func roster_update(list: Array) -> void:
+	if _netstat_on:
+		_recent_msgs.append("roster")
 	roster.clear()
 	for e in list:
 		roster[int(e[0])] = { "name": str(e[1]), "color": e[2], "character": str(e[3]) if e.size() > 3 else "pip",
@@ -668,11 +743,15 @@ func can_hurt(from: int, target: int) -> bool:
 ## The yard's events go to everyone, reliably and in order.
 @rpc("authority", "call_remote", "reliable", 3)
 func eco_event(kind: String, args: Array) -> void:
+	if _netstat_on:
+		_recent_msgs.append("eco " + kind)
 	eco.emit(kind, args)
 
 
 func _on_eco_event(kind: String, args: Array) -> void:
 	eco_event.rpc(kind, args)
+	if _netstat_on:
+		_tally("eco " + kind, var_to_bytes(args).size() + kind.length())
 	if is_host_player:
 		eco.emit(kind, args)
 
@@ -740,6 +819,7 @@ func inputs(data: PackedByteArray) -> void:
 
 @rpc("authority", "call_remote", "unreliable", 2)
 func snapshot(data: PackedByteArray) -> void:
+	snaps_in += 1
 	if sim_lat_ms > 0.0 or sim_loss > 0.0:
 		_sim_push(_sim_in, data)
 	else:
@@ -752,7 +832,16 @@ func _physics_process(_delta: float) -> void:
 		return
 	if my_id != 0 and predicted != null:
 		_client_tick()
+		if _netstat_on and not multiplayer.is_server() and next_seq % 300 == 0:
+			print("[netstat guest] seq=%d %s  interp %.1f ticks  corrections %d  extrap %d/%d  snapshots %d/s" % [next_seq,
+				quality_line(), interp_delay, corrections, extrap_frames, drawn_frames, snaps_in / 5])
+			snaps_in = 0
+		if netlog and not multiplayer.is_server() and next_seq % 1800 == 0:
+			_netlog_line()
 	if multiplayer.is_server():
+		_ticks_this_frame += 1
+		if _ticks_this_frame >= 3:   # 3+ ticks in one frame: the frame took 50 ms or more, these are catch-up ticks
+			_hitch_until = server_tick + 6
 		_server_tick()
 	if my_id != 0:
 		render_tick += 1.0
@@ -798,6 +887,8 @@ func _server_send_roster() -> void:
 			side_of(p), p.size, p.god, pts, p.charm_until > server_tick])
 		p.mxp_dirty = false
 	roster_update.rpc(list)
+	if _netstat_on:
+		_tally("roster", var_to_bytes(list).size())
 	if is_host_player:
 		roster_update(list)
 
@@ -826,8 +917,13 @@ func _server_tick() -> void:
 	_server_projectiles()
 	_server_items()
 	_server_spells()
+
 	if persist and server_tick % 300 == 0:   # v0.12.7: progress on disk every 5 s
 		save_progress()
+	if _netstat_on and server_tick % 300 == 0 and peer != null:
+		_print_netstat()
+	if netlog and server_tick % 1800 == 0 and peer != null:
+		_netlog_line()
 	if ecology:
 		var people := []
 		for p: ServerPlayer in players.values():
@@ -854,6 +950,13 @@ func _server_tick() -> void:
 				_client_receive_snapshot(Codec.decode_snapshot(data))
 			else:
 				snapshot.rpc_id(p.id, data)
+				_tally("snapshot", data.size())
+
+
+const CALM_SHRINK := 300   # v0.12.12: ticks without running dry before a buffer shrinks by one (was 600)
+const TRIM_WINDOW := 60    # v0.12.12: ticks a queue must stay above its target before a spare input is trimmed
+var _hitch_until := -1     # v0.12.12: server ticks up to here are catch-up after this machine stalled
+var _ticks_this_frame := 0
 
 
 ## Each player's inputs pass through a small jitter buffer. Over the internet inputs arrive unevenly; applied as they
@@ -870,16 +973,36 @@ func _server_step_player(p: ServerPlayer) -> void:
 			return
 	if n == 0:
 		p.primed = false
-		p.starves += 1
-		p.target_buf = mini(p.target_buf + 1, 8)
+		# v0.12.12: a buffer that ran dry because THIS machine stalled (the ticks it missed are run back to back, before
+		# the inputs that piled up meanwhile are read) says nothing about the guest's link: don't grow it for that
+		# Nor does one stall on THEIR side grow it by more than one: running dry several times within a second is one
+		# event (their game froze for a moment loading something, or one burst of lateness), not several.
+		if server_tick > _hitch_until:
+			p.starves += 1
+			if server_tick - p.grew_at > Config.TICK_RATE:
+				p.target_buf = mini(p.target_buf + 1, 8)
+				p.grew_at = server_tick
 		p.calm = 0
+		p.low = 99
+		p.low_t = 0
 		return
 	p.calm += 1
-	if p.calm > 600 and p.target_buf > 1:
+	if p.calm > CALM_SHRINK and p.target_buf > 1:
 		p.target_buf -= 1
 		p.calm = 0
 	# one input per tick; drain gently if too many have piled up (a burst after a hiccup)
 	var budget := 2 if n > p.target_buf + 3 else 1
+	# v0.12.12: and trim the spare ones. The queue used to keep whatever depth it once grew to (a buffer that grew to 6
+	# for a moment then stayed 6 deep, 100 ms of extra delay on everything the guest does). If for a whole second it
+	# never fell below target + 1, one queued input is never needed: apply two this tick (the guest moves one tick
+	# further, unnoticeable) and the delay drops by a tick. Repeats each second until the queue is at its target.
+	p.low = mini(p.low, n)
+	p.low_t += 1
+	if p.low_t >= TRIM_WINDOW:
+		if p.low > p.target_buf and server_tick > _hitch_until:
+			budget = 2
+		p.low = 99
+		p.low_t = 0
 	while budget > 0 and not p.queue.is_empty():
 		var nxt := p.last_applied + 1
 		if not p.queue.has(nxt):
@@ -1418,6 +1541,11 @@ func _process(_delta: float) -> void:
 	var now_us := Time.get_ticks_usec()
 	_frame_us = now_us - _last_frame_us if _last_frame_us > 0 else 0
 	_last_frame_us = now_us
+	_ticks_this_frame = 0
+	if _netstat_on:
+		if _frame_us > 80000:
+			print("[hitch] %d ms frame at tick %d after: %s" % [_frame_us / 1000, latest_tick, ", ".join(_recent_msgs)])
+		_recent_msgs.clear()
 	if _sim_out.is_empty() and _sim_in.is_empty() and _sim_boss.is_empty():
 		return
 	var now := Time.get_ticks_msec()
@@ -1638,7 +1766,8 @@ func quality_line() -> String:
 			var pp := peer.get_peer(p.id) if peer else null
 			var rtt := int(pp.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)) if pp else 0
 			var addr := pp.get_remote_address() if pp else ""
-			parts.append("%s %d ms, buffer %d, dry %d%s" % [roster.get(p.id, {}).get("name", "?"), rtt, p.target_buf, p.starves, _path_note(addr)])
+			parts.append("%s %d ms, buffer %d (holding %d), dry %d%s" % [roster.get(p.id, {}).get("name", "?"), rtt, p.target_buf,
+				p.queue.size(), p.starves, _path_note(addr)])
 		return "guests: " + ("  |  ".join(parts) if not parts.is_empty() else "none")
 	var addr := peer.get_peer(1).get_remote_address() if peer and peer.get_peer(1) else ""
 	return "link: %d ms round trip   jitter %d ms   loss %.1f%%%s" % [ping_ms(), int(jitter_ms), loss_pct(), _path_note(addr)]
@@ -2388,6 +2517,8 @@ func _server_spells() -> void:
 		_golems_were = not golems.list.is_empty()
 		var data := golems.pack()
 		golem_states.rpc(server_tick, data)
+		if _netstat_on:
+			_tally("golem_states", var_to_bytes(data).size())
 		if is_host_player:
 			golem_states(server_tick, data)
 	# the vault door shuts itself after a while
@@ -2413,12 +2544,16 @@ func _vault_interact(p: ServerPlayer) -> bool:
 ## A spell effect for everyone to see (reliable, in order); the host's own screen gets it too.
 func _fx(kind: String, args: Array) -> void:
 	spell_fx.rpc(kind, args)
+	if _netstat_on:
+		_tally("fx " + kind, var_to_bytes(args).size() + kind.length())
 	if is_host_player:
 		magic_fx.emit(kind, args)
 
 
 @rpc("authority", "call_remote", "reliable", 4)
 func spell_fx(kind: String, args: Array) -> void:
+	if _netstat_on:
+		_recent_msgs.append(kind)
 	magic_fx.emit(kind, args)
 
 
@@ -3008,6 +3143,7 @@ func _server_boss() -> void:
 	boss.tick(server_tick, people, gl)
 	if boss.state == Boss.S.CUTSCENE:   # v0.12.3 the Duel Stone's corruption
 		_server_cutscene(boss.t)
+
 	elif boss.state == Boss.S.DEATH:   # v0.12.3: his minions die with him (they collapse and dissolve into smoke)
 		_fell_minions()
 	for h in boss.hits:
@@ -3044,6 +3180,8 @@ func _server_boss() -> void:
 	if server_tick % 2 == 0:
 		var data := boss.pack()
 		boss_state.rpc(server_tick, data)
+		if _netstat_on:
+			_tally("boss_state", var_to_bytes(data).size())
 		if is_host_player:
 			boss_state(server_tick, data)
 	if boss.done:   # victory!

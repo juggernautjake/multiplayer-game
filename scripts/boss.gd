@@ -1508,15 +1508,25 @@ const LEAP_MARGIN := 3.0   # (kept for the arena's own spots)
 
 
 static func leap_candidates(from: Vector3) -> Array:
-	var lim := Config.WORLD_HALF - LEAP_EDGE
 	var out := []
+	for q: Vector3 in _open_spots():
+		if Vector2(q.x - from.x, q.z - from.z).length() <= LEAP_MAX_D:
+			out.append(q)
+	return out
+
+
+## v0.12.12: every grid point clear of the obstacles, worked out once (they never move). Checking 6 400 points against
+## every obstacle at each leap took 0.15 s, a hitch on the host (and so for everyone) as he wound up. Grid order kept.
+static var _open: Array = []
+static func _open_spots() -> Array:
+	if not _open.is_empty():
+		return _open
+	var lim := Config.WORLD_HALF - LEAP_EDGE
 	var n := int(lim / LEAP_GRID)
 	var boxes := WorldLayout.boxes()
 	for i in range(-n, n + 1):
 		for j in range(-n, n + 1):
 			var q := Vector3(i * LEAP_GRID, 0, j * LEAP_GRID)
-			if Vector2(q.x - from.x, q.z - from.z).length() > LEAP_MAX_D:
-				continue
 			var blocked := false
 			for b: WorldLayout.Box in boxes:
 				var nx := clampf(q.x, b.cx - b.hx, b.cx + b.hx)
@@ -1525,8 +1535,8 @@ static func leap_candidates(from: Vector3) -> Array:
 					blocked = true
 					break
 			if not blocked:
-				out.append(q)
-	return out
+				_open.append(q)
+	return _open
 
 
 ## The smallest flat distance from q to any of the points.

@@ -97,16 +97,40 @@ var _name := ""
 ## drawn into every frame.
 static func garb_textures(look: String) -> Array:
 	if not _outfit_tex.has(look):
-		_outfit_tex[look] = [load("res://assets/pip/garb/pip-spritesheet-%s.png" % look), load("res://assets/pip/garb/pip-weapons-%s.png" % look),
-			load("res://assets/pip/garb/pip-spritesheet-%s-accent.png" % look), load("res://assets/pip/garb/pip-weapons-%s-accent.png" % look)]
+		_outfit_tex[look] = [_sheet("res://assets/pip/garb/pip-spritesheet-%s.png" % look), _sheet("res://assets/pip/garb/pip-weapons-%s.png" % look),
+			_sheet("res://assets/pip/garb/pip-spritesheet-%s-accent.png" % look), _sheet("res://assets/pip/garb/pip-weapons-%s-accent.png" % look)]
 	return _outfit_tex[look]
+
+
+## v0.12.12: start loading every costume's sheets in the background as the game opens. Each look is four big sheets
+## (about 0.1 s to load); loaded on first sight, the boss fight's six minions (most looks seen for the first time at
+## once) froze everyone's game for 0.6 s as they rose, which on a guest also emptied the host's input buffer for them.
+## load() later just picks up the finished (or still finishing) background load.
+static func warm() -> void:
+	var paths := []
+	for look in ["brawler", "knight", "barbarian", "ranger", "scout", "wizard", "shadow"]:
+		for f in ["pip-spritesheet-%s", "pip-weapons-%s", "pip-spritesheet-%s-accent", "pip-weapons-%s-accent"]:
+			paths.append("res://assets/pip/garb/%s.png" % (f % look))
+	for o in [1, 2, 3]:
+		paths.append("res://assets/pip/outfits/pip-spritesheet-%d.png" % o)
+		paths.append("res://assets/pip/outfits/pip-weapons-%d.png" % o)
+	for p in paths:
+		if ResourceLoader.exists(p) and not ResourceLoader.has_cached(p):
+			ResourceLoader.load_threaded_request(p)
+
+
+## A sheet: from warm()'s background load if it started one (waits for it if it's still going), else loaded now.
+static func _sheet(p: String) -> Texture2D:
+	if ResourceLoader.load_threaded_get_status(p) != ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+		return ResourceLoader.load_threaded_get(p) as Texture2D
+	return load(p) as Texture2D
 
 
 static func outfit_textures(outfit: int) -> Array:
 	if outfit <= 0:
 		return _textures
 	if not _outfit_tex.has(outfit):
-		_outfit_tex[outfit] = [load("res://assets/pip/outfits/pip-spritesheet-%d.png" % outfit), load("res://assets/pip/outfits/pip-weapons-%d.png" % outfit)]
+		_outfit_tex[outfit] = [_sheet("res://assets/pip/outfits/pip-spritesheet-%d.png" % outfit), _sheet("res://assets/pip/outfits/pip-weapons-%d.png" % outfit)]
 	return _outfit_tex[outfit]
 
 
