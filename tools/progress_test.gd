@@ -1,6 +1,6 @@
 extends SceneTree
 ## v0.12.7 progress survives a restart (an update) or a rejoin: the host saves each player's progress by name and
-## gives it back when they join again; the staff / wand stay one of a kind; nothing is saved unless persist is on.
+## gives it back when they join again; the staff / wand are given back too; nothing is saved unless persist is on.
 ## Uses its own file (user://progress_test.json), never the real one.
 ##   Godot --headless --path . --script tools/progress_test.gd
 
@@ -64,18 +64,18 @@ func _initialize() -> void:
 	check(a2.state.arrows == 17 and a2.state.rocks == 4 and a2.state.weapon == Weapons.SWORD and a2.pvp, "ammo, the weapon in hand, PvP")
 	check(a2.state.pos.distance_to(Vector3(30, 0, 12)) < 0.2, "and he's back where he was")
 	check(is_equal_approx(float(a2.mxp[0]), 750.0) and a2.state.mastery == 0b1001, "his spell mastery points and levels too")
-	check(net2.items.values().filter(func(it): return it.kind == Weapons.Item.STAFF).is_empty(), "the staff he has isn't also on the tower")
+	check(net2.items.values().filter(func(it): return it.kind == Weapons.Item.STAFF).size() == 1, "v0.12.12: the tower keeps its staff for others")
 	net2._server_add_player(2, "Bob")
 	check(net2.players[2].arms == [4, 0, 0, 0, 0] and net2.players[2].state.owned == 0b11, "Bob's back too")
 	net2._server_add_player(3, "Newcomer")
 	check(net2.players[3].state.owned == 1 and net2.players[3].kills == [0, 0], "someone new starts fresh")
 
-	# ---- someone else took the wand meanwhile: it isn't duplicated
+	# ---- v0.12.12 someone else took the wand meanwhile: he still gets his back (there can be several now)
 	net2.players[3].state.owned |= 1 << Weapons.WAND
 	net2.players.erase(1)
 	net2._server_add_player(4, "Jacob")
-	check(not (net2.players[4].state.owned >> Weapons.WAND) & 1 and (net2.players[4].state.owned >> Weapons.STAFF) & 1,
-		"a one-of-a-kind weapon someone else now holds isn't given back twice")
+	check((net2.players[4].state.owned >> Weapons.WAND) & 1 and (net2.players[4].state.owned >> Weapons.STAFF) & 1,
+		"his staff and wand are given back even if someone else has one too")
 	net2.shutdown()
 	net2.free()
 

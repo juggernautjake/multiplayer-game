@@ -324,8 +324,8 @@ func join(address: String, port: int, player_name: String) -> Error:
 ## name in user://progress.json: weapons, ammo, staff/wand levels and kills, the other weapons' kills, challengers
 ## beaten, PvP, the weapon in hand and where they were. It's saved every 5 s and when someone leaves or the game
 ## closes, and given back when a player of that name joins (or the host starts again), so restarting for an update,
-## or dropping and rejoining, keeps everything. The staff and the wand stay one of a kind: one given back is taken
-## off its tower / vault spot, or not given back if someone else has it now. Off for tests and bots (persist = false).
+## or dropping and rejoining, keeps everything (the staff and the wand too: since v0.12.12 there can be several).
+## Off for tests and bots (persist = false).
 const PROGRESS := "user://progress.json"
 const POS_KEEP := 15 * 60   # seconds: where you were is only kept this long (after that you start at the spawn)
 var persist := false
@@ -374,24 +374,8 @@ func _restore_progress(p: ServerPlayer) -> bool:
 	var d: Dictionary = progress[_key(p.name)]
 	var s := p.state
 	var owned := int(d.get("owned", 1)) | 1
-	for kind in UNIQUE:   # the staff and the wand: one of each in the world
-		var w: int = Weapons.ITEM_WEAPON[kind]
-		if not (owned >> w) & 1:
-			continue
-		var taken := false
-		for q: ServerPlayer in players.values():
-			if q.id != p.id and (q.state.owned >> w) & 1:
-				taken = true
-		if taken:
-			owned &= ~(1 << w)
-			continue
-		for it: Item in items.values().duplicate():   # off its spot (and not coming back while they have it)
-			if it.kind == kind:
-				items.erase(it.id)
-				item_remove.rpc(it.id, p.id)
-				if is_host_player:
-					item_remove(it.id, p.id)
-		respawns = respawns.filter(func(r): return int(WorldLayout.ITEM_SPAWNS[int(r[1])][0]) != kind)
+	# v0.12.12: the staff and the wand are no longer one of a kind (they come back on their spots), so they're
+	# simply given back too
 	s.owned = owned
 	s.arrows = int(d.get("arrows", 0))
 	s.rocks = int(d.get("rocks", 0))
@@ -509,8 +493,11 @@ func _no_throttle(pp: ENetPacketPeer) -> void:
 		pp.throttle_configure(5000, 2, 0)   # interval, acceleration, deceleration 0: stays at full rate
 
 
-## One of a kind (Jacob 2026-11-04): only one player at a time can have the staff, and one the wand.
+## The staff and the wand. One of a kind until v0.12.12 (Jacob 2026-11-04: only one player at a time could have each);
+## now (Jacob 2026-11-06: "make it where the staff and wand will respawn over time") a new one appears on its spot
+## (the tower's top, the vault) UNIQUE_RESPAWN seconds after one is taken, so everyone can get one.
 const UNIQUE := [Weapons.Item.STAFF, Weapons.Item.WAND]
+const UNIQUE_RESPAWN := 120
 
 
 func _on_peer_disconnected(id: int) -> void:
@@ -1351,8 +1338,8 @@ func _add_item(kind: int, pos: Vector3, count: int, spawn: int) -> void:
 
 func _remove_item(it: Item, taker: int) -> void:
 	items.erase(it.id)
-	if it.spawn >= 0 and taker > 0 and it.kind in UNIQUE:
-		pass   # the staff and the wand are one of a kind: no new one while someone has it (back when they leave)
+	if it.spawn >= 0 and it.kind in UNIQUE:   # v0.12.12: the staff and the wand come back too, after 2 minutes
+		respawns.append([server_tick + UNIQUE_RESPAWN * Config.TICK_RATE, it.spawn])
 	elif it.spawn >= 0:
 		respawns.append([server_tick + 20 * Config.TICK_RATE, it.spawn])
 	item_remove.rpc(it.id, taker)
@@ -2827,14 +2814,19 @@ func _shield_soak(q: ServerPlayer, cost: int, at: Vector3, strength := 8) -> int
 	return left
 
 
-## A player who had the staff or the wand leaves: it goes back where it came from (the tower's top, the vault).
+## A player who had the staff or the wand leaves: if its spot is empty, it's back there at once (no waiting for the
+## respawn). v0.12.12: never a second one on the spot.
 func _return_unique(p: ServerPlayer) -> void:
 	for kind in UNIQUE:
 		var w: int = Weapons.ITEM_WEAPON[kind]
 		if (p.state.owned >> w) & 1:
 			for i in WorldLayout.ITEM_SPAWNS.size():
-				if int(WorldLayout.ITEM_SPAWNS[i][0]) == kind:
-					_spawn_item_at(i)
+				if int(WorldLayout.ITEM_SPAWNS[i][0]) != kind:
+					continue
+				if items.values().any(func(it): return it.spawn == i):
+					continue
+				respawns = respawns.filter(func(r): return int(r[1]) != i)
+				_spawn_item_at(i)
 
 
 ## Gravity wells: each tick, enemies within reach are dragged toward the centre (harder the closer they are, like real

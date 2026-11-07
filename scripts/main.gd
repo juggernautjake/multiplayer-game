@@ -1054,7 +1054,7 @@ func _bot_ui() -> Array:
 	if bot_t == 880:
 		shot.call("order_go_2")
 	_bot_ui_keys()
-	if bot_t > 1010:
+	if bot_t > 1034:   # (v0.12.12: past the Esc checks)
 		get_tree().quit()
 	var sp := int(spell_sel.get(weapon_slot, 0))
 	return [b, cam_yaw, -0.1, weapon_slot, atan2(-(aim - me).x, -(aim - me).z), face, sp, aim]
@@ -1126,6 +1126,27 @@ func _bot_ui_keys() -> void:
 			key.call(KEY_G, false)
 		1000:
 			say.call(net.golem_orders.get(net.my_id, [0])[0] == Golems.Order.STAY, "a tap of G: Stay here (order %d)" % net.golem_orders.get(net.my_id, [0])[0])
+			key.call(KEY_ESCAPE, true)   # v0.12.12: Esc and the pause menu's pages
+			key.call(KEY_ESCAPE, false)
+		1006:
+			say.call(pause_menu.visible and not _playing(), "Esc opens the pause menu")
+			_open_sound(pause_menu)
+		1010:
+			say.call(sound_panel.visible and not pause_menu.visible and not _playing(), "Sound page open (counts as paused)")
+			key.call(KEY_ESCAPE, true)
+			key.call(KEY_ESCAPE, false)
+		1016:
+			say.call(not sound_panel.visible and not pause_menu.visible and _playing(), "Esc on the Sound page closes everything, no second menu")
+			key.call(KEY_ESCAPE, true)
+			key.call(KEY_ESCAPE, false)
+		1019:
+			controls_panel.visible = true   # (the pause menu's Controls button)
+		1022:
+			say.call(pause_menu.visible and controls_panel.visible, "pause menu and its Controls page open")
+			key.call(KEY_ESCAPE, true)
+			key.call(KEY_ESCAPE, false)
+		1028:
+			say.call(not pause_menu.visible and not controls_panel.visible and _playing(), "Esc closes both")
 
 
 ## Duel bot (--host --give-all --bot duel --shots <dir>): walks to the Duel Stone and presses E (the real way), then
@@ -1655,20 +1676,35 @@ func _unhandled_input(event: InputEvent) -> void:
 			if k is int:
 				_key_up(k)
 				break
-	elif mb and mb.pressed and menu and not menu.visible and not pause_menu.visible and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED \
+	elif mb and mb.pressed and menu and not menu.visible and not pause_menu.visible and not (sound_panel and sound_panel.visible) \
+			and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED \
 			and not (console and console.visible):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		attack_block_until = Time.get_ticks_msec() + 250
+	elif event.is_action_pressed("ui_cancel") and sound_panel and sound_panel.visible and sound_from != pause_menu \
+			and is_instance_valid(sound_from):
+		sound_panel.visible = false   # v0.12.12: the main menu's sound page: Esc goes back to the menu
+		sound_from.visible = true
 	elif event.is_action_pressed("ui_cancel") and menu and not menu.visible:
 		if radial and radial.visible:   # Esc closes a wheel without picking
 			radial.close()
 			wheel_kind = ""
 			held.clear()
 			return
-		if controls_panel and controls_panel.visible:
+		# v0.12.12 (Jacob): with any menu open (the pause menu, or its Sound or Controls page), Esc closes all of them and
+		# you're back in the game. The Sound page hides the pause menu, so Esc used to open a second pause menu over it.
+		var in_sound := sound_panel != null and sound_panel.visible
+		if pause_menu.visible or in_sound:
+			if in_sound:
+				sound_panel.visible = false
+			if controls_panel:
+				controls_panel.visible = false
+			_set_paused(false)
+			return
+		if controls_panel and controls_panel.visible:   # (F1's panel on its own: just close it)
 			controls_panel.visible = false
 			return
-		_set_paused(not pause_menu.visible)
+		_set_paused(true)
 
 
 # ================================================================ v0.12.2 controls: weapons, spells, golem orders
@@ -1678,7 +1714,8 @@ func _unhandled_input(event: InputEvent) -> void:
 ## (or go to the spot). Every pick shows its name under the crosshair for a moment. The pick is part of every input
 ## (weapon, spell) or a request to the server (orders), so everyone sees the same.
 func _playing() -> bool:
-	return net.predicted != null and menu != null and not menu.visible and pause_menu != null and not pause_menu.visible
+	return net.predicted != null and menu != null and not menu.visible and pause_menu != null and not pause_menu.visible \
+		and not (sound_panel != null and sound_panel.visible)   # v0.12.12: the pause menu's Sound page counts as paused
 
 
 ## Tab / R / G held long enough: open its wheel.

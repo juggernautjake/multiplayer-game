@@ -240,7 +240,8 @@ func _initialize() -> void:
 	net._blast(a.state.pos + Vector3(0, 0.5, 0), Weapons.spell(Weapons.STAFF, 1), 1, Weapons.STAFF)
 	net._damage(1, 20, 1, Vector3(1, 0, 0), 2.0)
 	check(a.state.hp == Sim.MAX_HP, "a fireball at your own feet, and any damage you'd deal yourself: nothing")
-	# the staff is one of a kind: taken, no new one appears; its holder leaves, it's back on the tower
+	# v0.12.12 the staff comes back: taken, a new one appears on the tower 2 minutes later; its holder leaving
+	# before then puts it back at once, and never a second one on the spot
 	for i in WorldLayout.ITEM_SPAWNS.size():
 		net._spawn_item_at(i)
 	var staff_item: Net.Item = null
@@ -250,10 +251,15 @@ func _initialize() -> void:
 	a.state.owned |= 1 << Weapons.STAFF
 	net._remove_item(staff_item, 1)
 	var queued := net.respawns.filter(func(r): return int(WorldLayout.ITEM_SPAWNS[r[1]][0]) == Weapons.Item.STAFF)
-	check(queued.is_empty(), "taking the staff: no second staff will appear")
+	check(queued.size() == 1 and int(queued[0][0]) == net.server_tick + Net.UNIQUE_RESPAWN * Config.TICK_RATE,
+		"taking the staff: a new one is on its way to the tower (2 minutes)")
 	net._return_unique(a)
 	var back := net.items.values().filter(func(it): return it.kind == Weapons.Item.STAFF)
 	check(back.size() == 1 and absf(back[0].pos.y - WorldLayout.TOWER_TOP) < 0.01, "its holder leaves: it's back on top of the tower")
+	check(net.respawns.filter(func(r): return int(WorldLayout.ITEM_SPAWNS[r[1]][0]) == Weapons.Item.STAFF).is_empty(),
+		"and the queued one is cancelled (no second staff)")
+	net._return_unique(a)
+	check(net.items.values().filter(func(it): return it.kind == Weapons.Item.STAFF).size() == 1, "leaving again doesn't add another")
 	# meteor: a big blast where it lands, then the ground burns
 	a.state.pos = Vector3(60, 0, 60)
 	a.state.weapon = Weapons.STAFF

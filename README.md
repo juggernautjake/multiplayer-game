@@ -110,7 +110,8 @@ Other rules worth knowing:
 
 ## Magic: the staff and the wand
 
-Two magic weapons, each one of a kind (only one player has each; they go back when that player leaves):
+Two magic weapons. Once one is taken, a new one appears on its spot 2 minutes later (v0.12.13; until then each was
+one of a kind), so everyone can get one:
 
 - **The Wizard staff** lies on top of the **wizard's tower**, a spiral of pillar steps 15.6 m up, in sight of the spawn
   (follow the pale beam of light). Every step is one jump from the last. The staff uses **mana** (the blue bar under
@@ -962,7 +963,7 @@ the body), a turning-camera film of one costume, or an eight-figure frame rate.
 - **Updates without losing anything**: the host keeps everyone's progress by name in `user://progress.json` (weapons,
   ammo, staff / wand levels and kills, the other weapons' kills, challengers beaten, PvP, the weapon in hand, and where
   you were for 15 minutes), saved every 5 s and on leaving, and gives it back when that name joins again (the staff and
-  wand stay one of a kind) (`Net.save_progress`, `_restore_progress`; off for tests and bots: `Net.persist`). The game
+  wand given back too) (`Net.save_progress`, `_restore_progress`; off for tests and bots: `Net.persist`). The game
   looks for updates every 10 minutes while you play; when one is downloaded, **F9** restarts into it and drops you
   straight back into the same game (`main.gd _restart_for_update`, `user://resume.json`): the host hosts again on the
   same port, guests rejoin, and a guest whose host went away keeps trying to reconnect for 90 s. Test:
@@ -1037,6 +1038,21 @@ every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_te
   percentile, 48% of frames with a visible jolt) to 0.025 m (0.08 m; 0% jolts). `--netsim` now covers his state too.
 - Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
   guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).
+
+## What's new in 0.12.13
+
+- **The staff and the wand come back**: 2 minutes after one is taken, a new one appears on top of the tower (the
+  staff) or in the vault (the wand), so every player can have one (`Net.UNIQUE_RESPAWN`). A holder leaving puts it
+  back at once if its spot is empty; there's never a second one on the spot. Saved progress gives them back too.
+- **Esc closes the menu, whatever page is open**: with the pause menu's Sound or Controls page open, Esc used to open
+  a second pause menu on top. Now Esc closes all of them and you're back in the game; the Sound page also counts as
+  paused (a click no longer grabs the mouse, your player doesn't move). From the main menu's Sound page, Esc goes back
+  to the main menu. Checked by `--bot ui`.
+- **A cheat sheet of every dev command**: [docs/dev-commands.md](docs/dev-commands.md).
+- **Pick where the sound plays** (Sound menu, `SoundSettings.device`): Windows' default output, or any device such as
+  a headset (with several outputs, e.g. speakers, a headset and Voicemeeter's virtual ones, the default may not be
+  the headphones). Remembered in `user://settings.cfg`; if it isn't plugged in, the Windows default is used. A
+  **Test sound** button plays a sound on the Effects channel.
 
 ## What's new in 0.12.12 (less lag for guests)
 

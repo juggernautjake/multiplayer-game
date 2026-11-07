@@ -1,6 +1,6 @@
 ## v0.12.9 (Jacob) the sound settings: volume for Master, Effects (fighting, spells, Thunderhorn, the yard), Music (the
 ## prize fiesta's music) and Voice (spoken lines such as "my precious"), each 0-100%, plus mute. Kept in
-## user://settings.cfg and applied at start. Every sound plays on one of these buses (Synth.play's `bus`).
+## user://settings.cfg and applied at start. v0.12.13: and the output device (headphones), with a test sound. Every sound plays on one of these buses (Synth.play's `bus`).
 class_name SoundSettings
 
 const FILE := "user://settings.cfg"
@@ -25,6 +25,23 @@ static func setup() -> void:
 	for b in BUSES:
 		set_volume(b, volume(b), false)
 	set_muted(muted(), false)
+	var dev := device()   # v0.12.13: the output picked in the menu (headphones), if it's plugged in
+	if dev != "Default" and dev in AudioServer.get_output_device_list():
+		AudioServer.output_device = dev
+
+
+## v0.12.13 (Jacob: "not hearing the sounds... trying to listen through my headphones"): which output the game plays on.
+## "Default" follows Windows' default device; with several outputs (speakers, a headset, Voicemeeter's virtual ones)
+## that may not be the headphones, so the Sound menu lets you pick one, and it's remembered.
+static func device() -> String:
+	return str(_cfg().get_value("sound", "device", "Default"))
+
+
+static func set_device(d: String) -> void:
+	AudioServer.output_device = d
+	var c := _cfg()
+	c.set_value("sound", "device", d)
+	c.save(FILE)
 
 
 static func _cfg() -> ConfigFile:
@@ -91,6 +108,25 @@ static func panel(back: Callable) -> PanelContainer:
 			set_volume(b, v)
 			l.text = "%s   %d%%" % [nm, int(round(v * 100.0))])
 		box.add_child(s)
+	var dl := Label.new()
+	dl.text = "Play sound on"
+	box.add_child(dl)
+	var pick := OptionButton.new()
+	var devs := AudioServer.get_output_device_list()
+	var cur := AudioServer.output_device
+	for i in devs.size():
+		pick.add_item("Windows default output" if devs[i] == "Default" else devs[i])
+		pick.set_item_metadata(i, devs[i])
+		if devs[i] == cur:
+			pick.select(i)
+	pick.item_selected.connect(func(i: int):
+		set_device(str(pick.get_item_metadata(i)))
+		Synth.play(pick, Synth.fx("chirp"), -4.0))
+	box.add_child(pick)
+	var test := Button.new()
+	test.text = "Test sound"
+	test.pressed.connect(func(): Synth.play(test, Synth.fx("hoof"), 0.0))
+	box.add_child(test)
 	var mute := CheckBox.new()
 	mute.text = "Mute everything"
 	mute.button_pressed = muted()
