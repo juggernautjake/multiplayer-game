@@ -50,6 +50,8 @@ const BPM := 165.0
 const PIC := "smiguel_el_magnifico.png"
 const CREDIT := "Music: \"Mariachi Snooze\" Kevin MacLeod (incompetech.com) — CC BY 3.0"
 const LINES := ["CONGRATULATIONS!", "Now that you have beaten the boss, you get the final prize!",
+	"You have unlocked SMIGUEL as a playable character!
+(Esc > Character to play as him)",   # v0.13.0
 	"Are you ready for your prize?", "Here it comes!"]
 const FIESTA_LEN := 24.0   # the meme show's loop, in seconds
 

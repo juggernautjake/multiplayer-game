@@ -88,6 +88,9 @@ class ServerPlayer:
 	var charm_until := 0        # Stun III: a charmed NPC fights for charm_by until this tick (then back to its old side)
 	var charm_by := 0
 	var charm_old := []         # [side, owner, color, name] to put back
+	var last_inp: Sim.PlayerInput = null   # v0.13.0: the last input applied (where they're aiming: SmiguelPeek)
+	var skin := ""              # v0.13.0: a character skin ("" Pip, "smiguel"), from the unlocks
+	var unlocks: Array = []     # v0.13.0: characters unlocked ("smiguel": beat Thunderhorn)
 
 	func _init() -> void:
 		mxp.resize(Weapons.MASTERY_SLOTS)
@@ -352,6 +355,7 @@ func _pack_progress(p: ServerPlayer) -> Dictionary:
 		"wand_lvl": s.wand_lvl, "kills": p.kills.duplicate(), "arms": p.arms.duplicate(), "duel_wins": p.duel_wins,
 		"pvp": p.pvp, "weapon": s.weapon, "pos": [s.pos.x, s.pos.y, s.pos.z], "hp": s.hp,
 		"mxp": p.mxp.duplicate(), "mastery": s.mastery,   # spell mastery: the points and the levels
+		"skin": p.skin, "unlocks": p.unlocks.duplicate(),   # v0.13.0 characters
 		"t": int(Time.get_unix_time_from_system()) }
 
 
@@ -392,6 +396,8 @@ func _restore_progress(p: ServerPlayer) -> bool:
 		p.mxp[i] = float(mx[i])
 	s.mastery = int(d.get("mastery", 0))
 	p.pvp = bool(d.get("pvp", false))
+	p.unlocks = (d.get("unlocks", []) as Array).duplicate()
+	p.skin = str(d.get("skin", "")) if p.unlocks.has(str(d.get("skin", ""))) else ""
 	var w := int(d.get("weapon", 0))
 	s.weapon = w if (owned >> w) & 1 else Weapons.FISTS
 	var pos: Array = d.get("pos", [])
@@ -575,7 +581,8 @@ func roster_update(list: Array) -> void:
 			"side": int(e[9]) if e.size() > 9 else 0, "size": float(e[10]) if e.size() > 10 else 1.0,   # v0.12.6
 			"god": bool(e[11]) if e.size() > 11 else false,
 			"mxp": e[12] if e.size() > 12 else [],   # v0.12.7: spell mastery points (Weapons.MASTERY_SLOTS)
-			"charmed": bool(e[13]) if e.size() > 13 else false }   # v0.12.7: a unit charmed by a mastery-III stun
+			"charmed": bool(e[13]) if e.size() > 13 else false,   # v0.12.7: a unit charmed by a mastery-III stun
+			"skin": str(e[14]) if e.size() > 14 else "", "unlocks": e[15] if e.size() > 15 else [] }   # v0.13.0
 	roster_changed.emit(roster)
 
 
@@ -592,6 +599,45 @@ func _server_set_pvp(id: int, on: bool) -> void:
 		players[id].pvp = on
 		print("%s turned PvP %s" % [players[id].name, "on" if on else "off"])
 		_server_send_roster()
+
+
+## v0.13.0 CHARACTERS: Smiguel is unlocked by beating Thunderhorn (everyone who fought him), or from the dev console
+## ("smiguel"). A player picks a character they've unlocked (Esc menu: Character); the roster carries it to everyone.
+const CHARACTERS := ["", "smiguel"]   # "" = Pip
+var smiguel := SmiguelPeek.new()     # v0.13.0: he peeks at you now and then (server)
+var smiguel_off := false             # (tests and bots)
+
+
+func unlock(p: ServerPlayer, what: String) -> void:
+	if not p.unlocks.has(what):
+		p.unlocks.append(what)
+		_fx("unlocked", [p.id, what])
+		_server_send_roster()
+		save_progress()
+
+
+func server_set_skin(id: int, what: String) -> bool:
+	if not players.has(id) or not (what in CHARACTERS) or (what != "" and not players[id].unlocks.has(what)):
+		return false
+	players[id].skin = what
+	_server_send_roster()
+	save_progress()
+	return true
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func set_skin_req(what: String) -> void:
+	if multiplayer.is_server():
+		server_set_skin(multiplayer.get_remote_sender_id(), what)
+
+
+func request_skin(what: String) -> void:
+	if multiplayer.multiplayer_peer == null:
+		return
+	if multiplayer.is_server():
+		server_set_skin(my_id if my_id != 0 else 1, what)
+	else:
+		set_skin_req.rpc_id(1, what)
 
 
 ## Ask for PvP on or off (the host applies it at once; a guest asks the host).
@@ -871,7 +917,7 @@ func _server_send_roster() -> void:
 		for x in p.mxp:
 			pts.append(int(x))
 		list.append([p.id, p.name, p.color, p.character, p.outfit, p.pvp, p.kills, 2 if p.minion else (1 if p.npc else 0), p.arms,
-			side_of(p), p.size, p.god, pts, p.charm_until > server_tick])
+			side_of(p), p.size, p.god, pts, p.charm_until > server_tick, p.skin, p.unlocks])
 		p.mxp_dirty = false
 	roster_update.rpc(list)
 	if _netstat_on:
@@ -904,6 +950,8 @@ func _server_tick() -> void:
 	_server_projectiles()
 	_server_items()
 	_server_spells()
+	if smiguel != null and not smiguel_off:   # v0.13.0
+		smiguel.tick(self)
 
 	if persist and server_tick % 300 == 0:   # v0.12.7: progress on disk every 5 s
 		save_progress()
@@ -1005,6 +1053,7 @@ func _server_step_player(p: ServerPlayer) -> void:
 		if frozen and not p.npc:
 			inp.buttons = 0
 		var before := p.state.pos
+		p.last_inp = inp
 		var ev := Sim.step(p.state, inp)
 		p.last_applied = inp.seq
 		budget -= 1
@@ -3240,6 +3289,9 @@ func _server_boss() -> void:
 		boss_state.rpc(server_tick, [])
 		if is_host_player:
 			boss_state(server_tick, [])
+		for id in boss_fighters:   # v0.13.0: everyone who fought him unlocks Smiguel
+			if players.has(id) and not players[id].npc:
+				unlock(players[id], "smiguel")
 		_result("victory")
 		return
 	var down := 0

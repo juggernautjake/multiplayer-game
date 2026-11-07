@@ -547,6 +547,159 @@ LOOKS = {"brawler": brawler, "knight": knight, "barbarian": barbarian, "ranger":
          "wizard": wizard, "shadow": shadow}
 
 
+# ================================================================ v0.13.0 Smiguel (an unlockable character, Jacob's)
+# An original design: a wiry little old ranchero, weathered tan skin, bushy grey eyebrows and a grand drooping grey
+# moustache, a wide straw sombrero with a zigzag band (the accent: tinted with the player's colour), a rainbow-striped
+# serape poncho to the knees with a fringe, white cotton trousers and leather sandals.
+P["straw"] = [(232, 196, 128), (204, 164, 98), (172, 132, 74), (138, 102, 56)]
+P["tan"] = [(214, 160, 112), (186, 132, 92), (158, 108, 76)]
+P["cotton"] = [(240, 236, 224), (214, 208, 194), (182, 176, 162)]
+P["sandal"] = [(132, 86, 52), (104, 66, 40), (80, 50, 30)]
+P["stache"] = [(120, 116, 118), (58, 52, 56), (36, 32, 36)]   # the moustache: near black
+P["brow"] = [(214, 212, 214), (178, 176, 180)]
+SERAPE = [(206, 44, 52), (236, 120, 40), (246, 204, 64), (64, 168, 80), (40, 120, 196), (126, 64, 170),
+          (236, 120, 40), (206, 44, 52), (246, 204, 64), (64, 168, 80)]
+
+
+def _shade(c, k):
+    return tuple(int(max(0, min(255, v * k))) for v in c)
+
+
+def smiguel(fr):
+    # weathered skin
+    fr.recolor(("skin",), P["tan"])
+    # the trousers, white cotton, and sandals
+    fill_body(fr, fr.waist + 2, fr.boot_top - 1, P["cotton"], flare=0)
+    for y in range(fr.boot_top, fr.bottom + 1):
+        for x in range(CELL):
+            if fr.cls[y, x] == "boots":
+                fr.put(y, x, P["sandal"][0] if (x + y) % 3 else P["sandal"][2])
+    # the serape: from the shoulders to the knees, flaring, in horizontal stripes (thin dark lines between bands),
+    # darker on the shadow side; over the arms too (the hands come out of it)
+    hem = min(fr.knee, fr.bottom - 4)
+    def stripes(y, x, x0, x1, u):
+        band_i = (y - fr.neck) // 2
+        c = SERAPE[band_i % len(SERAPE)]
+        if (y - fr.neck) % 6 == 5:
+            c = (60, 30, 40)
+        t = (x - x0) / max(x1 - x0, 1)
+        k = 1.08 if t < 0.3 else (0.95 if t < 0.7 else 0.78)
+        if fr.view in ("N", "NE"):
+            k *= 0.92
+        return (_shade(c, k), None)
+    fill_body(fr, fr.neck, hem, P["cotton"], flare=4, folds=False, cols_fn=stripes)
+    for arm, hand in fr.arms:
+        for (y, x) in arm:
+            c = SERAPE[((y - fr.neck) // 2) % len(SERAPE)]
+            fr.put(y, x, _shade(c, 0.9))
+    # the fringe under the hem: every other pixel, two long
+    sp = fr.span(hem)
+    if sp:
+        for x in range(sp[0] - 4, sp[1] + 5, 2):
+            for dy in (1, 2):
+                if 0 <= hem + dy < CELL and fr.a[hem + dy, x, 3] == 0 or (0 <= hem + dy < CELL and fr.cls[hem + dy, x] in ("trousers", "tunic")):
+                    fr.put(hem + dy, x, (226, 200, 150) if dy == 1 else (190, 160, 110))
+    fr.outline()
+    # the face: eyebrows and the moustache (seen from the front and the side)
+    if fr.view in ("S", "SE", "E"):
+        eye_y = None
+        for y in range(fr.top + 4, fr.neck - 2):
+            xs = np.nonzero(fr.cls[y] == "skin")[0]
+            if len(xs) < 3:
+                continue
+            inner = [x for x in range(int(xs.min()) + 1, int(xs.max())) if fr.cls[y, x] in ("outline", "other")]
+            if len(inner) >= (1 if fr.view == "E" else 2):
+                eye_y = y
+                ex = inner
+                break
+        if eye_y is not None:
+            # big googly eyes (like the prize fiesta's): each eye a 3x3 white bulge with a pupil off-centre
+            centres = sorted(set(ex))
+            groups = []
+            for x in centres:
+                if groups and x - groups[-1][-1] <= 1:
+                    groups[-1].append(x)
+                else:
+                    groups.append([x])
+            for gi, g in enumerate(groups[:2]):
+                gx = int(round(sum(g) / len(g)))
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        fr.put(eye_y + dy, gx + dx, (250, 248, 240))
+                fr.put(eye_y + (1 if gi == 0 else 0), gx + (-1 if gi == 0 else 1), (24, 20, 22))
+            for x in ex:   # bushy brows
+                fr.put(eye_y - 3, x, P["brow"][0])
+                fr.put(eye_y - 3, x + (1 if fr.view == "E" else 0), P["brow"][1])
+            cx = (min(ex) + max(ex)) / 2.0 + (1.5 * -fr.back if fr.view == "E" else 0)
+            half = 4 if fr.view == "S" else 3
+            my = eye_y + 3
+            for x in range(int(round(cx - half)), int(round(cx + half)) + 1):
+                fr.put(my, x, P["stache"][1])
+                fr.put(my + 1, x, P["stache"][2] if abs(x - cx) < half - 1 else P["stache"][1])
+            for side in (-1, 1):   # a handlebar: each end sweeps out and curls up
+                if fr.view == "E" and side == fr.back:
+                    continue
+                xe = int(round(cx + side * (half + 1)))
+                fr.put(my, xe, P["stache"][1])
+                fr.put(my - 1, xe + side, P["stache"][2])
+                fr.put(my - 2, xe + side, P["stache"][2])
+    # the sombrero: a wide, flat straw brim with a woven zigzag trim and upturned edges, and a tall, round-topped crown
+    # (narrower than the brim) with a dent down the top and a zigzag band at its foot (the accent)
+    base = fr.top + 5
+    w = fr.hx1 - fr.hx0
+    ext = 8 if fr.view != "E" else 6
+    bx0, bx1 = fr.hx0 - ext, fr.hx1 + ext
+    mine = set()
+    for x in range(bx0, bx1 + 1):   # an ellipse seen from a little above: thick in the middle, thin at the tips
+        t = (x - bx0) / max(bx1 - bx0, 1)
+        e = (1.0 - (2.0 * t - 1.0) ** 2) ** 0.5
+        up = 1 if (t < 0.1 or t > 0.9) else 0
+        top_y = base - 1 - int(round(1.5 * e)) - up
+        bot_y = base + 1 + int(round(1.5 * e)) - up
+        for y in range(top_y, bot_y + 1):
+            if y == bot_y and bot_y - top_y >= 3:
+                col = P["straw"][3] if (x % 4) < 2 else P["straw"][1]   # the woven trim along the rim
+            elif y <= top_y + 1:
+                col = P["straw"][0]
+            else:
+                col = P["straw"][1] if t < 0.6 else P["straw"][2]
+            fr.put(y, x, col)
+            mine.add((y, x))
+    cx = fr.cx
+    half0 = max(w / 2.0 - 1.0, 3.0)
+    H = 9
+    for i in range(1, H + 1):
+        y = base - 2 - i
+        if y < 0:
+            continue
+        u = i / float(H)
+        half = half0 * (1.0 - 0.15 * u) if u < 0.65 else half0 * 0.85 * (1.0 - ((u - 0.65) / 0.35) ** 2) ** 0.5
+        half = max(half, 1.0)
+        for x in range(int(round(cx - half)), int(round(cx + half)) + 1):
+            if i in (1, 2):   # the band: a zigzag in the accent
+                zz = (x + i) % 4 < 2
+                g = GREY[0] if zz else GREY[2]
+                fr.put(y, x, g, g)
+            elif i >= H - 2 and abs(x - cx) < 0.6:
+                fr.put(y, x, P["straw"][3])   # the dent in the top
+            else:
+                fr.put(y, x, P["straw"][0] if x < cx - half * 0.3 else (P["straw"][1] if x < cx + half * 0.4 else P["straw"][2]))
+            mine.add((y, x))
+    for y in range(0, base):   # his hair above the brim is under the hat
+        for x in range(CELL):
+            if (y, x) not in mine and fr.a[y, x, 3] > 0 and fr.cls[y, x] in ("hair", "outline"):
+                fr.a[y, x, 3] = 0
+                fr.acc[y, x, 3] = 0
+    for y in range(base, fr.neck):   # what hair shows below the brim is grey
+        for x in range(CELL):
+            if fr.cls[y, x] == "hair" and (y, x) not in mine:
+                fr.put(y, x, P["brow"][1] if (x * 3 + y) % 7 else P["brow"][0])   # wispy grey hair
+    fr.outline()
+
+
+LOOKS["smiguel"] = smiguel
+
+
 def paint(sheet, look):
     meta = json.load(open(os.path.join(ROOT, sheet + ".json")))
     src = np.array(Image.open(os.path.join(ROOT, sheet + ".png")).convert("RGBA"))
@@ -562,7 +715,7 @@ def paint(sheet, look):
                 LOOKS[look](fr)
                 fr.outline()
             elif fr.ok:   # lying down: just the garment's colour on his clothes
-                fr.recolor(("tunic", "trousers", "scarf"), P["night"] if look == "shadow" else P["grey_robe"] if look == "wizard" else P["leather"])
+                fr.recolor(("tunic", "trousers", "scarf"), P["night"] if look == "shadow" else P["grey_robe"] if look == "wizard" else (P["straw"] if look == "smiguel" else P["leather"]))
             out[y0:y0 + CELL, x0:x0 + CELL] = fr.a
             acc[y0:y0 + CELL, x0:x0 + CELL] = fr.acc
     os.makedirs(OUT, exist_ok=True)
@@ -570,8 +723,10 @@ def paint(sheet, look):
     Image.fromarray(acc).save(os.path.join(OUT, "%s-%s-accent.png" % (sheet, look)))
 
 
-def main():
+def main(only=None):
     for look in LOOKS:
+        if only and look not in only:
+            continue
         for sheet in ["pip-spritesheet", "pip-weapons"]:
             paint(sheet, look)
         print("wrote garb/*-%s.png (and -accent)" % look)

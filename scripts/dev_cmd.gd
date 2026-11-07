@@ -27,7 +27,7 @@ const HELP := {
 	"level": ["level <weapon|all|magic|arms> <1-4|max> [target]", "set weapon levels (staff/wand: spells; the rest: damage)"],
 	"mastery": ["mastery <spell|staff|wand|all> <1-3|max> [target]", "set spell mastery (I-III; spell names may be partial: fire, tele)"],
 	"max": ["max [target]", "top out EVERYTHING: every weapon, every level 4, every spell mastery III, full ammo, health and mana (also: maxall)"],
-	"spawn": ["spawn <weapon|random|mix> [count] [tier 1-3] [friendly|neutral|hostile] [size N] [level 1-4] [name \"...\"]",
+	"spawn": ["spawn <weapon|random|mix> [count] [tier 1-3] [friendly|neutral|hostile] [size N] [level 1-4] [smiguel] [name \"...\"]",
 		"spawn fighters in front of you, e.g.  spawn sword 3 friendly tier 3 level 4 size 1.5"],
 	"side": ["side <target> <friendly|neutral|hostile>", "change whose side units are on"],
 	"size": ["size <target> <0.3-4>", "make someone bigger or smaller (their reach and hitbox too)"],
@@ -43,6 +43,10 @@ const HELP := {
 	"rename": ["rename <target> <new name>", "rename someone or a unit"],
 	"boss": ["boss", "summon Thunderhorn now"],
 	"cheats": ["cheats <on|off>", "host only: let guests use these commands too"],
+	"smiguel": ["smiguel [target]", "unlock Smiguel and play as him at once (also: unlock smiguel, skin smiguel)"],
+	"unlock": ["unlock <smiguel|all> [target]", "unlock a character (as if they'd beaten Thunderhorn)"],
+	"skin": ["skin <pip|smiguel> [target]", "play as a character you've unlocked (pip: back to normal)"],
+	"peek": ["peek", "make Smiguel peek out from behind something near you now"],
 }
 
 
@@ -103,6 +107,49 @@ static func run(net: Net, from: int, line: String) -> String:
 				return "Thunderhorn is already here"
 			net.summon_boss()
 			return "Thunderhorn is coming"
+		"smiguel":
+			var outs := []
+			for q in targets(net, from, str(a[0]) if a.size() > 0 else ""):
+				net.unlock(q, "smiguel")
+				q.skin = "smiguel"
+				outs.append(q.name)
+			net._server_send_roster()
+			net.save_progress()
+			return "¡Smiguel! Unlocked and worn by: %s" % ", ".join(outs) if not outs.is_empty() else "No one by that name"
+		"unlock":
+			if a.is_empty():
+				return "usage: " + HELP.unlock[0]
+			var what := str(a[0]).to_lower()
+			if what not in ["smiguel", "all"]:
+				return "Characters: smiguel"
+			var outs := []
+			for q in targets(net, from, str(a[1]) if a.size() > 1 else ""):
+				net.unlock(q, "smiguel")
+				outs.append(q.name)
+			return "Unlocked Smiguel for: %s (wear him: skin smiguel, or Esc > Character)" % ", ".join(outs)
+		"skin", "character", "char":
+			if a.is_empty():
+				return "usage: " + HELP.skin[0]
+			var what := str(a[0]).to_lower()
+			what = "" if what in ["pip", "none", "normal", "default"] else what
+			var outs := []
+			for q in targets(net, from, str(a[1]) if a.size() > 1 else ""):
+				if what != "" and not q.unlocks.has(what):
+					if q.npc:
+						q.unlocks.append(what)   # (a unit can wear him without beating anyone)
+					else:
+						return "%s hasn't unlocked %s (unlock %s first)" % [q.name, what, what]
+				if what != "" and not (what in Net.CHARACTERS):
+					return "Characters: pip, smiguel"
+				q.skin = what
+				outs.append(q.name)
+			net._server_send_roster()
+			net.save_progress()
+			return "%s now: %s" % [", ".join(outs), "Smiguel" if what == "smiguel" else "Pip"]
+		"peek":
+			if net.smiguel == null:
+				return "Smiguel isn't here"
+			return net.smiguel.force_peek(net)
 		"cheats":
 			if from != 1:
 				return "Only the host can turn cheats on or off"
@@ -540,6 +587,7 @@ static func _spawn(net: Net, from: int, a: Array) -> String:
 	var size := 1.0
 	var level := 1
 	var nm := ""
+	var as_smiguel := false
 	var i := 1
 	while i < a.size():
 		var t := str(a[i]).to_lower()
@@ -565,6 +613,8 @@ static func _spawn(net: Net, from: int, a: Array) -> String:
 			count = int(t.substr(1))
 		elif SIDE_WORDS.has(t):
 			side = SIDE_WORDS[t]
+		elif t in ["smiguel", "as_smiguel"]:
+			as_smiguel = true   # v0.13.0: dressed as Smiguel
 		else:
 			return "Didn't understand '%s'. %s" % [a[i], HELP.spawn[0]]
 		i += 1
@@ -585,6 +635,11 @@ static func _spawn(net: Net, from: int, a: Array) -> String:
 		var at := me.state.pos + fwd * (6.0 if side != Net.Side.HOSTILE else 8.0) + right * spread
 		at.y = maxf(WorldLayout.ground_height(at.x, at.z, at.y + 2.0), 0.0)
 		var q := spawn_unit(net, from, w, tier - 1, side, size, level, at, nm if count == 1 else ("%s %d" % [nm, k + 1] if nm != "" else ""))
+		if as_smiguel:
+			q.unlocks = ["smiguel"]
+			q.skin = "smiguel"
+			if nm == "":
+				q.name = "Smiguel (tier %d)" % tier
 		made.append(q)
 	return "Spawned %d %s %s (tier %d, level %d, size %s): %s" % [count, Net.SIDE_NAMES[side], wword, tier, level, str(snappedf(size, 0.01)), _names(made)]
 

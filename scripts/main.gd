@@ -67,6 +67,7 @@ var attack_block_until := 0  # msec: the click that grabs the mouse doesn't also
 var pause_menu: Control
 var action_sounds: ActionSounds
 var aim_preview: AimPreview
+var smiguel_view: SmiguelView
 var music: Music
 var pause_char: OptionButton
 var joining_until := 0     # msec: waiting for the host to answer a Join
@@ -158,6 +159,7 @@ func _ready() -> void:
 		return
 
 	bot = args.has("bot")
+	net.smiguel_off = bot and not args.has("smiguel")   # (bots: no surprise peeks; --smiguel: yes)
 	bot_mode = str(args["bot"]) if args.has("bot") and args["bot"] is String else ""
 	shot_path = str(args.get("screenshot", ""))
 	shot_frame = int(args.get("shot-frame", 240))
@@ -329,6 +331,10 @@ void fragment() {
 	add_child(magic_fx)
 	magic_fx.setup(net, self)
 	magic_fx._vault_door = vault_door
+	smiguel_view = SmiguelView.new()   # v0.13.0: Smiguel peeking, his lines, the unlock
+	smiguel_view.name = "Smiguel"
+	add_child(smiguel_view)
+	smiguel_view.setup(net, self)
 	aim_preview = AimPreview.new()   # v0.12.18: where your spell will land (your screen only)
 	aim_preview.name = "AimPreview"
 	add_child(aim_preview)
@@ -390,17 +396,19 @@ func _mat(c: Color, rough := 0.8) -> StandardMaterial3D:
 
 
 var _shown_names := {}   # v0.12.6: id -> the name its avatar was built with
+var _shown_skins := {}   # v0.13.0: id -> the character its avatar was built as
 
 
 ## Each player is drawn as the look they chose: Pip (sprite) or the 3D figure. Both take the same inputs.
 func _make_avatar(id: int, info: Dictionary) -> Node3D:
+	_shown_skins[id] = str(info.get("skin", ""))
 	var nm := str(info.get("name", "?"))
 	var col: Color = info.get("color", Color.WHITE)
 	var av: Node3D
 	if net.style == "figure":
 		av = FigureAvatar.new(nm, col, id != net.my_id, int(info.get("outfit", 0)))
 	else:
-		av = Avatar.new(nm, col, id != net.my_id, int(info.get("outfit", 0)))
+		av = Avatar.new(nm, col, id != net.my_id, int(info.get("outfit", 0)), str(info.get("skin", "")))
 	add_child(av)
 	av.set_pvp(bool(info.get("pvp", false)))
 	av.npc = id >= Fog.NPC_ID0   # v0.12.0: challengers' wizards show their mana
@@ -416,7 +424,7 @@ func _on_roster(r: Dictionary) -> void:
 			avatars.erase(id)
 	for id in r.keys():
 		# v0.12.6: renamed (the dev console, or a player changing their name): build it again with the new name tag
-		if avatars.has(id) and str(_shown_names.get(id, "")) != str(r[id].get("name", "?")):
+		if avatars.has(id) and (str(_shown_names.get(id, "")) != str(r[id].get("name", "?")) or str(_shown_skins.get(id, "")) != str(r[id].get("skin", ""))):
 			avatars[id].queue_free()
 			avatars.erase(id)
 		if not avatars.has(id):
@@ -425,6 +433,7 @@ func _on_roster(r: Dictionary) -> void:
 		avatars[id].set_pvp(bool(r[id].get("pvp", false)))
 		var sz := clampf(float(r[id].get("size", 1.0)), 0.2, 5.0)   # v0.12.6: the dev console's size
 		(avatars[id] as Node3D).scale = Vector3.ONE * sz
+	_update_char_btn()
 
 
 ## The host changed the look: rebuild everyone's avatar.
@@ -506,6 +515,10 @@ func _process(_delta: float) -> void:
 
 	if action_sounds:
 		action_sounds.update(_delta, avatars)
+	if smiguel_view:
+		if _args().has("peekshot"):
+			_peek_shot()
+		smiguel_view.update(_delta, cam)
 	if aim_preview:
 		if _args().has("preview"):   # testing: --preview <spell name>: that spell in hand, its preview shown
 			var nm := str(_args()["preview"]).replace("_", " ")
@@ -587,6 +600,8 @@ func _sample_input() -> Array:
 		if Input.is_physical_key_pressed(KEY_F) and not (radial and radial.visible): b |= Sim.Btn.BLOCK
 	else:
 		_attack_buttons(false)
+	if _args().has("peekshot") and frames > 230 and frames < 520:   # testing: walk toward him
+		b |= Sim.Btn.FORWARD
 	return [b, cam_yaw, aim_pitch, weapon_slot, aim_yaw, face_yaw, int(spell_sel.get(weapon_slot, 0)), aim_point]
 
 
@@ -611,6 +626,37 @@ var _pulse_swing := 0
 
 
 var bot_preview := false     # (tests: show the preview)
+
+
+## Testing (--peekshot [n] --screenshot path --shot-frame 140): stand 14 m in front of the n-th hiding place with your
+## back to it, let Smiguel take his spot, then turn round to face it.
+var _peek_cover := []
+func _peek_shot() -> void:
+	if net.predicted == null or not net.players.has(net.my_id):
+		return
+	if frames == 40:
+		var cs := SmiguelPeek.covers().filter(func(c): return absf(c[0].x) < 60 and absf(c[0].z) < 60 and float(c[3].h) > 2.0)
+		var pick := str(_args().get("peekshot", "0"))
+		_peek_cover = cs[(int(pick) if pick.is_valid_int() else 0) % cs.size()]
+		var cc: Vector3 = _peek_cover[0]
+		var dir := Vector3(cc.x, 0, cc.z).normalized() * -1.0
+		if dir.length() < 0.1:
+			dir = Vector3(0, 0, 1)
+		var at := cc + dir * 14.0
+		at.y = 0.0
+		for st in [net.players[net.my_id].state, net.predicted]:
+			st.pos = at
+		cam_yaw = atan2(-dir.x, -dir.z)   # looking away from it (forward is (-sin, -cos))
+	if frames == 80:
+		print("[peekshot] ", net.smiguel.force_peek(net))
+	if frames >= 110 and frames < 175 and not _peek_cover.is_empty():
+		var cc: Vector3 = net.smiguel.pos if net.smiguel.peeking else _peek_cover[0]
+		var me: Vector3 = net.predicted.pos
+		var want := atan2(-(cc.x - me.x), -(cc.z - me.z))
+		cam_yaw = lerp_angle(cam_yaw, want + 0.2, 0.09)   # (a little off him: right on him, he ducks)
+		cam_pitch = -0.08
+		if frames == 125:
+			print("[peekshot] peeking=%s at %s  view shown=%s av=%s  me=%s" % [net.smiguel.peeking, str(net.smiguel.pos), smiguel_view.shown, str(smiguel_view.av.position) if smiguel_view.av else "-", str(net.predicted.pos)])
 
 
 ## v0.12.18 AimPreview: the enemy Life Drain will latch onto, from what this screen sees (Net.drain_assist).
@@ -900,6 +946,35 @@ func _bot_show() -> Array:
 	var me := net.predicted.pos
 	var owned := net.predicted.owned
 	var magic := Weapons.STAFF if (owned >> Weapons.STAFF) & 1 else Weapons.WAND
+	if _args().has("smiguel_demo"):   # v0.13.0 testing: play as Smiguel, every weapon: walking, then attacking
+		if t == 20 and net.players.has(net.my_id):
+			DevCmd.run(net, net.my_id, "smiguel")
+			DevCmd.run(net, net.my_id, "give all")
+			DevCmd.run(net, net.my_id, "level all max")
+		if t < 60:
+			return [0, cam_yaw, 0.0, weapon_slot]
+		var ws := [Weapons.FISTS, Weapons.SWORD, Weapons.CLUB, Weapons.BOW, Weapons.SLING, Weapons.STAFF, Weapons.WAND]
+		var k := (t - 60) / 150
+		if k >= ws.size():
+			get_tree().quit()
+			return [0, cam_yaw, 0.0, weapon_slot]
+		weapon_slot = ws[k]
+		cam_dist = 4.2
+		cam_yaw = (t - 60) * 0.006
+		var ph := (t - 60) % 150
+		var bb := 0
+		if ph < 50:
+			bb = Sim.Btn.FORWARD | (Sim.Btn.SPRINT if ph > 25 else 0)
+		elif ph < 140:
+			if weapon_slot in [Weapons.BOW, Weapons.SLING]:
+				bb = Sim.Btn.ATTACK if (ph - 50) % 45 < 32 else 0
+			elif weapon_slot in [Weapons.STAFF, Weapons.WAND]:
+				bb = Sim.Btn.ATTACK if (ph - 50) % 30 < 3 else 0
+			else:
+				bb = Sim.Btn.ATTACK if (ph - 50) % 12 < 2 else 0
+		var fy := cam_yaw + PI * 0.75
+		var sp := 1 if weapon_slot == Weapons.STAFF else 0
+		return [bb | Sim.Btn.FACE_CAM if ph >= 50 else bb, cam_yaw + (PI * 0.75 if ph < 50 else 0.0), 0.0, weapon_slot, fy, fy, sp, me + Vector3(-sin(fy), 1.0, -cos(fy)) * 8.0]
 	if _args().has("cycle") and t >= 60:   # every weapon (so every costume) in turn, standing then walking; the camera circles
 		var k := (t - 60) / 70
 		if k >= 7 * 2:
@@ -2282,6 +2357,11 @@ func _build_pause_menu(layer: CanvasLayer) -> void:
 	pause_char.add_item("3D figure (test character)")
 	pause_char.item_selected.connect(func(i): _pause_pick_style(i))
 	box.add_child(pause_char)
+	# v0.13.0 your character: Pip, or Smiguel once he's unlocked (beat Thunderhorn)
+	char_btn = Button.new()
+	char_btn.pressed.connect(_cycle_character)
+	box.add_child(char_btn)
+	_update_char_btn()
 	var ctl := Button.new()
 	ctl.text = "Controls (F1)"
 	ctl.pressed.connect(func(): controls_panel.visible = not controls_panel.visible)
@@ -2297,6 +2377,27 @@ func _build_pause_menu(layer: CanvasLayer) -> void:
 
 
 var sound_panel: PanelContainer
+var char_btn: Button
+
+
+func _my_unlocks() -> Array:
+	return net.roster.get(net.my_id, {}).get("unlocks", []) if net else []
+
+
+func _update_char_btn() -> void:
+	if char_btn == null:
+		return
+	var sk := str(net.roster.get(net.my_id, {}).get("skin", "")) if net else ""
+	var has := _my_unlocks().has("smiguel")
+	char_btn.text = "Character: %s" % ("Smiguel" if sk == "smiguel" else "Pip") + ("" if has else "   (Smiguel: beat Thunderhorn)")
+	char_btn.disabled = not has
+
+
+func _cycle_character() -> void:
+	if not _my_unlocks().has("smiguel"):
+		return
+	var sk := str(net.roster.get(net.my_id, {}).get("skin", ""))
+	net.request_skin("" if sk == "smiguel" else "smiguel")
 
 
 ## v0.12.9 the sound settings (SoundSettings.panel), opened from the pause menu or the main menu; Back returns there.
@@ -2628,7 +2729,7 @@ func _name_ready() -> bool:
 func _real_play() -> bool:
 	if bot:
 		return false
-	for a in ["give-all", "give-staff", "give-wand", "max-level", "screenshot", "no-save", "preview"]:
+	for a in ["give-all", "give-staff", "give-wand", "max-level", "screenshot", "no-save", "preview", "peekshot"]:
 		if _args().has(a):
 			return false
 	return true

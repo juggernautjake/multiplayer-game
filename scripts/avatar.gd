@@ -108,7 +108,7 @@ static func garb_textures(look: String) -> Array:
 ## load() later just picks up the finished (or still finishing) background load.
 static func warm() -> void:
 	var paths := []
-	for look in ["brawler", "knight", "barbarian", "ranger", "scout", "wizard", "shadow"]:
+	for look in ["brawler", "knight", "barbarian", "ranger", "scout", "wizard", "shadow", "smiguel"]:
 		for f in ["pip-spritesheet-%s", "pip-weapons-%s", "pip-spritesheet-%s-accent", "pip-weapons-%s-accent"]:
 			paths.append("res://assets/pip/garb/%s.png" % (f % look))
 	for o in [1, 2, 3]:
@@ -134,10 +134,16 @@ static func outfit_textures(outfit: int) -> Array:
 	return _outfit_tex[outfit]
 
 
-func _init(player_name: String, color: Color, show_name: bool, outfit := 0) -> void:
+## v0.13.0 a character skin ("" = Pip; "smiguel": Smiguel, unlocked by beating Thunderhorn): his look for every
+## weapon (garb sheet "smiguel", tools/make_costumes.py) and his hunched, scuttling way of moving (_skin_pose).
+var skin := ""
+
+
+func _init(player_name: String, color: Color, show_name: bool, outfit := 0, skin_name := "") -> void:
 	_load_sheets()
 	_outfit = outfit % 4
-	_tex = outfit_textures(_outfit)
+	skin = skin_name
+	_tex = garb_textures(skin) if skin != "" else outfit_textures(_outfit)
 	_name = player_name
 	model = Node3D.new()
 	add_child(model)
@@ -437,6 +443,7 @@ func animate(delta: float, cam: Camera3D) -> void:
 			sprite.modulate = Color(0.85, 0.7, 1.4)
 
 	_puppet_pose()
+	_skin_pose(speed)
 	var ground := WorldLayout.ground_height(position.x, position.z, position.y)
 	blob.global_position = Vector3(position.x, ground + 0.012, position.z)
 	var s := clampf(1.0 - (position.y - ground) / 6.0, 0.35, 1.0)
@@ -455,6 +462,30 @@ func _puppet_pose() -> void:
 	sprite.position.y += float(puppet.get("head", 0.0)) * 0.04
 	if bool(puppet.get("hide_weapon", false)):
 		_carry.visible = false
+	if _accent:
+		_accent.scale = sprite.scale
+		_accent.position.x = sprite.position.x
+		_accent.position.y = sprite.position.y
+
+
+## v0.13.0 Smiguel moves like a skulking little creature: hunched low, scuttling with a quick low bob when he moves
+## (faster and lower at a run), and when he stands, he can't keep still: a fidgety sway and now and then a sharp
+## glance-twitch to one side.
+func _skin_pose(speed: float) -> void:
+	if skin != "smiguel" or (state != null and (state.dead > 0 or state.down > 0)):
+		return
+	var t := Time.get_ticks_msec() / 1000.0 + float(get_instance_id() % 997)
+	var run := clampf(speed / Sim.SPRINT_SPEED, 0.0, 1.0)
+	var hunch := 0.1 + 0.06 * run
+	sprite.scale = Vector3(sprite.scale.x * (1.0 + 0.6 * hunch), sprite.scale.y * (1.0 - hunch), 1.0)
+	if speed > 0.5:
+		sprite.position.y += absf(sin(t * (14.0 + 8.0 * run))) * (0.05 + 0.04 * run)
+		sprite.position.x += sin(t * (7.0 + 4.0 * run)) * 0.03
+	else:
+		sprite.position.x += sin(t * 2.3) * 0.025
+		var tw := fmod(t, 4.7)
+		if tw < 0.12:
+			sprite.position.x += 0.06 * (1.0 if int(t / 4.7) % 2 == 0 else -1.0)
 	if _accent:
 		_accent.scale = sprite.scale
 		_accent.position.x = sprite.position.x
@@ -840,6 +871,8 @@ func _dress(_delta: float, cam: Camera3D) -> void:
 		_garb_kind = k
 		# v0.9.0: his costume is painted into his sheets: one per weapon, switching with the weapon in his hand
 		_tex = garb_textures(WizardGarb.LOOK.get(k, "brawler")) if k != WizardGarb.Kind.NONE else outfit_textures(_outfit)
+		if skin != "":   # v0.13.0: a character skin wears its own look with every weapon
+			_tex = garb_textures(skin)
 		_show(cam)
 		if not first and get_parent() != null and model.visible:   # a puff as it changes: sparkles for magic, dust
 			var magic := k == WizardGarb.Kind.WIZARD or k == WizardGarb.Kind.SHADOW

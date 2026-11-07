@@ -1042,6 +1042,24 @@ every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_te
 - Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
   guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).
 
+## What's new in 0.13.0 (Smiguel)
+
+- **Smiguel, an unlockable character** (an original design): a wiry little old ranchero with big googly eyes, bushy grey
+  brows, a black handlebar moustache, a wide straw sombrero with a zigzag band (tinted with your colour), a rainbow
+  serape with a fringe, white cotton trousers and sandals. Painted over every frame of every animation, so every weapon
+  works (`tools/make_costumes.py` "smiguel"). He moves hunched and scuttling, and fidgets when he stands
+  (`Avatar._skin_pose`).
+- **Unlocked by beating Thunderhorn** (everyone who fought him; saved with your progress). The prize screen says so.
+  Wear him: **Esc > Character**. Dev console: `smiguel` (unlock and wear), `unlock smiguel [who]`, `skin pip|smiguel
+  [who]`, `spawn sword smiguel` (a fighter dressed as him), `peek` (make him peek now).
+- **His lines**: whoever plays as Smiguel mutters one of 12 original lines every 1.5-3 minutes, heard from where they
+  stand (`assets/smiguel/line_NN.wav`: Windows' speech voice with the prize voice's raspy treatment).
+- **He peeks** (an easter egg, not an enemy; `scripts/smiguel_peek.gd`, `scripts/smiguel_view.gd`): every 4-7 minutes
+  he takes a spot half behind a tree or pillar that's behind you (never where anyone is looking), 8-35 m away, leaning
+  out (a big portrait, `assets/smiguel/peek.png`, `tools/make_smiguel_peek.py`). Turn round and he's there. Up close
+  (within 14 m) he slides back behind it 0.5-1.5 s after you see him; far off he stays, a little figure over there,
+  until you come closer or aim at him (within 24 m). Never while anyone plays as Smiguel or during Thunderhorn's fight.
+
 ## What's new in 0.12.19 (Stun on Thunderhorn)
 
 - **Stun hits Thunderhorn**: the bolt used to pass straight through him (it only looked for players and golems). It
