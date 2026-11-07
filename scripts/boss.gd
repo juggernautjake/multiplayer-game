@@ -97,14 +97,16 @@ extends RefCounted
 
 const ID := -5000                # its id as a damage target
 const NAME := "Thunderhorn"
-## Health (v0.11.0, cut by 45% in v0.12.9: Jacob, "45% less health at each stage"): BASE_HP x (1 + 0.7 per extra
-## player): 3850 alone (was 7000), 6545 for two (was 11 900), 9240 for three (was 16 800). Every stage (the leaps at
-## 80/55/30%, the cutscene at 60%, enrage at 1/2, the storm at 1/4) is a fraction of max_hp, so they all come 45% sooner.
+## Health (v0.11.0, cut by 45% in v0.12.9: Jacob, "45% less health at each stage"; v0.12.15 another 15% less, Jacob:
+## "15% less health per section... still keep it where he gains additional health for every player"): BASE_HP x
+## (1 + 0.7 per extra player): 3273 alone (was 3850, first 7000), 5564 for two (was 6545), 7855 for three (was 9240).
+## Every stage (the leaps at 80/55/30%, the cutscene at 60%, enrage at 1/2, the storm at 1/4) is a fraction of max_hp,
+## so each section of his health is 15% shorter.
 ## The math: a level-3 wizard's sustained damage on him, dodging half the time, is about 15 a second (mana comes back
 ## at 12 a second: meteors 60 for 45 mana, fireballs ~20 for 22 plus 8 a second of burning, the wand's spark
 ## beam 7 a second and life drain 18 every 3 s, sword cuts 8 at most every 0.6 s up close; lightning only 7).
-## 3850 / 15 = ~4.3 minutes alone (was ~7.8).
-const BASE_HP := 3850
+## 3273 / 15 = ~3.6 minutes alone.
+const BASE_HP := 3273
 const HP_PER_EXTRA := 0.7
 const RADIUS := 2.8              # his body, for hits (v0.11.0: about 3.5x a player)
 const HORN_REACH := 5.6          # v0.12.0: the nose spike's tip, metres ahead of his centre (head lowered)
@@ -116,13 +118,16 @@ const GALLOP := 19.0
 const RUSH_V := 24.0
 const LEAP_H := 34.0             # v0.12.0: the apex of the shortest leap (was 14 m); see leap_arc()
 const LEAP_AIR := 135            # ticks in the air of the shortest leap (was 84)
-const LEAP_MAX_D := 200.0        # v0.12.0: he can bound up to 200 m, anywhere on the map
+const LEAP_MAX_D := 150.0        # v0.12.0: he can bound up to 200 m; v0.12.15 (Jacob: "his max jump 3/4 of what it is now") 150 m
 const LEAP_EDGE := 10.0          # landing candidates keep this far inside the world's edge
 var leap_h := LEAP_H             # this leap's apex and air time (leap_arc of its distance)
 var leap_air := LEAP_AIR
-const LEAP_HP := [0.8, 0.55, 0.3]
-const LEAP_MAX := 5
-const LEAP_GAP := 1500           # ticks between the starts of two sequences
+## v0.12.15 (Jacob: "doesn't do quite so many storm leaps... a bit more than seems appropriate"): at 75% and 40% (was
+## 80 / 55 / 30%), at most one bonus (was two), at least 35 s apart (was 25): 2-3 a fight (was 3-5).
+const LEAP_HP := [0.75, 0.4]
+const LEAP_MAX := 3
+const LEAP_BONUS := 1
+const LEAP_GAP := 2100           # ticks between the starts of two sequences
 const LEAP_FALLBACK := 4500      # 75 s without one (and fewer than two so far): leap anyway
 const ORB_V0 := 6.0
 const ORB_VMAX := 15.0
@@ -1017,12 +1022,12 @@ func _drift_home(_living: Array) -> void:
 ##    the target): `_tree_on_line`; anything his charge or rush runs through is felled.
 ##  - Apples under his hooves while he moves are trampled; near an apple (APPLE_CD apart, shorter when they're low or
 ##    eating) he stomps it to mush, or bucks and stomps everything within 5 m.
-const TREE_CD := 6 * 60          # v0.12.9 (was 15 s)
+const TREE_CD := 4 * 60          # v0.12.9 (was 15 s); v0.12.15 4 s (was 6): his health is 15% less, the trees still go by half
 const TREE_NEAR_CD := 3 * 60
 const TREE_GO := 30.0
 const TREE_NEAR := RADIUS + 5.0
 const TREE_SEEK := 36.0
-const TREE_DRIFT := 2.4
+const TREE_DRIFT := 2.8   # v0.12.15 (was 2.4)
 const APPLE_CD := 4 * 60
 var trees: Array = []
 var apples: Array = []
@@ -1167,9 +1172,9 @@ func _want_tree(living: Array) -> bool:
 	if best < 0:
 		return false
 	if best_d < TREE_NEAR:   # v0.12.9 right by one: a swipe on the way, most of the time
-		if tree_cd > TREE_CD - TREE_NEAR_CD or rng.randf() > 0.6 + 0.2 * _pressure(living):
+		if tree_cd > TREE_CD - TREE_NEAR_CD or rng.randf() > 0.7 + 0.2 * _pressure(living):   # v0.12.15 (was 0.6)
 			return false
-	elif tree_cd > 0 or rng.randf() > 0.25 + 0.3 * _pressure(living):
+	elif tree_cd > 0 or rng.randf() > 0.35 + 0.3 * _pressure(living):   # v0.12.15 (was 0.25)
 		return false
 	tree_target = best
 	tree_cd = TREE_CD
@@ -1470,7 +1475,7 @@ func _want_leap(living: Array) -> bool:
 	if leaps < 2 and leap_sure < LEAP_HP.size() and total_t - maxi(last_leap, 150) > LEAP_FALLBACK:
 		leap_sure += 1
 		return true
-	if leap_bonus < 2 and frac < 0.92 and _doing_well(living) and rng.randf() < 0.18:
+	if leap_bonus < LEAP_BONUS and frac < 0.92 and _doing_well(living) and rng.randf() < 0.12:
 		leap_bonus += 1
 		return true
 	return false
@@ -1498,7 +1503,7 @@ func _start_leap(living: Array) -> void:
 
 
 ## Where he lands (v0.12.0, Jacob: "very far across the map"): the point of the whole map furthest from every living
-## player, no more than LEAP_MAX_D (200 m) from where he takes off. Candidates are a LEAP_GRID (5 m) grid over the
+## player, no more than LEAP_MAX_D (150 m) from where he takes off. Candidates are a LEAP_GRID (5 m) grid over the
 ## world (400 x 400 m) kept LEAP_EDGE inside its edge and within 200 m of the take-off, minus anything within
 ## RADIUS + 1 m of an obstacle (`WorldLayout.boxes()`: pillars, trunks, the tower, the vault, the altar, the stone).
 ## Each scores its distance to the NEAREST living player; the highest wins (maximin). Ties within 1 cm go to the one
@@ -1565,10 +1570,12 @@ static func maximin_spot(pts: Array, from: Vector3) -> Vector3:
 
 
 ## The arc for a leap of d metres: [apex (m), ticks in the air]. 34 m / 2.25 s for a short one, growing to
-## 75 m / 3.4 s for a 200 m bound.
+## 56 m / 2.9 s for his longest, 150 m (v0.12.15: 3/4 of the old 75 m / 3.4 s, 200 m).
+const LEAP_TOP := 56.0
+const LEAP_TOP_AIR := 175
 static func leap_arc(d: float) -> Array:
 	var k := clampf((d - 20.0) / (LEAP_MAX_D - 20.0), 0.0, 1.0)
-	return [lerpf(LEAP_H, 75.0, k), int(lerpf(LEAP_AIR, 205.0, k))]
+	return [lerpf(LEAP_H, LEAP_TOP, k), int(lerpf(LEAP_AIR, LEAP_TOP_AIR, k))]
 
 
 func _leap_spot(living: Array) -> Vector3:

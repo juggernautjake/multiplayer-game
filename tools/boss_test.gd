@@ -123,11 +123,13 @@ func _initialize() -> void:
 			ppl = [ppl[0]]
 		var starts := []
 		var every: int = 9 + int(sd) % 4 * 3   # different paces of damage (a 2-5 minute fight)
+		var end_k := 30000
 		for k in 30000:
 			if b.state == Boss.S.DEATH:
+				end_k = k
 				break
 			if k % every == 0 and b.state != Boss.S.ENTER:
-				b.hurt(14, 1, "")
+				b.hurt(int(round(14.0 * Boss.BASE_HP / 3850.0)), 1, "")   # (v0.12.15: scaled with his health, so still a 2-5 minute fight)
 			var st0 := b.state
 			b.tick(k, ppl, [])
 			if b.state == Boss.S.LEAP_WIND and st0 != Boss.S.LEAP_WIND:
@@ -138,8 +140,9 @@ func _initialize() -> void:
 		var gap := 999999
 		for i in range(1, starts.size()):
 			gap = mini(gap, starts[i] - starts[i - 1])
-		check(starts.size() >= 2 and starts.size() <= 5 and gap >= Boss.LEAP_GAP,
-			"seed %d (%d player%s): %d leaps, at least %.0f s apart" % [sd, b.players_n, "s" if b.players_n > 1 else "", starts.size(), (gap if starts.size() > 1 else 0) / 60.0])
+		# v0.12.15: 2-3 (was 2-5); a fight won in under 2 minutes may see just one (they're 35 s apart)
+		check(starts.size() >= (2 if end_k > 7200 else 1) and starts.size() <= 3 and gap >= Boss.LEAP_GAP,
+			"seed %d (%d player%s, %.1f min): %d leaps, at least %.0f s apart" % [sd, b.players_n, "s" if b.players_n > 1 else "", end_k / 3600.0, starts.size(), (gap if starts.size() > 1 else 0) / 60.0])
 	# losing badly: no bonus leaps
 	var bl := Boss.new(Vector3(0, 0, 56), 1, 5)
 	bl.state = Boss.S.IDLE
@@ -671,7 +674,7 @@ func _throw_tests() -> void:
 
 
 ## v0.12.0: the Storm Leap lands at the point of the whole map furthest from every living player (maximin over the
-## grid), within 200 m of his take-off; the arc grows with the distance.
+## grid), within 150 m of his take-off; the arc grows with the distance.
 func _maximin_tests() -> void:
 	var c := Boss.arena_c()
 	var cands := Boss.leap_candidates(c)
@@ -696,8 +699,8 @@ func _maximin_tests() -> void:
 	check(inside, "the pick is always on the map, inside the edge, and within %d m of the take-off" % int(Boss.LEAP_MAX_D))
 	check(far, "and it really is far: over 100 m every time")
 	check(Boss.maximin_spot([c], c) == Boss.maximin_spot([c], c), "the same answer every time (deterministic)")
-	var big := Boss.leap_arc(200.0)
-	check(float(big[0]) >= 60.0 and int(big[1]) * Config.DT >= 3.0, "a 200 m bound is enormous (%d m up, %.1f s in the air)" % [int(big[0]), int(big[1]) * Config.DT])
+	var big := Boss.leap_arc(Boss.LEAP_MAX_D)
+	check(Boss.LEAP_MAX_D == 150.0 and absf(float(big[0]) - 56.0) < 0.5 and int(big[1]) * Config.DT >= 2.8, "v0.12.15 his longest bound, 3/4 of the old: %d m, %d m up, %.1f s in the air" % [int(Boss.LEAP_MAX_D), int(big[0]), int(big[1]) * Config.DT])
 
 
 ## v0.12.0: he knows apples heal: fells trees now and then (more when they're low), charges through trees, tramples

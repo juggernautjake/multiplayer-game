@@ -23,10 +23,11 @@ static func _wav(data: PackedFloat32Array, loop := false) -> AudioStreamWAV:
 
 
 ## bus (v0.12.9): "Effects" (default), "Music" or "Voice" (SoundSettings: their volumes are in the sound menu).
-static func play(parent: Node, stream: AudioStream, volume_db := 0.0, bus := "Effects") -> void:
+static func play(parent: Node, stream: AudioStream, volume_db := 0.0, bus := "Effects", pitch := 1.0) -> void:
 	var p := AudioStreamPlayer.new()
 	p.stream = stream
 	p.volume_db = volume_db
+	p.pitch_scale = pitch   # v0.12.15: ActionSounds varies it a little each time
 	p.bus = bus if AudioServer.get_bus_index(bus) >= 0 else "Master"
 	parent.add_child(p)
 	p.play()
@@ -552,3 +553,4 @@ static func _warm_all() -> void:
 	for k in 2:
 		grunt(k, false)
 		grunt(k, true)
+	ActionSounds.warm_all()   # v0.12.15: every swing, hit, cast and step

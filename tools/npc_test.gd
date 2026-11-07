@@ -158,7 +158,7 @@ func _initialize() -> void:
 	var b1 := Boss.new(Vector3.ZERO, 1)
 	var b2 := Boss.new(Vector3.ZERO, 2)
 	# v0.12.9 Jacob: "45% less health at each stage": 55% of the old 7000 / 11 900 / 16 800
-	check(b1.max_hp == 3850 and b2.max_hp == 6545 and Boss.hp_for(3) == 9240, "his health is 45%% less: %d alone, %d for two, %d for three (was 7000 / 11 900 / 16 800)" % [b1.max_hp, b2.max_hp, Boss.hp_for(3)])
+	check(b1.max_hp == 3273 and b2.max_hp == 5564 and Boss.hp_for(3) == 7855, "v0.12.15 his health is 15%% less again: %d alone, %d for two, %d for three (was 3850 / 6545 / 9240)" % [b1.max_hp, b2.max_hp, Boss.hp_for(3)])
 	check(b2.max_hp == int(round(Boss.BASE_HP * 1.7)) and b1.max_hp == Boss.BASE_HP and Boss.hp_for(3) == int(round(Boss.BASE_HP * 2.4)), "two players: 1.7x his health, three 2.4x (%d vs %d)" % [b2.max_hp, b1.max_hp])
 	# what each spell does to him
 	var t1 := Boss.new(Vector3.ZERO, 1)

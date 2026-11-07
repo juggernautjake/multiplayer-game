@@ -65,6 +65,7 @@ var mouse_sens := 0.0025     # radians per pixel (Esc menu)
 var aiming := false          # right mouse held: zoomed aim
 var attack_block_until := 0  # msec: the click that grabs the mouse doesn't also swing
 var pause_menu: Control
+var action_sounds: ActionSounds
 var pause_char: OptionButton
 var joining_until := 0     # msec: waiting for the host to answer a Join
 var arena_view: ArenaView  # v0.10.0: the Duel Stone and the Storm Altar
@@ -318,6 +319,10 @@ void fragment() {
 	add_child(magic_fx)
 	magic_fx.setup(net, self)
 	magic_fx._vault_door = vault_door
+	action_sounds = ActionSounds.new()   # v0.12.15: the sounds of swings, shots, casts, spells, jumps and steps
+	action_sounds.name = "ActionSounds"
+	add_child(action_sounds)
+	action_sounds.setup(net, self)
 	golem_view = GolemView.new()
 	golem_view.name = "Golems"
 	add_child(golem_view)
@@ -482,6 +487,8 @@ func _process(_delta: float) -> void:
 		cutscene_view.camera(cam, _delta)
 		cutscene_view.post_avatars(avatars, _delta)
 
+	if action_sounds:
+		action_sounds.update(_delta, avatars)
 	_update_projectiles(frac)
 	_update_items(_delta)
 	_update_holds()
@@ -2786,6 +2793,9 @@ func _update_projectiles(frac: float) -> void:
 				node.visible = false
 				continue
 			var ended: bool = e.end_tick >= 0 and n >= e.end_tick - e.tick0
+			if ended and not e.get("heard", false) and action_sounds and int(e.kind) < 2:
+				e["heard"] = true   # v0.12.15: an arrow thudding in, a stone clacking down
+				action_sounds.shot_landed(int(e.kind), e.end_pos, bool(e.stuck))
 			if ended:
 				if not e.stuck or n > e.end_tick - e.tick0 + 180:   # stuck arrows stay 3 s
 					node.queue_free()

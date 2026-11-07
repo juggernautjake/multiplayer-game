@@ -1039,6 +1039,25 @@ every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_te
 - Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
   guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).
 
+## What's new in 0.12.15
+
+- **Sounds for every action** (`scripts/action_sounds.gd`, all made from scratch and built in the background at
+  start-up): the sword's swish (heavier on the combo's finisher), the club's whump and a punch's jab as each blow
+  lands; the bow's creak while drawn, its twang and the arrow's whizz; the slingshot's stretch and snap; hits (a
+  sword's slash, a club's bonk, a punch, an arrow's thunk, a stone's clack); arrows thudding into the ground; a cast
+  for each kind of magic (arcane, fire, ice, the wand's darker one) and every spell's own sound (thunder and crackle,
+  fireball whoosh and boom, the shield's swell, ping and shatter, frost, a meteor's whistle and impact, teleport's
+  blink, stun's zap, the gravity well, life drain, golems and the titan, poison bubbles, a level-up chime);
+  jumping, landing (harder from higher), dashing, footsteps and a body falling. Quieter with distance, a little
+  louder for your own actions (which sound the instant you act), each with a slightly different pitch. On the
+  Effects volume. `--soundlog` prints each sound as it plays.
+- **Thunderhorn has 15% less health** again at every player count: 3273 alone, 5564 for two, 7855 for three (still
+  +70% for each extra player); every stage of the fight comes 15% sooner. He still fells the apple trees by half
+  health (he goes for them a little more often).
+- **Fewer Storm Leaps**: at 75% and 40% health (was 80, 55 and 30%), at most one bonus (was two), at least 35 s apart
+  (was 25): 2-3 a fight (was 3-5).
+- **His longest leap is 3/4 of what it was**: 150 m (was 200), 56 m up (was 75).
+
 ## What's new in 0.12.14
 
 - **Paste into the dev console**: Ctrl+V or Shift+Insert, or right-click the box and choose Paste. It works even after
