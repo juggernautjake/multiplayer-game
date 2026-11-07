@@ -1042,6 +1042,13 @@ every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_te
 - Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
   guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).
 
+## What's new in 0.13.1 (your own peek picture)
+
+- **Use your own drawing for Smiguel's peek**: put `smiguel_peek.png` (or `.jpg` / `.webp`) in the `prize` folder
+  next to the game's exe, and it peeks from behind the trees and pillars instead of the built-in portrait
+  (`SmiguelView.custom_picture`). It stands 1.95 m tall, its bottom edge on the ground; a picture with no transparency
+  has a plain white or light-grey background removed; empty margins are trimmed. Only on that computer.
+
 ## What's new in 0.13.0 (Smiguel)
 
 - **Smiguel, an unlockable character** (an original design): a wiry little old ranchero with big googly eyes, bushy grey

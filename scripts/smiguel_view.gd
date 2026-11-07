@@ -43,10 +43,84 @@ func setup(n: Net, m: Node) -> void:
 	_giggle = load(LINES_DIR + "giggle.wav") if ResourceLoader.exists(LINES_DIR + "giggle.wav") else null
 
 
+## v0.13.1 YOUR OWN PEEK PICTURE: put a picture called smiguel_peek.png (or .jpg / .webp) in the "prize" folder next
+## to the game's exe (or in user://prize/), and it peeks instead of the built-in one. It's read when the game starts,
+## only on this computer (each player sees their own, or the built-in one). It stands PIC_H (1.95 m) tall, its width
+## from its proportions, its bottom edge on the ground. A picture with no see-through pixels gets a plain light
+## background removed (everything light and colourless joined to its edges); empty margins are trimmed.
+const CUSTOM := ["smiguel_peek.png", "smiguel_peek.jpg", "smiguel_peek.jpeg", "smiguel_peek.webp"]
+static var custom_path := ""   # (the file it used, for the console and tests)
+
+
+static func custom_picture() -> Texture2D:
+	var dirs := [OS.get_executable_path().get_base_dir().path_join("prize"), ProjectSettings.globalize_path("user://prize")]
+	if not OS.has_feature("template"):
+		dirs.append(ProjectSettings.globalize_path("res://").path_join("prize"))
+	for d in dirs:
+		for n in CUSTOM:
+			var fp: String = d.path_join(n)
+			if FileAccess.file_exists(fp):
+				var img := Image.load_from_file(fp)
+				if img == null or img.is_empty():
+					continue
+				img.convert(Image.FORMAT_RGBA8)
+				img = prepare(img)
+				custom_path = fp
+				print("Smiguel's peek picture: ", fp)
+				return ImageTexture.create_from_image(img)
+	return null
+
+
+## Remove a plain light background (only when the picture has no see-through pixels at all), then trim empty margins,
+## and keep it to at most 1024 px tall.
+static func prepare(img: Image) -> Image:
+	var w := img.get_width()
+	var h := img.get_height()
+	var has_alpha := false
+	for y in range(0, h, maxi(h / 64, 1)):
+		for x in range(0, w, maxi(w / 64, 1)):
+			if img.get_pixel(x, y).a < 0.5:
+				has_alpha = true
+				break
+		if has_alpha:
+			break
+	if not has_alpha:   # flood the light, colourless background in from the edges
+		var seen := PackedByteArray()
+		seen.resize(w * h)
+		var stack: Array[Vector2i] = []
+		for x in w:
+			stack.append(Vector2i(x, 0))
+			stack.append(Vector2i(x, h - 1))
+		for y in h:
+			stack.append(Vector2i(0, y))
+			stack.append(Vector2i(w - 1, y))
+		while not stack.is_empty():
+			var q: Vector2i = stack.pop_back()
+			if q.x < 0 or q.y < 0 or q.x >= w or q.y >= h or seen[q.y * w + q.x]:
+				continue
+			seen[q.y * w + q.x] = 1
+			var c := img.get_pixelv(q)
+			if c.v < 0.86 or c.s > 0.12:
+				continue
+			img.set_pixelv(q, Color(c.r, c.g, c.b, 0.0))
+			stack.append(q + Vector2i(1, 0))
+			stack.append(q + Vector2i(-1, 0))
+			stack.append(q + Vector2i(0, 1))
+			stack.append(q + Vector2i(0, -1))
+	var used := img.get_used_rect()
+	if used.size.x > 0 and used.size.y > 0 and used.size != img.get_size():
+		img = img.get_region(used)
+	if img.get_height() > 1024:
+		img.resize(int(img.get_width() * 1024.0 / img.get_height()), 1024, Image.INTERPOLATE_LANCZOS)
+	return img
+
+
 func _ensure() -> void:
 	if pic != null:
 		return
-	var tex: Texture2D = load("res://assets/smiguel/peek.png")
+	var tex: Texture2D = custom_picture()
+	if tex == null:
+		tex = load("res://assets/smiguel/peek.png")
 	var q := QuadMesh.new()
 	var w := PIC_H * float(tex.get_width()) / float(tex.get_height())
 	q.size = Vector2(w, PIC_H)
@@ -56,7 +130,7 @@ func _ensure() -> void:
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 	m.alpha_scissor_threshold = 0.5
-	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST if custom_path == "" else BaseMaterial3D.TEXTURE_FILTER_LINEAR
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	pic = MeshInstance3D.new()
 	pic.name = "SmiguelPeeker"
