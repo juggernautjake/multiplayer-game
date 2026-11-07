@@ -66,6 +66,7 @@ var aiming := false          # right mouse held: zoomed aim
 var attack_block_until := 0  # msec: the click that grabs the mouse doesn't also swing
 var pause_menu: Control
 var action_sounds: ActionSounds
+var music: Music
 var pause_char: OptionButton
 var joining_until := 0     # msec: waiting for the host to answer a Join
 var arena_view: ArenaView  # v0.10.0: the Duel Stone and the Storm Altar
@@ -125,6 +126,11 @@ func _ready() -> void:
 	net.hit.connect(_on_hit)
 	net.local_shot.connect(_on_local_shot)
 	net.projectile_bounced.connect(_on_proj_bounce)
+	if not _args().has("no-music"):   # v0.12.16: music for what's happening (scripts/music.gd)
+		music = Music.new()
+		music.name = "Music"
+		add_child(music)
+		music.setup(net, self)
 	net.item_added.connect(_on_item_added)
 	net.item_removed.connect(_on_item_removed)
 	net.style_changed.connect(_on_style)
@@ -427,6 +433,8 @@ func _on_style(s: String) -> void:
 
 # ================================================================ every frame: draw
 func _process(_delta: float) -> void:
+	if music:
+		music.update(_delta)
 	if cam == null:
 		return
 	_process_joining()

@@ -1039,6 +1039,20 @@ every mastery to III, `help mastery` lists every metric. Test: `tools/mastery_te
 - Tools: `--bot watchboss` (a guest watching him, `--orblog`, `--bosslog`), `tools/boss_replay.gd` (replays a
   guest's `--bosslog` into a movie), `tools/boss_anim_review.gd ... sim <scenario>` (a real fight's timing).
 
+## What's new in 0.12.16 (music)
+
+- **Music for what's happening** (`scripts/music.gd`; composed and synthesised from scratch by
+  `tools/make_music.py` into `assets/music/`, on the Music volume): calm music out in the world, a driving piece in a
+  fight (a blow in the last 9 s, or a hostile fighter within 22 m), music on the main menu, and for **Thunderhorn** a
+  theme in eight layers that play in step and change with the fight: timpani and strings as he arrives; drums, bass
+  and the brass theme for the fight; a dissonant choir and organ after the Duel Stone's corruption; double-time drums
+  and racing strings when he's enraged; tremolo strings, thunder and bells for his storm; the drums dropping out while
+  he's dazed. The **corruption cutscene** has its own score, timed to the film (the slam, the runes, the rising, the
+  eyes, the twitching, the weapons drawn). Pieces crossfade.
+- **Fanfares**: your weapon levelling up, a spell's mastery, Thunderhorn falling, and everyone going down. (The prize
+  screen keeps its mariachi.)
+- Testing: `--no-music`, `--musiclog` (prints each change).
+
 ## What's new in 0.12.15
 
 - **Sounds for every action** (`scripts/action_sounds.gd`, all made from scratch and built in the background at
